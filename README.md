@@ -84,6 +84,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 长期产品语义、目标枝干模型、Agent Session、BranchProposal、插件系统与多设备部署约束，见 [产品设计基线](docs/product-design.md)。后续实现 Goal 应以该文件为准；当前架构文档只描述已经落地的技术状态。
 
+本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
+
 ## 主要路由
 
 | 方法 | 路由 | 用途 |
