@@ -40,6 +40,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/projects/{project_id}/graph",
             post(handlers::graph_action_form),
         )
+        .route(
+            "/projects/{project_id}/goal-commands",
+            post(handlers::goal_command_form),
+        )
         .route("/artifacts/{artifact_id}", get(handlers::artifact_download))
         .route("/api/health", get(handlers::api_health))
         .route(
@@ -57,6 +61,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/projects/{project_id}/graph",
             post(handlers::api_graph_action),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/goal-graph",
+            get(handlers::api_goal_snapshot),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/goal-commands",
+            post(handlers::api_goal_command),
         )
         .route(
             "/api/artifacts/{artifact_id}",

@@ -24,8 +24,8 @@
 | 0. 安全基线与 Git | 已完成 | 基线提交 `60b6cad`；功能枝干 `feat/goal-branch-core-v0.1`；无远端；真实数据计数未变 |
 | 1. 领域与协议基线 | 已完成 | `goal-branch-domain.md`、`tool-protocol.md`；关键不变量自动检索核对通过 |
 | 2. 数据库与领域实现 | 已完成 | `0002_goal_branch_core.sql`；16 个 Rust 单元测试；隔离迁移/约束脚本通过 |
-| 3. HTTP/API 纵向流程 | 进行中 |  |
-| 4. 插件与环境版本基础 | 待开始 |  |
+| 3. HTTP/API 纵向流程 | 已完成 | `api-goal-branch-v1.md`；隔离真实 HTTP 闭环与 HTML 表单适配测试通过 |
+| 4. 插件与环境版本基础 | 进行中 |  |
 | 5. 安全文件导入 | 待开始 |  |
 | 6. 项目图与工作台原型 | 待开始 |  |
 | 7. 质量门与早晨交付 | 待开始 |  |
@@ -65,3 +65,15 @@
 - `cargo fmt --check`、Clippy `-D warnings`、16 个单元测试全部通过；隔离迁移报告 `legacy counts stayed 1:1:1`；
 - 临时数据库容器已清理；真实库仍为 3 个项目、8 条旧模型分支、23 个旧模型节点、2 个产物；
 - 第 2 级验收通过，开始第 3 级 HTTP/API 纵向流程。
+
+### 2026-08-22 01:57 +08:00
+
+- 新增事务化目标枝干应用服务与 `goal-branch-v1` 快照，JSON API 和普通 HTML 表单共用同一命令入口；
+- 实现 Proposal 草拟、修订、提交、取消、批准，以及批准后原子创建 GoalBranch、契约 v1 和首个 Session；
+- 实现拟子枝干、判断请求、异常/手动暂停、显式恢复、Contribution、冻结拟合并、独立 AI 审核、用户接受/部分接受/退回/放弃和下一 Session；
+- 所有写命令锁定项目、验证稳定输入、写不可变事件，并用 `clientRequestId + canonical input hash` 返回原结果或拒绝语义漂移；
+- `scripts/test-goal-http.sh` 在临时网络、数据库和服务中通过完整流程：根 Proposal 修订 → 子枝干 → 拟合并 → 退回 → 幂等重放/冲突 → 下一 Session → 接受 → 父 Session 恢复 → 根目标完成；
+- 中途快照证明未接受时父枝干仍 `waiting` 且没有 Integration；最终快照证明子枝干 `integrated`、根枝干/项目 `completed`，物理 Git 集成诚实记录 `not_attempted`；
+- HTML 表单适配入口以 303 回跳且产生同一 Proposal；空库/旧基线迁移、fmt、Clippy、16 个单元测试继续通过；
+- 所有隔离容器和网络已清理；真实库计数仍为 3/8/23/2；
+- 第 3 级验收通过，开始第 4 级中央插件与环境版本基础。

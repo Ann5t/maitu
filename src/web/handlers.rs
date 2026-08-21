@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{graph, projects},
+    application::{goal_branches, graph, projects},
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -60,6 +60,13 @@ pub struct GraphForm {
     pub reason: Option<String>,
     pub summary: Option<String>,
     pub accepted_ids: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GoalCommandForm {
+    pub client_request_id: Option<Uuid>,
+    pub action: String,
+    pub payload: String,
 }
 
 pub async fn dashboard(
@@ -139,6 +146,31 @@ pub async fn graph_action_form(
         Err(error) => Err(error),
     };
     redirect_project_result(project_id, result, "项目脉络已更新", node_hint)
+}
+
+pub async fn goal_command_form(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<Uuid>,
+    Form(form): Form<GoalCommandForm>,
+) -> Response {
+    let payload = serde_json::from_str::<Value>(&form.payload).map_err(|_| {
+        AppError::bad_request("invalid_goal_input", "表单中的目标枝干参数不是有效 JSON")
+    });
+    let result = match payload {
+        Ok(payload) => goal_branches::run_command(
+            &state.pool,
+            project_id,
+            goal_branches::GoalCommandRequest {
+                client_request_id: form.client_request_id.unwrap_or_else(Uuid::new_v4),
+                action: form.action,
+                payload,
+            },
+        )
+        .await
+        .map(|_| ()),
+        Err(error) => Err(error),
+    };
+    redirect_project_result(project_id, result, "目标枝干已更新", None)
 }
 
 fn graph_form_request(form: GraphForm) -> AppResult<GraphActionRequest> {
@@ -342,4 +374,21 @@ pub async fn api_graph_action(
 ) -> AppResult<Json<Value>> {
     graph::run_graph_action(&state.pool, project_id, request).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn api_goal_snapshot(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let snapshot = goal_branches::get_snapshot(&state.pool, project_id).await?;
+    Ok(Json(serde_json::to_value(snapshot)?))
+}
+
+pub async fn api_goal_command(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<Uuid>,
+    Json(request): Json<goal_branches::GoalCommandRequest>,
+) -> AppResult<Json<Value>> {
+    let response = goal_branches::run_command(&state.pool, project_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
 }

@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS goal_branch_proposals (
   updated_at timestamptz NOT NULL DEFAULT now(),
   decided_at timestamptz,
   CHECK (
+    (parent_goal_branch_id IS NULL AND parent_session_id IS NULL)
+    OR (parent_goal_branch_id IS NOT NULL AND parent_session_id IS NOT NULL)
+  ),
+  CHECK (
     (status = 'approved' AND approved_revision IS NOT NULL AND approved_goal_branch_id IS NOT NULL)
     OR (status <> 'approved' AND approved_goal_branch_id IS NULL)
   )
@@ -82,6 +86,10 @@ CREATE TABLE IF NOT EXISTS goal_branches (
   updated_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz,
   stopped_at timestamptz,
+  CHECK (
+    (parent_goal_branch_id IS NULL AND inherited_from_session_id IS NULL)
+    OR (parent_goal_branch_id IS NOT NULL AND inherited_from_session_id IS NOT NULL)
+  ),
   UNIQUE (project_id, git_branch_name)
 );
 
@@ -149,6 +157,33 @@ CREATE TABLE IF NOT EXISTS goal_sessions (
 
 CREATE UNIQUE INDEX IF NOT EXISTS goal_sessions_one_running_writer_idx
   ON goal_sessions (goal_branch_id) WHERE status = 'running';
+
+CREATE OR REPLACE FUNCTION goal_validate_session_contract()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  contract_project_id uuid;
+  contract_branch_id uuid;
+BEGIN
+  SELECT project_id, goal_branch_id INTO contract_project_id, contract_branch_id
+  FROM goal_contract_versions WHERE id = NEW.contract_version_id;
+  IF contract_project_id IS DISTINCT FROM NEW.project_id
+     OR contract_branch_id IS DISTINCT FROM NEW.goal_branch_id THEN
+    RAISE EXCEPTION 'goal Session contract belongs to another aggregate'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DO $$ BEGIN
+  CREATE TRIGGER goal_sessions_contract_scope
+    AFTER INSERT OR UPDATE OF project_id, goal_branch_id, contract_version_id
+    ON goal_sessions
+    FOR EACH ROW EXECUTE FUNCTION goal_validate_session_contract();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE goal_branches
@@ -401,6 +436,8 @@ CREATE INDEX IF NOT EXISTS goal_branch_proposals_project_idx
   ON goal_branch_proposals (project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS goal_branches_project_idx
   ON goal_branches (project_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS goal_branches_one_root_idx
+  ON goal_branches (project_id) WHERE parent_goal_branch_id IS NULL;
 CREATE INDEX IF NOT EXISTS goal_sessions_branch_idx
   ON goal_sessions (goal_branch_id, session_number);
 CREATE INDEX IF NOT EXISTS goal_contributions_branch_idx

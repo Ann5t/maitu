@@ -4,6 +4,7 @@ mod config;
 mod domain;
 mod error;
 pub mod goal_domain;
+pub mod goal_models;
 mod migrations;
 mod models;
 mod web;

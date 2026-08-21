@@ -86,6 +86,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 
+新目标枝干纵向接口及幂等/错误语义见 [目标枝干 HTTP API v1](docs/api-goal-branch-v1.md)。
+
 ## 主要路由
 
 | 方法 | 路由 | 用途 |
@@ -100,6 +102,8 @@ assets/                      CSS、渐进增强脚本和图标
 | `POST` | `/api/projects/:id/actions` | JSON 项目动作 |
 | `POST` | `/api/projects/:id/graph` | JSON 图谱动作 |
 | `GET` | `/api/artifacts/:id` | 带 ETag 的产物读取 |
+| `GET` | `/api/v1/projects/:id/goal-graph` | 新目标枝干领域快照 |
+| `POST` | `/api/v1/projects/:id/goal-commands` | 幂等目标枝干命令 |
 
 ## 技术基线
 

@@ -556,7 +556,10 @@ pub fn require_human(actor: GoalActor) -> AppResult<()> {
 }
 
 pub fn canonical_json_sha256<T: Serialize>(value: &T) -> AppResult<String> {
-    let encoded = serde_json::to_vec(value)?;
+    // Round-tripping through Value makes struct fields and object keys share the same sorted-map
+    // representation, so hashing a typed value and its persisted JSON produces one fingerprint.
+    let canonical_value = serde_json::to_value(value)?;
+    let encoded = serde_json::to_vec(&canonical_value)?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(encoded))))
 }
 
