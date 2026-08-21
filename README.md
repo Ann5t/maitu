@@ -99,6 +99,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 长期产品语义、目标枝干模型、Agent Session、BranchProposal、插件系统与多设备部署约束，见 [产品设计基线](docs/product-design.md)。后续实现 Goal 应以该文件为准；当前架构文档只描述已经落地的技术状态。
 
+“目标枝干核心 v0.1”的实现范围、完整验证、真实现场保护证据和下一 Goal 建议见 [阶段执行报告](docs/overnight-report.md)。
+
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 
 新目标枝干纵向接口及幂等/错误语义见 [目标枝干 HTTP API v1](docs/api-goal-branch-v1.md)。
