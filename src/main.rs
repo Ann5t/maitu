@@ -3,6 +3,7 @@ mod artifacts;
 mod config;
 mod domain;
 mod error;
+pub mod goal_domain;
 mod migrations;
 mod models;
 mod web;

@@ -1,9 +1,15 @@
 use sqlx::{Executor, PgPool};
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_rust_baseline.sql",
-    include_str!("../migrations/0001_rust_baseline.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_rust_baseline.sql",
+        include_str!("../migrations/0001_rust_baseline.sql"),
+    ),
+    (
+        "0002_goal_branch_core.sql",
+        include_str!("../migrations/0002_goal_branch_core.sql"),
+    ),
+];
 
 pub async fn run(pool: &PgPool) -> Result<(), sqlx::Error> {
     pool.execute(
