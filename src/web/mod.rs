@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     http::{HeaderName, HeaderValue},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use sqlx::PgPool;
 use tower_http::{
@@ -97,6 +97,26 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/projects/{project_id}/sessions/{session_id}/tool-calls",
             post(handlers::api_execute_tool),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/inputs",
+            get(handlers::api_list_inputs).post(handlers::api_begin_input),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/inputs/{input_id}/chunks",
+            put(handlers::api_append_input_chunk),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/inputs/{input_id}/finish",
+            post(handlers::api_finish_input),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/inputs/{input_id}/import",
+            post(handlers::api_import_input),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/inputs/{input_id}/content",
+            get(handlers::api_download_input),
         )
         .route(
             "/api/artifacts/{artifact_id}",

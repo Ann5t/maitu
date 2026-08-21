@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     Form, Json,
+    body::{Body, to_bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
@@ -13,7 +14,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{goal_branches, graph, plugins, projects},
+    application::{goal_branches, graph, inputs, plugins, projects},
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -21,6 +22,7 @@ use crate::{
         contribution_kind_label,
     },
     error::{AppError, AppResult},
+    input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
     tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
 };
 
@@ -458,4 +460,137 @@ pub async fn api_execute_tool(
 ) -> AppResult<Json<Value>> {
     let response = plugins::execute_tool(&state.pool, project_id, session_id, request).await?;
     Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_list_inputs(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let records = inputs::list_inputs(&state.pool, project_id, session_id).await?;
+    Ok(Json(json!({ "inputs": records })))
+}
+
+pub async fn api_begin_input(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<BeginInputArtifact>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let response = inputs::begin_input(
+        &state.pool,
+        &state.config.artifact_root,
+        state.config.input_max_bytes,
+        project_id,
+        session_id,
+        input,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_append_input_chunk(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, input_id)): Path<(Uuid, Uuid, Uuid)>,
+    Query(query): Query<ChunkQuery>,
+    body: Body,
+) -> AppResult<Json<Value>> {
+    let bytes = to_bytes(body, state.config.input_chunk_max_bytes)
+        .await
+        .map_err(|_| {
+            AppError::bad_request("upload_chunk_too_large", "请求体超过单个上传分段的大小限制")
+        })?;
+    let response = inputs::append_chunk(
+        &state.pool,
+        &state.config.artifact_root,
+        state.config.input_chunk_max_bytes,
+        inputs::InputLocation {
+            project_id,
+            session_id,
+            input_id,
+        },
+        query,
+        bytes.to_vec(),
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_finish_input(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, input_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<FinishInputArtifact>,
+) -> AppResult<Json<Value>> {
+    let response = inputs::finish_input(
+        &state.pool,
+        &state.config.artifact_root,
+        project_id,
+        session_id,
+        input_id,
+        input,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_import_input(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, input_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<ImportInputArtifact>,
+) -> AppResult<Json<Value>> {
+    let response = inputs::import_input(
+        &state.pool,
+        &state.config.artifact_root,
+        state.config.input_inbox_copy_max_bytes,
+        project_id,
+        session_id,
+        input_id,
+        input,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_download_input(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, input_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> AppResult<(HeaderMap, Vec<u8>)> {
+    let (record, bytes) = inputs::read_input(
+        &state.pool,
+        &state.config.artifact_root,
+        project_id,
+        session_id,
+        input_id,
+    )
+    .await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(
+            record
+                .trusted_media_type
+                .as_deref()
+                .unwrap_or("application/octet-stream"),
+        )
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "attachment; filename*=UTF-8''{}",
+            urlencoding::encode(&record.display_name)
+        ))
+        .map_err(|_| AppError::internal("InputArtifact 文件名无法用于下载响应"))?,
+    );
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(&format!(
+            "\"{}\"",
+            record.sha256.as_deref().unwrap_or_default()
+        ))
+        .map_err(|_| AppError::internal("InputArtifact 摘要不合法"))?,
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    Ok((headers, bytes))
 }

@@ -5,6 +5,9 @@ x-app-environment: &app-environment
   ARTIFACT_ROOT: /data/artifacts
   FUDIAN_BIND: 0.0.0.0:3000
   RUST_LOG: ${RUST_LOG:-fudian=debug,tower_http=info}
+  INPUT_MAX_BYTES: ${INPUT_MAX_BYTES:-67108864}
+  INPUT_CHUNK_MAX_BYTES: ${INPUT_CHUNK_MAX_BYTES:-4194304}
+  INPUT_INBOX_COPY_MAX_BYTES: ${INPUT_INBOX_COPY_MAX_BYTES:-1048576}
 
 services:
   postgres:

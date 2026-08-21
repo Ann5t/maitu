@@ -90,6 +90,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 插件目录、不可变环境、Session 绑定和参考 Tool Broker 接口见 [中央插件与环境 API v1](docs/tooling-api-v1.md)。
 
+分段上传、内容验证、Session inbox 与冻结边界见 [Session 安全文件输入 API v1](docs/input-api-v1.md)。
+
 ## 主要路由
 
 | 方法 | 路由 | 用途 |
@@ -109,6 +111,10 @@ assets/                      CSS、渐进增强脚本和图标
 | `GET/POST` | `/api/v1/plugins` | 渐进式插件目录与注册 |
 | `POST` | `/api/v1/environments` | 固定 EnvironmentManifest |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/tool-calls` | 无状态工具调用 |
+| `GET/POST` | `/api/v1/projects/:id/sessions/:session_id/inputs` | 列出/建立 Session 文件输入 |
+| `PUT` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/chunks` | 上传受限文件分段 |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/finish` | 完整性与可信类型验证 |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/import` | 显式导入 worktree/inbox 或产物引用 |
 
 ## 技术基线
 

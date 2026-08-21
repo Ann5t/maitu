@@ -5,6 +5,7 @@ mod domain;
 mod error;
 pub mod goal_domain;
 pub mod goal_models;
+pub mod input_artifacts;
 mod migrations;
 mod models;
 pub mod tooling;
