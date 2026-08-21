@@ -20,8 +20,9 @@ Axum 路由与传输适配
         └──────┬──────┘
                ▼
        SQLx / PostgreSQL
-               │
-               └── 文件产物存储
+          │          │
+          │          └── 内容寻址文件与 Session inbox
+          └── 固定 EnvironmentManifest ── Tool Broker
 ```
 
 - `domain` 不依赖 HTTP 或数据库，保存校验、状态能力和 Markdown 产物生成规则。
@@ -77,3 +78,13 @@ Rust 版本直接读取当前 `fudian-nextgen` 的 14 张业务表，不引入�
 9. 重放同一 `clientRequestId`，确认没有重复分支。
 
 隔离验收最终得到 3 条分支、9 个节点、9 条边、5 项贡献、1 个文件产物和 1 次合流。一次性数据库在核验后删除，未写入现有项目。
+
+2026-08-22 增加了 `scripts/quality-gate.sh` 作为本地与 CI 共用的单一完整入口：
+
+1. 在固定 Rust 1.97 开发镜像中运行 rustfmt、Clippy `-D warnings` 和全部 Rust 测试；
+2. 对空库、迁移 SQL 重放和带旧 DAG fixture 的数据库验证只增不减迁移；
+3. 分别通过真实 HTTP 跑通目标枝干、插件环境、文件输入和结构化工作台流程；
+4. 在固定 Playwright 容器中用真实 Chromium 验证 1440px、390px、上传和完整审核；
+5. 构建 runtime 镜像，以 UID 1000、只读根文件系统、随机 `127.0.0.1` 端口和一次性 PostgreSQL 启动，再验证健康、静态资源、4 个迁移和隔离写入。
+
+`.github/workflows/ci.yml` 不另造一套 CI 特例，而是直接运行该入口。测试脚本按唯一进程后缀命名容器和网络，并用 `trap` 清理；任何失败都会保留应用日志，但不会连接 `fudian_nextgen_postgres_data` 或 `fudian_nextgen_artifacts`。

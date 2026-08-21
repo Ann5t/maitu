@@ -1,0 +1,27 @@
+name: quality-gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-stack:
+    name: Rust, isolated PostgreSQL, Chromium and runtime image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run the complete isolated quality gate
+        run: ./scripts/quality-gate.sh

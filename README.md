@@ -34,6 +34,7 @@ APP_PORT=3001 make start
 - `fudian_nextgen_artifacts`
 
 启动时只执行幂等迁移，不清空数据。不要运行 `docker compose down -v`，它会请求删除数据卷。
+应用和 PostgreSQL 的宿主机端口默认都只绑定 `127.0.0.1`；需要跨设备访问时，应先增加认证和受控反向代理，不要直接公开数据库端口。
 
 开发模式：
 
@@ -50,6 +51,16 @@ make check
 ```
 
 该命令依次执行 rustfmt、Clippy（警告视为错误）和全部测试。完整的隔离端到端核验方法记录在 [架构说明](docs/architecture.md)。
+
+提交前的完整质量门是：
+
+```bash
+./scripts/quality-gate.sh
+```
+
+它会构建固定 Rust 开发镜像，在一次性 PostgreSQL 中运行迁移及全部 HTTP 闭环，用固定 Playwright/Chromium 验证桌面和 390px 工作台，最后构建非 root、只读根文件系统的生产镜像并在随机本机端口验收。数据库和浏览器现场都是隔离的，不连接 Compose 中的真实数据卷；Cargo、npm 仅复用中央缓存卷。
+
+仓库内的 `.github/workflows/ci.yml` 在 push、pull request 或手动触发时运行同一入口。它只有源码读取权限，不发布镜像、不部署，也不持久化 Git 凭据。
 
 ## 备份
 
@@ -73,8 +84,12 @@ make backup
 src/domain.rs                纯领域规则与输入校验
 src/application/projects.rs  项目、契约、产物用例
 src/application/graph.rs     项目 DAG 与选择性合流
+src/application/goal_branches.rs  目标枝干事务与审核闭环
+src/application/plugins.rs   插件目录、环境绑定与 Tool Broker
+src/application/inputs.rs    Session 文件输入与内容寻址导入
 src/web/handlers.rs          HTML/JSON 传输适配
 src/web/views.rs             Maud 服务端页面
+src/web/goal_projection.rs   可替换的 GoalBranch/Session 车道投影
 src/artifacts.rs             文件产物边界
 migrations/                  兼容现有数据的幂等 SQL
 assets/                      CSS、渐进增强脚本和图标
@@ -130,6 +145,7 @@ assets/                      CSS、渐进增强脚本和图标
 ## 技术基线
 
 - Rust 2024 edition，最低 Rust 1.94
+- 构建与 CI 固定 Rust 1.97；`Cargo.toml` 仍声明最低 Rust 1.94
 - Axum 0.8、SQLx 0.9、Maud 0.27
 - PostgreSQL 17
 - Debian slim 生产运行镜像，非 root 用户

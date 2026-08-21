@@ -7,6 +7,7 @@ browser_network="fudian-browser-test-$browser_suffix"
 browser_db="fudian-browser-db-$browser_suffix"
 browser_app="fudian-browser-app-$browser_suffix"
 browser_image="mcr.microsoft.com/playwright:v1.62.0-noble"
+browser_screenshot_dir="${SCREENSHOT_DIR:-$browser_repo_root/docs/screenshots}"
 
 cleanup_browser_stack() {
   local exit_status="$?"
@@ -24,6 +25,8 @@ cleanup_browser_stack() {
 trap cleanup_browser_stack EXIT
 
 docker image inspect "$browser_image" >/dev/null
+mkdir -p "$browser_screenshot_dir"
+browser_screenshot_dir="$(cd "$browser_screenshot_dir" && pwd)"
 docker network create "$browser_network" >/dev/null
 docker run -d --name "$browser_db" --network "$browser_network" \
   --network-alias browser-db \
@@ -53,8 +56,9 @@ done
 
 docker run --rm --init --ipc=host --network "$browser_network" \
   -e BASE_URL=http://browser-app:3000 \
-  -e SCREENSHOT_DIR=/work/docs/screenshots \
+  -e SCREENSHOT_DIR=/screenshots \
   --mount "type=bind,src=$browser_repo_root,dst=/work" \
+  --mount "type=bind,src=$browser_screenshot_dir,dst=/screenshots" \
   --mount type=volume,src=fudian_playwright_npm_cache,dst=/root/.npm \
   "$browser_image" sh -c '
     npm install --prefix /tmp/pw --no-audit --no-fund @playwright/test@1.62.0 >/dev/null &&
@@ -63,6 +67,6 @@ docker run --rm --init --ipc=host --network "$browser_network" \
     ./node_modules/.bin/playwright test workbench.spec.js --reporter=line --workers=1
   '
 
-test -s "$browser_repo_root/docs/screenshots/goal-workbench-desktop.png"
-test -s "$browser_repo_root/docs/screenshots/goal-workbench-mobile.png"
+test -s "$browser_screenshot_dir/goal-workbench-desktop.png"
+test -s "$browser_screenshot_dir/goal-workbench-mobile.png"
 echo "workbench Chromium test passed: desktop 1440px, mobile 390px, file upload and full review flow"
