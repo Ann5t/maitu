@@ -1,0 +1,12 @@
+{
+  "name": "浮点",
+  "short_name": "浮点",
+  "description": "以现实结果为目标、以证据更新决策的长期项目工作区。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f6f2",
+  "theme_color": "#f6f6f2",
+  "icons": [
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

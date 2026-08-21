@@ -1,0 +1,87 @@
+name: fudian-nextgen
+
+x-app-environment: &app-environment
+  DATABASE_URL: ${DATABASE_URL:-postgres://fudian_nextgen:fudian_nextgen_dev@postgres:5432/fudian_nextgen}
+  ARTIFACT_ROOT: /data/artifacts
+  FUDIAN_BIND: 0.0.0.0:3000
+  RUST_LOG: ${RUST_LOG:-fudian=debug,tower_http=info}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: fudian_nextgen
+      POSTGRES_USER: fudian_nextgen
+      POSTGRES_PASSWORD: fudian_nextgen_dev
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fudian_nextgen -d fudian_nextgen"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 30s
+
+  artifact-init:
+    image: postgres:17-alpine
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /data/artifacts && chown -R 1000:1000 /data/artifacts"]
+    volumes:
+      - artifacts:/data/artifacts
+    tmpfs:
+      - /var/lib/postgresql/data
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: development
+    working_dir: /app
+    command: ["cargo", "run"]
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      artifact-init:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - target:/app/target
+      - artifacts:/data/artifacts
+    init: true
+
+  app-prod:
+    profiles: ["production"]
+    build:
+      context: .
+      target: runtime
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      artifact-init:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    volumes:
+      - artifacts:/data/artifacts
+    init: true
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: fudian_nextgen_postgres_data
+  artifacts:
+    name: fudian_nextgen_artifacts
+  cargo_registry:
+    name: fudian_rust_cargo_registry
+  cargo_git:
+    name: fudian_rust_cargo_git
+  target:
+    name: fudian_rust_target
