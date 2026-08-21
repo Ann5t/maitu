@@ -913,7 +913,7 @@ async fn approve_proposal(
         }
     }
 
-    if let Some(parent_session_id) = proposal.parent_session_id {
+    let inherited_environment = if let Some(parent_session_id) = proposal.parent_session_id {
         let parent = load_session_for_update(transaction, project_id, parent_session_id).await?;
         if parent.goal_branch_id
             != proposal
@@ -927,7 +927,23 @@ async fn approve_proposal(
                 "父 Session 已不再等待这个 Proposal",
             ));
         }
-    }
+        let binding: Option<(Uuid, String)> = sqlx::query_as(
+            "SELECT environment_manifest_id, environment_fingerprint \
+             FROM session_environment_bindings WHERE session_id = $1",
+        )
+        .bind(parent_session_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        if parent.environment_fingerprint.is_some() && binding.is_none() {
+            return Err(AppError::conflict(
+                "environment_fingerprint_mismatch",
+                "父 Session 有环境指纹但缺少不可变绑定",
+            ));
+        }
+        binding
+    } else {
+        None
+    };
 
     let goal_branch_id = Uuid::new_v4();
     let contract_id = Uuid::new_v4();
@@ -937,8 +953,8 @@ async fn approve_proposal(
         "INSERT INTO goal_branches \
          (id, project_id, creating_proposal_id, parent_goal_branch_id, \
           inherited_from_session_id, name, status, current_contract_version_id, \
-          head_session_id, git_branch_name) \
-         VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9)",
+          head_session_id, git_branch_name, environment_fingerprint) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10)",
     )
     .bind(goal_branch_id)
     .bind(project_id)
@@ -949,6 +965,7 @@ async fn approve_proposal(
     .bind(contract_id)
     .bind(session_id)
     .bind(&git_branch_name)
+    .bind(inherited_environment.as_ref().map(|binding| &binding.1))
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
@@ -976,8 +993,8 @@ async fn approve_proposal(
     sqlx::query(
         "INSERT INTO goal_sessions \
          (id, project_id, goal_branch_id, session_number, status, assignment, \
-          agent_identity, contract_version_id, inherited_context) \
-         VALUES ($1, $2, $3, 1, 'running', $4, $5, $6, $7)",
+          agent_identity, contract_version_id, environment_fingerprint, inherited_context) \
+         VALUES ($1, $2, $3, 1, 'running', $4, $5, $6, $7, $8)",
     )
     .bind(session_id)
     .bind(project_id)
@@ -985,9 +1002,28 @@ async fn approve_proposal(
     .bind(&assignment)
     .bind(&agent_identity)
     .bind(contract_id)
+    .bind(inherited_environment.as_ref().map(|binding| &binding.1))
     .bind(revision.context_inheritance)
     .execute(&mut **transaction)
     .await?;
+    if let (Some(parent_session_id), Some((environment_id, fingerprint))) =
+        (proposal.parent_session_id, &inherited_environment)
+    {
+        sqlx::query(
+            "INSERT INTO session_environment_bindings \
+             (session_id, project_id, goal_branch_id, environment_manifest_id, \
+              environment_fingerprint, inherited_from_session_id) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(session_id)
+        .bind(project_id)
+        .bind(goal_branch_id)
+        .bind(environment_id)
+        .bind(fingerprint)
+        .bind(parent_session_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     sqlx::query(
         "UPDATE goal_branch_proposals SET status = $1, approved_revision = $2, \
          approved_goal_branch_id = $3, updated_at = now(), decided_at = now() WHERE id = $4",
@@ -1497,6 +1533,36 @@ async fn start_next_session(
     })))
     .execute(&mut **transaction)
     .await?;
+    if let Some(fingerprint) = &branch.environment_fingerprint {
+        let environment_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT environment_manifest_id FROM session_environment_bindings \
+             WHERE session_id = $1 AND environment_fingerprint = $2",
+        )
+        .bind(previous.id)
+        .bind(fingerprint)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        let environment_id = environment_id.ok_or_else(|| {
+            AppError::conflict(
+                "environment_fingerprint_mismatch",
+                "上一 Session 环境没有对应的不可变绑定",
+            )
+        })?;
+        sqlx::query(
+            "INSERT INTO session_environment_bindings \
+             (session_id, project_id, goal_branch_id, environment_manifest_id, \
+              environment_fingerprint, inherited_from_session_id) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(session_id)
+        .bind(project_id)
+        .bind(branch.id)
+        .bind(environment_id)
+        .bind(fingerprint)
+        .bind(previous.id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     sqlx::query(
         "UPDATE goal_branches SET head_session_id = $1, status = 'active', updated_at = now() \
          WHERE id = $2",

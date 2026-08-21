@@ -9,6 +9,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_goal_branch_core.sql",
         include_str!("../migrations/0002_goal_branch_core.sql"),
     ),
+    (
+        "0003_tooling_core.sql",
+        include_str!("../migrations/0003_tooling_core.sql"),
+    ),
 ];
 
 pub async fn run(pool: &PgPool) -> Result<(), sqlx::Error> {

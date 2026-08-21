@@ -71,6 +71,34 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::api_goal_command),
         )
         .route(
+            "/api/v1/plugins",
+            get(handlers::api_plugin_catalog).post(handlers::api_register_plugin),
+        )
+        .route(
+            "/api/v1/plugins/resolve",
+            post(handlers::api_resolve_plugin),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/{version}",
+            get(handlers::api_plugin_detail),
+        )
+        .route(
+            "/api/v1/environments",
+            post(handlers::api_create_environment),
+        )
+        .route(
+            "/api/v1/environments/{environment_id}",
+            get(handlers::api_environment_detail),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/environment",
+            post(handlers::api_bind_environment),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/tool-calls",
+            post(handlers::api_execute_tool),
+        )
+        .route(
             "/api/artifacts/{artifact_id}",
             get(handlers::artifact_download),
         )

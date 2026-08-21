@@ -7,6 +7,7 @@ pub mod goal_domain;
 pub mod goal_models;
 mod migrations;
 mod models;
+pub mod tooling;
 mod web;
 
 use std::sync::Arc;
@@ -36,6 +37,9 @@ async fn main() -> anyhow::Result<()> {
         .context("连接 PostgreSQL 失败")?;
 
     migrations::run(&pool).await.context("数据库迁移失败")?;
+    application::plugins::ensure_reference_plugins(&pool)
+        .await
+        .context("初始化参考插件失败")?;
     tokio::fs::create_dir_all(&config.artifact_root)
         .await
         .context("创建产物目录失败")?;

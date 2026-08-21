@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{goal_branches, graph, projects},
+    application::{goal_branches, graph, plugins, projects},
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -21,6 +21,7 @@ use crate::{
         contribution_kind_label,
     },
     error::{AppError, AppResult},
+    tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
 };
 
 use super::{AppState, views};
@@ -390,5 +391,71 @@ pub async fn api_goal_command(
     Json(request): Json<goal_branches::GoalCommandRequest>,
 ) -> AppResult<Json<Value>> {
     let response = goal_branches::run_command(&state.pool, project_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_plugin_catalog(State(state): State<Arc<AppState>>) -> AppResult<Json<Value>> {
+    let plugins = plugins::list_catalog(&state.pool).await?;
+    Ok(Json(json!({ "plugins": plugins })))
+}
+
+pub async fn api_register_plugin(
+    State(state): State<Arc<AppState>>,
+    Json(draft): Json<PluginManifestDraft>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let manifest = plugins::register_plugin(&state.pool, draft).await?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(manifest)?)))
+}
+
+pub async fn api_plugin_detail(
+    State(state): State<Arc<AppState>>,
+    Path((plugin_id, version)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let manifest = plugins::get_plugin(&state.pool, &plugin_id, &version).await?;
+    Ok(Json(serde_json::to_value(manifest)?))
+}
+
+pub async fn api_resolve_plugin(
+    State(state): State<Arc<AppState>>,
+    Json(selector): Json<PluginSelector>,
+) -> AppResult<Json<Value>> {
+    let plugin = plugins::resolve_plugin(&state.pool, selector).await?;
+    Ok(Json(serde_json::to_value(plugin)?))
+}
+
+pub async fn api_create_environment(
+    State(state): State<Arc<AppState>>,
+    Json(manifest): Json<EnvironmentManifest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let environment = plugins::create_environment(&state.pool, manifest).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(environment)?),
+    ))
+}
+
+pub async fn api_environment_detail(
+    State(state): State<Arc<AppState>>,
+    Path(environment_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let environment = plugins::get_environment(&state.pool, environment_id).await?;
+    Ok(Json(serde_json::to_value(environment)?))
+}
+
+pub async fn api_bind_environment(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<plugins::BindEnvironmentRequest>,
+) -> AppResult<Json<Value>> {
+    let response = plugins::bind_environment(&state.pool, project_id, session_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_execute_tool(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<plugins::ExecuteToolRequest>,
+) -> AppResult<Json<Value>> {
+    let response = plugins::execute_tool(&state.pool, project_id, session_id, request).await?;
     Ok(Json(serde_json::to_value(response)?))
 }

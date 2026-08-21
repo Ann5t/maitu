@@ -88,6 +88,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 新目标枝干纵向接口及幂等/错误语义见 [目标枝干 HTTP API v1](docs/api-goal-branch-v1.md)。
 
+插件目录、不可变环境、Session 绑定和参考 Tool Broker 接口见 [中央插件与环境 API v1](docs/tooling-api-v1.md)。
+
 ## 主要路由
 
 | 方法 | 路由 | 用途 |
@@ -104,6 +106,9 @@ assets/                      CSS、渐进增强脚本和图标
 | `GET` | `/api/artifacts/:id` | 带 ETag 的产物读取 |
 | `GET` | `/api/v1/projects/:id/goal-graph` | 新目标枝干领域快照 |
 | `POST` | `/api/v1/projects/:id/goal-commands` | 幂等目标枝干命令 |
+| `GET/POST` | `/api/v1/plugins` | 渐进式插件目录与注册 |
+| `POST` | `/api/v1/environments` | 固定 EnvironmentManifest |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/tool-calls` | 无状态工具调用 |
 
 ## 技术基线
 

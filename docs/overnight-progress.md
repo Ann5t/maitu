@@ -25,8 +25,8 @@
 | 1. 领域与协议基线 | 已完成 | `goal-branch-domain.md`、`tool-protocol.md`；关键不变量自动检索核对通过 |
 | 2. 数据库与领域实现 | 已完成 | `0002_goal_branch_core.sql`；16 个 Rust 单元测试；隔离迁移/约束脚本通过 |
 | 3. HTTP/API 纵向流程 | 已完成 | `api-goal-branch-v1.md`；隔离真实 HTTP 闭环与 HTML 表单适配测试通过 |
-| 4. 插件与环境版本基础 | 进行中 |  |
-| 5. 安全文件导入 | 待开始 |  |
+| 4. 插件与环境版本基础 | 已完成 | `0003_tooling_core.sql`、`tooling-api-v1.md`；隔离版本/环境/Mock Broker HTTP 测试通过 |
+| 5. 安全文件导入 | 进行中 |  |
 | 6. 项目图与工作台原型 | 待开始 |  |
 | 7. 质量门与早晨交付 | 待开始 |  |
 
@@ -77,3 +77,15 @@
 - HTML 表单适配入口以 303 回跳且产生同一 Proposal；空库/旧基线迁移、fmt、Clippy、16 个单元测试继续通过；
 - 所有隔离容器和网络已清理；真实库计数仍为 3/8/23/2；
 - 第 3 级验收通过，开始第 4 级中央插件与环境版本基础。
+
+### 2026-08-22 02:14 +08:00
+
+- 新增不可变插件包、EnvironmentManifest、Session 环境 binding、ToolCall 审计与 ToolLease 状态表；迁移在空库、重放和旧基线场景通过；
+- 实现 Manifest 规范化/服务器封装、SemVer 目录与 `latest` 解析、同版本摘要冲突拒绝，以及按需目录/详情接口；
+- 实现确定性环境规范化与 SHA-256 指纹；插件、工具链、lock、目标、Feature、参数或策略变化都会形成新环境；
+- Session 首次环境绑定不可变；子目标首个 Session 与退回后的下一 Session 持久继承准确 binding，不共享可变环境；
+- 实现 ToolBroker trait、ToolCall/Result 和 ToolLease 状态机，以及无文件、网络副作用的 `echo`/`inspect` 参考 Mock 插件；
+- `scripts/test-tooling-http.sh` 验证同名 1.0/2.0/3.0 共存、`latest` 解析后不漂移、冲突环境并行、重绑拒绝、错误插件拒绝、调用幂等、结果绑定与不可变插件审计；
+- 目标枝干 HTTP 回归继续通过；Rust 单元测试增至 21 个并全部通过，fmt/Clippy 无警告；
+- 所有隔离容器和网络已清理；真实库计数仍为 3/8/23/2；
+- 第 4 级验收通过，开始第 5 级安全文件导入。
