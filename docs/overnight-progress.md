@@ -27,8 +27,8 @@
 | 3. HTTP/API 纵向流程 | 已完成 | `api-goal-branch-v1.md`；隔离真实 HTTP 闭环与 HTML 表单适配测试通过 |
 | 4. 插件与环境版本基础 | 已完成 | `0003_tooling_core.sql`、`tooling-api-v1.md`；隔离版本/环境/Mock Broker HTTP 测试通过 |
 | 5. 安全文件导入 | 已完成 | `0004_input_artifacts.sql`、`input-api-v1.md`；隔离分段/哈希/导入/冻结 HTTP 验收通过 |
-| 6. 项目图与工作台原型 | 进行中 |  |
-| 7. 质量门与早晨交付 | 待开始 |  |
+| 6. 项目图与工作台原型 | 已完成 | `goal-lanes-v1` 可替换投影；结构化 HTML 与 Chromium 1440px/390px 全流程通过 |
+| 7. 质量门与早晨交付 | 进行中 |  |
 
 ## 运行日志
 
@@ -101,3 +101,17 @@
 - 空库/旧基线迁移、目标枝干 HTTP、插件环境 HTTP 全部回归通过；25 个 Rust 单元测试全部通过，fmt/Clippy 无警告；
 - 隔离容器与网络已清理；真实库计数仍为 3/8/23/2；
 - 第 5 级验收通过，开始第 6 级项目图与工作台原型。
+
+### 2026-08-22 03:04 +08:00
+
+- 项目默认入口切换为新目标枝干工作台，旧 DAG 保留为独立“探索图”页签，两套模型不自动重解释；
+- 新增只读 `goal-lanes-v1` 投影：枝干是目标车道，圆点卡片是 Agent Session，`HEAD` 表示当前 Session；投影版本不写回领域数据；
+- 点击 Session 可看到契约/未知、文件与产物、环境指纹、工具/浏览器/测试证据、Contribution、暂停上下文和审核决定；
+- 增加结构化 HTML 表单，无需手写 JSON 即可推进 Proposal 草拟/修订/批准、Contribution、子目标、判断请求、异常/手动暂停、恢复、拟合并、独立 AI 建议和用户最终决定；
+- 新增浏览器文件渐进增强：选择文件后按受限分段上传、完整哈希验证并导入 Session；服务器端仍是完整性权威；
+- `scripts/test-workbench-http.sh` 用真实 HTML 表单跑通 Proposal → 判断暂停/恢复 → Contribution → 拟合并 → AI 建议 → 用户接受；
+- `scripts/test-workbench-browser.sh` 用固定官方 Playwright 1.62.0 容器中的 Chromium 真实点击同一闭环和文件上传；1440px 与 390px 都无页面级横向溢出；
+- 保存桌面/手机截图和 `workbench-projection-v1.md`，并明确它们是待用户凭感觉继续修改的原型，不是最终 UI 定案；
+- Rust 单元测试增至 29 个并全部通过，fmt/Clippy 无警告；所有浏览器隔离容器/网络已清理；
+- 真实库计数仍为 3/8/23/2，原预览仍只绑定 `127.0.0.1:3001`；
+- 第 6 级验收通过，开始第 7 级最终质量门与早晨交付。

@@ -26,13 +26,15 @@ Axum 路由与传输适配
 
 - `domain` 不依赖 HTTP 或数据库，保存校验、状态能力和 Markdown 产物生成规则。
 - `application` 负责用例、事务和事件记录。
-- `web` 只做表单/JSON 解码、响应和页面渲染。
+- `web` 只做表单/JSON 解码、响应和页面渲染。`goal_projection` 是可替换的只读投影，不把车道布局写回领域数据。
 - `artifacts` 约束文件路径始终位于配置的产物根目录内。
 - `migrations` 使用应用内迁移记录，启动时顺序执行且校验迁移名唯一性。
 
 ## 数据兼容
 
 Rust 版本直接读取当前 `fudian-nextgen` 的 14 张业务表，不引入第二套影子数据。基线迁移使用 `CREATE TABLE IF NOT EXISTS`、受控的约束补全和幂等索引，因此既能初始化空库，也能接管已有库。
+
+`0002_goal_branch_core.sql` 以只增不减方式添加新 `goal_` 聚合，`0003_tooling_core.sql` 添加插件/环境/工具审计，`0004_input_artifacts.sql` 添加 Session 输入。旧 DAG 与新 GoalBranch 并存，应用不会把旧节点自动重解释为 Session。
 
 已有的 `0001_initial.sql`、`0002_project_evolution_graph.sql`、`0003_selective_branch_merges.sql` 迁移记录会保留；Rust 基线以 `0001_rust_baseline.sql` 单独登记。该记录代表 Rust 已确认数据库具备所需结构，不代表重建或复制已有数据。
 

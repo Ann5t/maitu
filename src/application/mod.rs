@@ -3,3 +3,4 @@ pub mod graph;
 pub mod inputs;
 pub mod plugins;
 pub mod projects;
+pub mod workbench;

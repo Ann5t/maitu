@@ -1,3 +1,4 @@
+mod goal_projection;
 mod handlers;
 mod views;
 

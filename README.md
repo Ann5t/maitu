@@ -92,6 +92,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 分段上传、内容验证、Session inbox 与冻结边界见 [Session 安全文件输入 API v1](docs/input-api-v1.md)。
 
+可操作的 Git 车道投影、Session 工作现场、桌面/手机截图与替换边界见 [目标枝干工作台投影 v1](docs/workbench-projection-v1.md)。
+
 ## 主要路由
 
 | 方法 | 路由 | 用途 |
@@ -115,6 +117,15 @@ assets/                      CSS、渐进增强脚本和图标
 | `PUT` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/chunks` | 上传受限文件分段 |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/finish` | 完整性与可信类型验证 |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/import` | 显式导入 worktree/inbox 或产物引用 |
+
+工作台隔离验收：
+
+```bash
+./scripts/test-workbench-http.sh
+./scripts/test-workbench-browser.sh
+```
+
+第二个命令使用固定版本的一次性官方 Playwright 容器，不在应用镜像或仓库内安装 Node 运行时。
 
 ## 技术基线
 

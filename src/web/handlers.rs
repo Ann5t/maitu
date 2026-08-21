@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{goal_branches, graph, inputs, plugins, projects},
+    application::{goal_branches, graph, inputs, plugins, projects, workbench},
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -32,6 +32,7 @@ use super::{AppState, views};
 pub struct ProjectPageQuery {
     pub tab: Option<String>,
     pub node: Option<Uuid>,
+    pub session: Option<Uuid>,
     pub notice: Option<String>,
     pub error: Option<String>,
 }
@@ -65,11 +66,58 @@ pub struct GraphForm {
     pub accepted_ids: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct GoalCommandForm {
     pub client_request_id: Option<Uuid>,
     pub action: String,
-    pub payload: String,
+    pub payload: Option<String>,
+    pub return_session_id: Option<Uuid>,
+    pub proposal_id: Option<Uuid>,
+    pub expected_revision: Option<i32>,
+    pub parent_session_id: Option<Uuid>,
+    pub goal_branch_id: Option<Uuid>,
+    pub previous_session_id: Option<Uuid>,
+    pub session_id: Option<Uuid>,
+    pub contract_version_id: Option<Uuid>,
+    pub review_gate_id: Option<Uuid>,
+    pub why_needed: Option<String>,
+    pub desired_outcome: Option<String>,
+    pub hard_constraints: Option<String>,
+    pub subjective_preferences: Option<String>,
+    pub unknowns: Option<String>,
+    pub non_goals: Option<String>,
+    pub validation_plan: Option<String>,
+    pub judgment_triggers: Option<String>,
+    pub stop_conditions: Option<String>,
+    pub expected_contributions: Option<String>,
+    pub exploration_plan: Option<String>,
+    pub tool_requirements: Option<String>,
+    pub inferences: Option<String>,
+    pub revision_reason: Option<String>,
+    pub branch_name: Option<String>,
+    pub assignment: Option<String>,
+    pub agent_identity: Option<String>,
+    pub contribution_kind: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub question: Option<String>,
+    pub candidates: Option<String>,
+    pub evidence: Option<String>,
+    pub recommendation: Option<String>,
+    pub reason: Option<String>,
+    pub safe_checkpoint: Option<String>,
+    pub attempted: Option<String>,
+    pub risk: Option<String>,
+    pub user_action: Option<String>,
+    pub resolution: Option<String>,
+    pub contribution_ids: Option<String>,
+    pub test_evidence: Option<String>,
+    pub risks: Option<String>,
+    pub self_check: Option<String>,
+    pub reviewer_identity: Option<String>,
+    pub review_decision: Option<String>,
+    pub rationale: Option<String>,
+    pub selected_contribution_ids: Option<String>,
 }
 
 pub async fn dashboard(
@@ -107,8 +155,12 @@ pub async fn project_page(
     Path(project_id): Path<Uuid>,
     Query(query): Query<ProjectPageQuery>,
 ) -> AppResult<Markup> {
-    let snapshot = projects::get_snapshot(&state.pool, project_id).await?;
-    Ok(views::project(&snapshot, &query))
+    let (snapshot, goal_snapshot, activity) = tokio::try_join!(
+        projects::get_snapshot(&state.pool, project_id),
+        goal_branches::get_snapshot(&state.pool, project_id),
+        workbench::get_activity(&state.pool, project_id),
+    )?;
+    Ok(views::project(&snapshot, &goal_snapshot, &activity, &query))
 }
 
 pub async fn project_action_form(
@@ -156,24 +208,218 @@ pub async fn goal_command_form(
     Path(project_id): Path<Uuid>,
     Form(form): Form<GoalCommandForm>,
 ) -> Response {
-    let payload = serde_json::from_str::<Value>(&form.payload).map_err(|_| {
-        AppError::bad_request("invalid_goal_input", "表单中的目标枝干参数不是有效 JSON")
-    });
+    let session_hint = form
+        .return_session_id
+        .or(form.session_id)
+        .or(form.parent_session_id)
+        .or(form.previous_session_id);
+    let payload = goal_form_payload(&form);
     let result = match payload {
-        Ok(payload) => goal_branches::run_command(
-            &state.pool,
-            project_id,
-            goal_branches::GoalCommandRequest {
-                client_request_id: form.client_request_id.unwrap_or_else(Uuid::new_v4),
-                action: form.action,
-                payload,
-            },
-        )
-        .await
-        .map(|_| ()),
+        Ok(payload) => {
+            goal_branches::run_command(
+                &state.pool,
+                project_id,
+                goal_branches::GoalCommandRequest {
+                    client_request_id: form.client_request_id.unwrap_or_else(Uuid::new_v4),
+                    action: form.action.clone(),
+                    payload,
+                },
+            )
+            .await
+        }
         Err(error) => Err(error),
     };
-    redirect_project_result(project_id, result, "目标枝干已更新", None)
+    redirect_goal_result(project_id, result, session_hint)
+}
+
+fn goal_form_payload(form: &GoalCommandForm) -> AppResult<Value> {
+    if let Some(payload) = form
+        .payload
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return serde_json::from_str(payload).map_err(|_| {
+            AppError::bad_request("invalid_goal_input", "表单中的目标枝干参数不是有效 JSON")
+        });
+    }
+    let required_uuid = |value: Option<Uuid>, label: &'static str| {
+        value.ok_or_else(|| AppError::bad_request("invalid_goal_input", format!("缺少{label}标识")))
+    };
+    let revision = || {
+        json!({
+            "whyNeeded": form.why_needed.clone().unwrap_or_default(),
+            "contract": {
+                "desiredOutcome": form.desired_outcome.clone().unwrap_or_default(),
+                "hardConstraints": split_lines(form.hard_constraints.as_deref()),
+                "subjectivePreferences": split_lines(form.subjective_preferences.as_deref()),
+                "unknowns": split_lines(form.unknowns.as_deref()),
+                "nonGoals": split_lines(form.non_goals.as_deref()),
+                "validationPlan": split_lines(form.validation_plan.as_deref()),
+                "judgmentTriggers": split_lines(form.judgment_triggers.as_deref()),
+                "stopConditions": split_lines(form.stop_conditions.as_deref()),
+                "expectedContributions": split_lines(form.expected_contributions.as_deref()),
+            },
+            "expectedContributions": split_lines(form.expected_contributions.as_deref()),
+            "explorationPlan": split_lines(form.exploration_plan.as_deref()),
+            "contextInheritance": {},
+            "toolRequirements": split_lines(form.tool_requirements.as_deref()),
+            "inferences": split_lines(form.inferences.as_deref()),
+            "revisionReason": optional_form_text(form.revision_reason.as_deref()),
+        })
+    };
+
+    match form.action.as_str() {
+        "proposal.create" => Ok(json!({ "revision": revision() })),
+        "proposal.revise" => Ok(json!({
+            "proposalId": required_uuid(form.proposal_id, "Proposal")?,
+            "expectedRevision": form.expected_revision.unwrap_or_default(),
+            "revision": revision(),
+        })),
+        "proposal.submit" => Ok(json!({
+            "proposalId": required_uuid(form.proposal_id, "Proposal")?,
+            "expectedRevision": form.expected_revision.unwrap_or_default(),
+        })),
+        "proposal.cancel" => Ok(json!({
+            "proposalId": required_uuid(form.proposal_id, "Proposal")?,
+            "reason": form.reason.clone().unwrap_or_default(),
+        })),
+        "proposal.approve" => Ok(json!({
+            "proposalId": required_uuid(form.proposal_id, "Proposal")?,
+            "expectedRevision": form.expected_revision.unwrap_or_default(),
+            "branchName": form.branch_name.clone().unwrap_or_default(),
+            "assignment": form.assignment.clone().unwrap_or_default(),
+            "agentIdentity": optional_form_text(form.agent_identity.as_deref()),
+        })),
+        "session.propose_child" => Ok(json!({
+            "parentSessionId": required_uuid(form.parent_session_id, "父 Session")?,
+            "revision": revision(),
+        })),
+        "session.add_contribution" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "kind": form.contribution_kind.clone().unwrap_or_else(|| "finding".into()),
+            "title": form.title.clone().unwrap_or_default(),
+            "body": form.body.clone().unwrap_or_default(),
+            "artifactId": null,
+            "evidenceRefs": [],
+            "supersedesId": null,
+        })),
+        "session.request_judgment" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "question": form.question.clone().unwrap_or_default(),
+            "candidates": split_lines(form.candidates.as_deref()),
+            "evidence": optional_form_text(form.evidence.as_deref()),
+            "recommendation": optional_form_text(form.recommendation.as_deref()),
+        })),
+        "session.pause_exception" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "reason": form.reason.clone().unwrap_or_default(),
+            "safeCheckpoint": form.safe_checkpoint.clone().unwrap_or_default(),
+            "attempted": form.attempted.clone().unwrap_or_default(),
+            "risk": form.risk.clone().unwrap_or_default(),
+            "userAction": form.user_action.clone().unwrap_or_default(),
+            "recommendation": form.recommendation.clone().unwrap_or_default(),
+        })),
+        "session.pause_manual" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "reason": form.reason.clone().unwrap_or_default(),
+        })),
+        "session.resume" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "resolution": form.resolution.clone().unwrap_or_default(),
+        })),
+        "session.start_next" => Ok(json!({
+            "goalBranchId": required_uuid(form.goal_branch_id, "目标枝干")?,
+            "previousSessionId": required_uuid(form.previous_session_id, "上一 Session")?,
+            "assignment": form.assignment.clone().unwrap_or_default(),
+            "agentIdentity": optional_form_text(form.agent_identity.as_deref()),
+        })),
+        "merge.propose" => Ok(json!({
+            "sessionId": required_uuid(form.session_id, "Session")?,
+            "candidate": {
+                "contributionIds": parse_uuid_list(form.contribution_ids.as_deref())?,
+                "contractVersionId": required_uuid(form.contract_version_id, "契约版本")?,
+                "gitBaseCommit": null,
+                "gitHeadCommit": null,
+                "gitDirty": false,
+                "environmentFingerprint": null,
+                "testEvidence": split_lines(form.test_evidence.as_deref()),
+                "risks": split_lines(form.risks.as_deref()),
+                "selfCheck": form.self_check.clone().unwrap_or_default(),
+            }
+        })),
+        "review.ai_record" => Ok(json!({
+            "reviewGateId": required_uuid(form.review_gate_id, "ReviewGate")?,
+            "reviewerIdentity": form.reviewer_identity.clone().unwrap_or_default(),
+            "decision": form.review_decision.clone().unwrap_or_default(),
+            "rationale": form.rationale.clone().unwrap_or_default(),
+            "contractCheck": { "recordedFrom": "workbench" },
+            "retestEvidence": split_lines(form.test_evidence.as_deref()),
+        })),
+        "review.human_decide" => Ok(json!({
+            "reviewGateId": required_uuid(form.review_gate_id, "ReviewGate")?,
+            "decision": form.review_decision.clone().unwrap_or_default(),
+            "rationale": form.rationale.clone().unwrap_or_default(),
+            "selectedContributionIds": parse_uuid_list(form.selected_contribution_ids.as_deref())?,
+        })),
+        _ => Err(AppError::bad_request(
+            "unsupported_goal_action",
+            "不支持的目标枝干表单动作",
+        )),
+    }
+}
+
+fn split_lines(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn optional_form_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn parse_uuid_list(value: Option<&str>) -> AppResult<Vec<Uuid>> {
+    value
+        .unwrap_or_default()
+        .split([',', '\n', '\r'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            Uuid::parse_str(item).map_err(|_| {
+                AppError::bad_request("invalid_contribution", "Contribution 标识不合法")
+            })
+        })
+        .collect()
+}
+
+fn redirect_goal_result(
+    project_id: Uuid,
+    result: AppResult<goal_branches::GoalCommandResponse>,
+    session_id: Option<Uuid>,
+) -> Response {
+    let session = session_id
+        .map(|session_id| format!("&session={session_id}"))
+        .unwrap_or_default();
+    let location = match result {
+        Ok(_) => format!(
+            "/projects/{project_id}?tab=goals&notice={}{}#goal-workbench",
+            urlencoding::encode("目标枝干已更新"),
+            session,
+        ),
+        Err(error) => format!(
+            "/projects/{project_id}?tab=goals&error={}{}#goal-workbench",
+            urlencoding::encode(&error.public_message()),
+            session,
+        ),
+    };
+    Redirect::to(&location).into_response()
 }
 
 fn graph_form_request(form: GraphForm) -> AppResult<GraphActionRequest> {
@@ -593,4 +839,48 @@ pub async fn api_download_input(
         HeaderValue::from_static("private, no-store"),
     );
     Ok((headers, bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_goal_form_keeps_unknowns_without_requiring_json() {
+        let form = GoalCommandForm {
+            action: "proposal.create".into(),
+            why_needed: Some("需要探索".into()),
+            desired_outcome: Some("找到可行方案".into()),
+            unknowns: Some("性能上限\n\n最终手感 ".into()),
+            validation_plan: Some("实际测试".into()),
+            stop_conditions: Some("用户确认".into()),
+            ..GoalCommandForm::default()
+        };
+        let payload = goal_form_payload(&form).unwrap();
+        assert_eq!(
+            payload["revision"]["contract"]["unknowns"],
+            json!(["性能上限", "最终手感"])
+        );
+        assert_eq!(
+            payload["revision"]["contract"]["desiredOutcome"],
+            "找到可行方案"
+        );
+    }
+
+    #[test]
+    fn generic_json_form_remains_a_compatible_escape_hatch() {
+        let form = GoalCommandForm {
+            action: "proposal.submit".into(),
+            payload: Some(r#"{"expectedRevision":2}"#.into()),
+            ..GoalCommandForm::default()
+        };
+        assert_eq!(goal_form_payload(&form).unwrap()["expectedRevision"], 2);
+    }
+
+    #[test]
+    fn contribution_identifier_lists_are_strict() {
+        assert!(parse_uuid_list(Some("not-a-uuid")).is_err());
+        let id = Uuid::new_v4();
+        assert_eq!(parse_uuid_list(Some(&id.to_string())).unwrap(), vec![id]);
+    }
 }

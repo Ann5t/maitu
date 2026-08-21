@@ -4,16 +4,24 @@ use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
 use crate::{
+    application::workbench::WorkbenchActivity,
     domain::{
         branch_status_label, can_append_to_branch, contribution_kind_label, node_kind_label,
         outcome_label, state_label,
+    },
+    goal_models::{
+        GoalContractVersionRecord, GoalGraphSnapshot, GoalProposalRecord,
+        GoalProposalRevisionRecord, GoalReviewGateRecord, GoalSessionRecord,
     },
     models::{
         ActionRun, ProjectBranch, ProjectContribution, ProjectNode, ProjectSnapshot, ProjectSummary,
     },
 };
 
-use super::handlers::ProjectPageQuery;
+use super::{
+    goal_projection::{GoalGraphProjection, GoalLane, PROJECTION_VERSION},
+    handlers::ProjectPageQuery,
+};
 
 pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> Markup {
     let view = match requested_view {
@@ -170,8 +178,13 @@ pub fn new_project(error: Option<&str>) -> Markup {
     layout("创建项目", "projects", content)
 }
 
-pub fn project(snapshot: &ProjectSnapshot, query: &ProjectPageQuery) -> Markup {
-    let tab = query.tab.as_deref().unwrap_or("graph");
+pub fn project(
+    snapshot: &ProjectSnapshot,
+    goal_snapshot: &GoalGraphSnapshot,
+    activity: &WorkbenchActivity,
+    query: &ProjectPageQuery,
+) -> Markup {
+    let tab = query.tab.as_deref().unwrap_or("goals");
     let content = html! {
         header class="project-head" {
             div class="project-head__row" {
@@ -185,7 +198,8 @@ pub fn project(snapshot: &ProjectSnapshot, query: &ProjectPageQuery) -> Markup {
             }
             p { (snapshot.project.current_focus.as_deref().unwrap_or("尚未确定当前焦点")) }
             nav class="project-tabs" aria-label="项目页面" {
-                (project_tab(snapshot.project.id, "graph", "脉络", tab, snapshot.nodes.len()))
+                (project_tab(snapshot.project.id, "goals", "目标枝干", tab, goal_snapshot.sessions.len()))
+                (project_tab(snapshot.project.id, "graph", "探索图", tab, snapshot.nodes.len()))
                 (project_tab(snapshot.project.id, "contract", "成果契约", tab, snapshot.contract.as_ref().map(|_| 1).unwrap_or(0)))
                 (project_tab(snapshot.project.id, "outputs", "产物与证据", tab, snapshot.artifacts.len() + snapshot.evidence.len()))
                 (project_tab(snapshot.project.id, "history", "历史", tab, snapshot.events.len()))
@@ -199,9 +213,12 @@ pub fn project(snapshot: &ProjectSnapshot, query: &ProjectPageQuery) -> Markup {
             div class="flash flash--error" role="alert" { (message) }
         }
 
-        (current_action_panel(snapshot))
+        @if tab != "goals" {
+            (current_action_panel(snapshot))
+        }
 
         @match tab {
+            "goals" => (goal_workbench(goal_snapshot, activity, query.session)),
             "contract" => (contract_view(snapshot)),
             "outputs" => (outputs_view(snapshot)),
             "history" => (history_view(snapshot)),
@@ -417,6 +434,964 @@ fn history_view(snapshot: &ProjectSnapshot) -> Markup {
             }
         }
     }
+}
+
+fn goal_workbench(
+    snapshot: &GoalGraphSnapshot,
+    activity: &WorkbenchActivity,
+    requested_session: Option<Uuid>,
+) -> Markup {
+    let projection = GoalGraphProjection::build(snapshot, requested_session);
+    let open_proposals = snapshot
+        .proposals
+        .iter()
+        .filter(|proposal| matches!(proposal.status.as_str(), "draft" | "awaiting_approval"))
+        .collect::<Vec<_>>();
+    let selected = projection
+        .selected_session_id
+        .and_then(|session_id| snapshot.sessions.iter().find(|item| item.id == session_id));
+    let open_attention = snapshot
+        .attention_items
+        .iter()
+        .filter(|item| item.status == "open")
+        .count();
+
+    html! {
+        section id="goal-workbench" class="goal-workbench"
+            data-projection-version=(PROJECTION_VERSION) {
+            header class="goal-toolbar" {
+                div {
+                    span class="eyebrow" { "GOAL BRANCH WORKBENCH · PROJECTION " (PROJECTION_VERSION) }
+                    h2 { "目标枝干工作台" }
+                    p { "一条枝干承载一个目标；圆点卡片代表一次 Agent Session。图只是可替换投影，审核语义保存在领域记录中。" }
+                }
+                div class="goal-toolbar__stats" aria-label="目标枝干概览" {
+                    span { b { (snapshot.branches.len()) } "目标" }
+                    span { b { (snapshot.sessions.len()) } "Session" }
+                    span class=(if open_attention > 0 { "has-attention" } else { "" }) {
+                        b { (open_attention) } "待判断"
+                    }
+                }
+            }
+
+            @if !open_proposals.is_empty() {
+                section class="proposal-queue" aria-label="待决定的 BranchProposal" {
+                    div class="proposal-queue__heading" {
+                        span class="eyebrow" { "BRANCH PROPOSALS" }
+                        strong { (open_proposals.len()) " 项分枝提案等待推进" }
+                    }
+                    div class="proposal-queue__cards" {
+                        @for proposal in open_proposals {
+                            (proposal_card(snapshot, proposal))
+                        }
+                    }
+                }
+            }
+
+            @if projection.lanes.is_empty() {
+                div class="goal-empty-layout" {
+                    article class="goal-empty-copy" {
+                        span class="goal-empty-copy__mark" { "00" }
+                        span class="eyebrow" { "FIRST GOAL" }
+                        h3 { "先形成第一条目标枝干" }
+                        p { "不需要填写巨量表格。先写清想得到什么、怎样验证、何时停止；暂时说不清的内容诚实放进“未知”。" }
+                        ul {
+                            li { "能明确的部分写清楚" }
+                            li { "不能明确的部分标为未知" }
+                            li { "约定何时回来请你凭感觉判断" }
+                        }
+                    }
+                    (proposal_editor(snapshot.project.id, "proposal.create", None, None, None))
+                }
+            } @else {
+                div class="goal-workbench__layout" {
+                    section class="goal-map" aria-label="目标枝干与 Agent Session" {
+                        div class="goal-map__scroll" data-goal-map-scroll {
+                            ol class="goal-lanes" {
+                                @for lane in &projection.lanes {
+                                    (goal_lane(snapshot, lane, projection.selected_session_id))
+                                }
+                            }
+                        }
+                    }
+                    aside class="session-worksite" aria-label="选中 Session 的工作现场" {
+                        @if let Some(session) = selected {
+                            (session_worksite(snapshot, activity, session))
+                        } @else {
+                            div class="worksite-empty" {
+                                span { "◎" }
+                                h3 { "选择一个 Session" }
+                                p { "这里会显示目标、文件、工具行动、测试证据和审核记录。" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn goal_lane(
+    snapshot: &GoalGraphSnapshot,
+    lane: &GoalLane,
+    selected_session_id: Option<Uuid>,
+) -> Markup {
+    let open_attention = snapshot
+        .attention_items
+        .iter()
+        .filter(|item| item.goal_branch_id == Some(lane.branch_id) && item.status == "open")
+        .count();
+    html! {
+        li class=(format!("goal-lane goal-lane--{}", goal_status_tone(&lane.status)))
+            style=(format!("--goal-depth:{}", lane.depth))
+            data-branch-id=(lane.branch_id) {
+            div class="goal-lane__identity" {
+                span class="goal-lane__fork" aria-hidden="true" { "⌁" }
+                div {
+                    small {
+                        @if lane.parent_branch_id.is_some() { "子目标" } @else { "根目标" }
+                    }
+                    strong { (&lane.name) }
+                }
+                span class=(format!("goal-state goal-state--{}", goal_status_tone(&lane.status))) {
+                    (goal_status_label(&lane.status))
+                }
+                @if open_attention > 0 {
+                    b class="goal-attention-count" title="待处理" { (open_attention) }
+                }
+            }
+            div class="goal-session-chain" {
+                @for session_id in &lane.session_ids {
+                    @if let Some(session) = snapshot.sessions.iter().find(|item| item.id == *session_id) {
+                        @let contribution_count = snapshot.contributions.iter().filter(|item| item.session_id == session.id).count();
+                        @let gate = snapshot.review_gates.iter().rev().find(|item| item.session_id == session.id);
+                        a class=(format!("goal-session-node goal-session-node--{}{}{}",
+                                goal_status_tone(&session.status),
+                                if Some(session.id) == selected_session_id { " is-selected" } else { "" },
+                                if lane.head_session_id == session.id { " is-head" } else { "" }))
+                            data-session-id=(session.id)
+                            data-selected=(if Some(session.id) == selected_session_id { "true" } else { "false" })
+                            href=(format!("/projects/{}?tab=goals&session={}#goal-workbench", snapshot.project.id, session.id)) {
+                            i class="goal-session-node__dot" aria-hidden="true" {}
+                            span class="goal-session-node__copy" {
+                                small {
+                                    "SESSION " (format!("{:02}", session.session_number))
+                                    @if lane.head_session_id == session.id { b { "HEAD" } }
+                                }
+                                strong { (&session.assignment) }
+                                em { (goal_status_label(&session.status)) }
+                            }
+                            span class="goal-session-node__signals" {
+                                @if contribution_count > 0 { b { (contribution_count) " 产出" } }
+                                @if let Some(gate) = gate { b { (review_status_label(&gate.status)) } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn proposal_card(snapshot: &GoalGraphSnapshot, proposal: &GoalProposalRecord) -> Markup {
+    let revision = latest_proposal_revision(snapshot, proposal);
+    let desired_outcome = revision
+        .and_then(|item| item.contract.0.get("desiredOutcome"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("契约内容缺失");
+    html! {
+        article class="proposal-card" data-proposal-id=(proposal.id) {
+            header {
+                span class="proposal-card__kind" {
+                    @if proposal.parent_session_id.is_some() { "子目标提案" } @else { "根目标提案" }
+                }
+                span class=(format!("goal-state goal-state--{}", goal_status_tone(&proposal.status))) {
+                    (proposal_status_label(&proposal.status))
+                }
+            }
+            h3 { (desired_outcome) }
+            @if let Some(revision) = revision {
+                p { (&revision.why_needed) }
+                div class="proposal-card__meta" {
+                    span { "v" (proposal.current_revision) }
+                    span { (json_array_len(&revision.contract.0, "unknowns")) " 项未知" }
+                    span { (json_array_len(&revision.contract.0, "validationPlan")) " 项验证" }
+                }
+            }
+            div class="proposal-card__actions" {
+                @if proposal.status == "draft" {
+                    form method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="proposal.submit";
+                        input type="hidden" name="proposal_id" value=(proposal.id);
+                        input type="hidden" name="expected_revision" value=(proposal.current_revision);
+                        @if let Some(session_id) = proposal.parent_session_id {
+                            input type="hidden" name="return_session_id" value=(session_id);
+                        }
+                        button class="button button--primary button--small" type="submit" { "提交审核" }
+                    }
+                } @else if proposal.status == "awaiting_approval" {
+                    details class="proposal-decision" open {
+                        summary { "批准并创建独立枝干" }
+                        form class="goal-form" method="post"
+                            action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="proposal.approve";
+                            input type="hidden" name="proposal_id" value=(proposal.id);
+                            input type="hidden" name="expected_revision" value=(proposal.current_revision);
+                            @if let Some(session_id) = proposal.parent_session_id {
+                                input type="hidden" name="return_session_id" value=(session_id);
+                            }
+                            label { "枝干名称" input name="branch_name" required value=(goal_short_title(desired_outcome, 28)); }
+                            label { "第一个 Session 要做什么" textarea name="assignment" rows="2" required { (desired_outcome) } }
+                            label { "Agent 身份（可选）" input name="agent_identity" placeholder="worker-main"; }
+                            button class="button button--primary button--small" type="submit" { "批准 BranchProposal" }
+                        }
+                    }
+                }
+                @if let Some(revision) = revision {
+                    details class="proposal-decision" {
+                        summary { "修订目标契约" }
+                        (proposal_editor(snapshot.project.id, "proposal.revise", Some(proposal), proposal.parent_session_id, Some(revision)))
+                    }
+                }
+                details class="proposal-decision proposal-decision--danger" {
+                    summary { "取消这项提案" }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="proposal.cancel";
+                        input type="hidden" name="proposal_id" value=(proposal.id);
+                        @if let Some(session_id) = proposal.parent_session_id {
+                            input type="hidden" name="return_session_id" value=(session_id);
+                        }
+                        label { "原因" textarea name="reason" rows="2" required {} }
+                        button class="button button--secondary button--small" type="submit" { "确认取消" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn proposal_editor(
+    project_id: Uuid,
+    action: &str,
+    proposal: Option<&GoalProposalRecord>,
+    parent_session_id: Option<Uuid>,
+    revision: Option<&GoalProposalRevisionRecord>,
+) -> Markup {
+    let why_needed = revision.map(|item| item.why_needed.as_str()).unwrap_or("");
+    let desired_outcome = revision
+        .and_then(|item| item.contract.0.get("desiredOutcome"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let contract_lines = |key: &str| {
+        revision
+            .and_then(|item| item.contract.0.get(key))
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
+    let outer_lines =
+        |value: Option<&serde_json::Value>| value.map(json_value_lines).unwrap_or_default();
+    let form_id = proposal
+        .map(|item| item.id.to_string())
+        .or_else(|| parent_session_id.map(|item| item.to_string()))
+        .unwrap_or_else(|| "root".into());
+    html! {
+        form class="goal-contract-form" method="post"
+            action=(format!("/projects/{project_id}/goal-commands"))
+            data-goal-contract-form=(form_id) {
+            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+            input type="hidden" name="action" value=(action);
+            @if let Some(proposal) = proposal {
+                input type="hidden" name="proposal_id" value=(proposal.id);
+                input type="hidden" name="expected_revision" value=(proposal.current_revision);
+            }
+            @if let Some(session_id) = parent_session_id {
+                input type="hidden" name="parent_session_id" value=(session_id);
+                input type="hidden" name="return_session_id" value=(session_id);
+            }
+            div class="goal-contract-form__intro" {
+                strong { "最少先填 4 项" }
+                span { "目标、原因、验证、停止；没想清的写入“未知”。" }
+            }
+            label { "为什么要单独做这件事？"
+                textarea name="why_needed" rows="2" required { (why_needed) }
+            }
+            label { "想得到的结果"
+                textarea name="desired_outcome" rows="3" required { (desired_outcome) }
+            }
+            div class="goal-form-columns" {
+                label { "怎样验证（每行一项）"
+                    textarea name="validation_plan" rows="3" required { (contract_lines("validationPlan")) }
+                }
+                label { "何时完成或停止（每行一项）"
+                    textarea name="stop_conditions" rows="3" required { (contract_lines("stopConditions")) }
+                }
+            }
+            label { "目前还不知道什么？（可留空）"
+                textarea name="unknowns" rows="2" placeholder="不能明确的部分诚实写在这里" { (contract_lines("unknowns")) }
+            }
+            details class="goal-form-advanced" {
+                summary { "按需补充约束、偏好、工具和探索计划" }
+                div class="goal-form-columns" {
+                    label { "硬约束" textarea name="hard_constraints" rows="2" { (contract_lines("hardConstraints")) } }
+                    label { "主观偏好" textarea name="subjective_preferences" rows="2" { (contract_lines("subjectivePreferences")) } }
+                    label { "明确不做" textarea name="non_goals" rows="2" { (contract_lines("nonGoals")) } }
+                    label { "何时请你判断" textarea name="judgment_triggers" rows="2" { (contract_lines("judgmentTriggers")) } }
+                    label { "期望回流的贡献" textarea name="expected_contributions" rows="2" { (revision.map(|item| outer_lines(Some(&item.expected_contributions.0))).unwrap_or_default()) } }
+                    label { "探索计划" textarea name="exploration_plan" rows="2" { (revision.map(|item| outer_lines(Some(&item.exploration_plan.0))).unwrap_or_default()) } }
+                    label { "工具需求" textarea name="tool_requirements" rows="2" { (revision.map(|item| outer_lines(Some(&item.tool_requirements.0))).unwrap_or_default()) } }
+                    label { "AI 推断（非用户确认）" textarea name="inferences" rows="2" { (revision.map(|item| outer_lines(Some(&item.inferences.0))).unwrap_or_default()) } }
+                }
+                @if proposal.is_some() {
+                    label { "本次修订理由" textarea name="revision_reason" rows="2" required { (revision.and_then(|item| item.revision_reason.as_deref()).unwrap_or("")) } }
+                }
+            }
+            button class="button button--primary" type="submit" {
+                @if action == "proposal.create" { "建立 BranchProposal 草案" }
+                @else if action == "session.propose_child" { "提议拆出子目标" }
+                @else { "保存新版契约" }
+            }
+        }
+    }
+}
+
+fn session_worksite(
+    snapshot: &GoalGraphSnapshot,
+    activity: &WorkbenchActivity,
+    session: &GoalSessionRecord,
+) -> Markup {
+    let branch = snapshot
+        .branches
+        .iter()
+        .find(|item| item.id == session.goal_branch_id);
+    let contract = snapshot
+        .contracts
+        .iter()
+        .find(|item| item.id == session.contract_version_id);
+    let inputs = activity
+        .inputs
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let tool_calls = activity
+        .tool_calls
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let environment = activity
+        .environments
+        .iter()
+        .find(|item| item.session_id == session.id);
+    let contributions = snapshot
+        .contributions
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let gates = snapshot
+        .review_gates
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let attention = snapshot
+        .attention_items
+        .iter()
+        .filter(|item| item.session_id == Some(session.id))
+        .collect::<Vec<_>>();
+
+    html! {
+        header class="worksite-head" {
+            div {
+                span class="eyebrow" { "AGENT SESSION WORKSITE" }
+                h3 { "Session " (format!("{:02}", session.session_number)) }
+            }
+            span class=(format!("goal-state goal-state--{}", goal_status_tone(&session.status))) {
+                (goal_status_label(&session.status))
+            }
+        }
+        p class="worksite-assignment" { (&session.assignment) }
+        div class="worksite-meta" {
+            span { b { "目标" } (branch.map(|item| item.name.as_str()).unwrap_or("未知")) }
+            span { b { "Agent" } (session.agent_identity.as_deref().unwrap_or("未指定")) }
+            span { b { "契约" } "v" (contract.map(|item| item.version).unwrap_or_default()) }
+            span { b { "环境" }
+                @if let Some(environment) = environment {
+                    code title=(environment.environment_fingerprint.as_str()) {
+                        (&environment.environment_fingerprint[..environment.environment_fingerprint.len().min(15)]) "…"
+                    }
+                } @else { "未绑定" }
+            }
+        }
+
+        @if let Some(contract) = contract {
+            details class="worksite-contract" open {
+                summary { "目标契约 · 这个 Session 为什么存在" }
+                strong { (&contract.desired_outcome) }
+                div class="worksite-contract__lists" {
+                    (compact_list("验证", &contract.validation_plan.0))
+                    (compact_list("停止", &contract.stop_conditions.0))
+                    (compact_list("未知", &contract.unknowns.0))
+                }
+            }
+        }
+
+        @for item in attention.iter().filter(|item| item.status == "open") {
+            article class="attention-card" role="status" {
+                header { span { "暂停 · " (attention_kind_label(&item.kind)) } b { "需要你" } }
+                h4 { (&item.title) }
+                p { (&item.reason) }
+                @if let Some(checkpoint) = &item.safe_checkpoint { small { b { "安全点：" } (checkpoint) } }
+                @if let Some(attempted) = &item.attempted { small { b { "已尝试：" } (attempted) } }
+                @if let Some(risk) = &item.risk { small { b { "风险：" } (risk) } }
+                @if let Some(action) = &item.user_action { small { b { "请你：" } (action) } }
+                @if let Some(recommendation) = &item.recommendation { small { b { "AI 建议：" } (recommendation) } }
+            }
+        }
+
+        div class="worksite-sections" {
+            section class="worksite-section" data-worksite-files {
+                header { span class="eyebrow" { "FILES / ARTIFACTS" } b { (inputs.len()) } }
+                h4 { "文件与产物" }
+                @if inputs.is_empty() {
+                    p class="worksite-empty-copy" { "尚无输入文件。手机和电脑上传都会先进入受限暂存区。" }
+                }
+                div class="worksite-records" {
+                    @for input in &inputs {
+                        article class="worksite-record" {
+                            span class="worksite-record__icon" { "◇" }
+                            div {
+                                strong { (&input.display_name) }
+                                small { (input.actual_size) " B · " (input_status_label(&input.status))
+                                    @if let Some(mode) = &input.import_mode { " · " (import_mode_label(mode)) }
+                                }
+                            }
+                            @if matches!(input.status.as_str(), "available" | "imported") {
+                                a href=(format!("/api/v1/projects/{}/sessions/{}/inputs/{}/content", snapshot.project.id, session.id, input.id)) { "下载" }
+                            }
+                        }
+                    }
+                }
+                @if session.status == "running" {
+                    form class="session-upload" data-input-upload
+                        data-project-id=(snapshot.project.id) data-session-id=(session.id) {
+                        label { span { "选择文件" } input type="file" name="file" required; }
+                        label { span { "Session 内路径（可选）" } input name="inbox_relative_path" placeholder="inputs/notes.md"; }
+                        button class="button button--secondary button--small" type="submit" { "验证并导入" }
+                        output data-upload-status aria-live="polite" {}
+                    }
+                }
+            }
+
+            section class="worksite-section" data-worksite-tools {
+                header { span class="eyebrow" { "TOOLS / BROWSER / TESTS" } b { (tool_calls.len()) } }
+                h4 { "工具行动与测试证据" }
+                @if tool_calls.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
+                    p class="worksite-empty-copy" { "尚无工具或测试记录。未来 Playwright 浏览器会以插件 ToolCall 出现在这里。" }
+                }
+                div class="worksite-records" {
+                    @for call in tool_calls {
+                        article class="tool-record" {
+                            div { strong { (&call.tool_name) } span class=(format!("goal-state goal-state--{}", goal_status_tone(&call.status))) { (tool_status_label(&call.status)) } }
+                            p { (&call.plugin_id) "@" (&call.plugin_version) }
+                            small { (format_date_time(call.completed_at)) }
+                        }
+                    }
+                    @for gate in &gates {
+                        @for evidence in json_value_strings(&gate.test_evidence.0) {
+                            article class="test-evidence-record" { span { "✓" } p { (evidence) } }
+                        }
+                    }
+                }
+            }
+        }
+
+        section class="worksite-section worksite-section--wide" data-worksite-contributions {
+            header { span class="eyebrow" { "CONTRIBUTIONS" } b { (contributions.len()) } }
+            h4 { "本 Session 留下的可回流产出" }
+            @if contributions.is_empty() {
+                p class="worksite-empty-copy" { "过程日志不会自动冒充产出；Agent 必须显式记录 Contribution。" }
+            }
+            div class="contribution-stack" {
+                @for item in &contributions {
+                    article {
+                        span { (goal_contribution_kind_label(&item.kind)) }
+                        strong { (&item.title) }
+                        p { (&item.body) }
+                    }
+                }
+            }
+        }
+
+        @for gate in &gates {
+            (review_gate_panel(snapshot, session, gate))
+        }
+
+        (session_action_panel(snapshot, session, contract, &contributions))
+    }
+}
+
+fn compact_list(title: &str, items: &[String]) -> Markup {
+    html! {
+        div {
+            b { (title) }
+            @if items.is_empty() { span { "未设定" } }
+            @for item in items { span { (item) } }
+        }
+    }
+}
+
+fn review_gate_panel(
+    snapshot: &GoalGraphSnapshot,
+    session: &GoalSessionRecord,
+    gate: &GoalReviewGateRecord,
+) -> Markup {
+    let decisions = snapshot
+        .review_decisions
+        .iter()
+        .filter(|item| item.review_gate_id == gate.id)
+        .collect::<Vec<_>>();
+    let candidate_ids = candidate_contribution_ids(gate);
+    let candidate_id_list = candidate_ids
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    html! {
+        section class=(format!("review-panel review-panel--{}", goal_status_tone(&gate.status)))
+            data-review-gate-id=(gate.id) {
+            header {
+                div { span class="eyebrow" { "PROPOSED MERGE" } h4 { "拟合并审核" } }
+                span class=(format!("goal-state goal-state--{}", goal_status_tone(&gate.status))) { (review_status_label(&gate.status)) }
+            }
+            p class="review-hash" { "候选快照 " code { (&gate.candidate_hash[..gate.candidate_hash.len().min(24)]) "…" } }
+            div class="review-evidence-grid" {
+                div { b { "Agent 自查" } p { (gate.self_check.0.get("summary").and_then(serde_json::Value::as_str).unwrap_or("未记录")) } }
+                div { b { "测试" } @for item in json_value_strings(&gate.test_evidence.0) { span { (item) } } }
+                div { b { "风险" } @if json_value_len(&gate.risks.0) == 0 { span { "未记录" } } @for item in json_value_strings(&gate.risks.0) { span { (item) } } }
+            }
+            @for decision in decisions {
+                article class="review-decision-record" {
+                    header { b { (review_actor_label(&decision.actor_role)) } span { (review_decision_label(&decision.decision)) } }
+                    p { (&decision.rationale) }
+                }
+            }
+            @if gate.status == "pending_ai_review" {
+                details class="review-action" open {
+                    summary { "独立审核 AI 记录建议" }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="review.ai_record";
+                        input type="hidden" name="review_gate_id" value=(gate.id);
+                        input type="hidden" name="return_session_id" value=(session.id);
+                        label { "审核身份" input name="reviewer_identity" required value="reviewer-v0.1"; }
+                        label { "建议"
+                            select name="review_decision" { option value="recommend_accept" { "建议接受" } option value="recommend_reject" { "建议退回" } }
+                        }
+                        label { "理由" textarea name="rationale" rows="3" required {} }
+                        label { "复验证据（每行一项）" textarea name="test_evidence" rows="2" {} }
+                        button class="button button--primary button--small" type="submit" { "保存独立审核" }
+                    }
+                }
+            } @else if gate.status == "pending_human_review" {
+                div class="human-review-actions" {
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="review.human_decide";
+                        input type="hidden" name="review_gate_id" value=(gate.id);
+                        input type="hidden" name="return_session_id" value=(session.id);
+                        input type="hidden" name="review_decision" value="accept";
+                        input type="hidden" name="selected_contribution_ids" value=(candidate_id_list.as_str());
+                        label { "接受理由" textarea name="rationale" rows="2" required {} }
+                        button class="button button--primary" type="submit" { "接受整条枝干产出" }
+                    }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="review.human_decide";
+                        input type="hidden" name="review_gate_id" value=(gate.id);
+                        input type="hidden" name="return_session_id" value=(session.id);
+                        input type="hidden" name="review_decision" value="reject";
+                        label { "退回理由" textarea name="rationale" rows="2" required {} }
+                        button class="button button--secondary" type="submit" { "退回到下一 Session" }
+                    }
+                }
+                @if candidate_ids.len() > 1 {
+                    details class="review-action" {
+                        summary { "部分接受（高级）" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="review.human_decide";
+                            input type="hidden" name="review_gate_id" value=(gate.id);
+                            input type="hidden" name="return_session_id" value=(session.id);
+                            input type="hidden" name="review_decision" value="partial_accept";
+                            label { "保留的 Contribution ID（至少一个，但不能全部）" textarea name="selected_contribution_ids" rows="3" required { (candidate_id_list.as_str()) } }
+                            label { "部分接受理由" textarea name="rationale" rows="2" required {} }
+                            button class="button button--secondary button--small" type="submit" { "部分接受" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn session_action_panel(
+    snapshot: &GoalGraphSnapshot,
+    session: &GoalSessionRecord,
+    contract: Option<&GoalContractVersionRecord>,
+    current_contributions: &[&crate::goal_models::GoalContributionRecord],
+) -> Markup {
+    let branch_contributions = snapshot
+        .contributions
+        .iter()
+        .filter(|item| item.goal_branch_id == session.goal_branch_id)
+        .collect::<Vec<_>>();
+    let contribution_ids = branch_contributions
+        .iter()
+        .map(|item| item.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let blocking_proposal = snapshot.proposals.iter().any(|proposal| {
+        proposal.parent_session_id == Some(session.id)
+            && matches!(proposal.status.as_str(), "draft" | "awaiting_approval")
+    });
+    let active_child = snapshot.branches.iter().any(|item| {
+        item.inherited_from_session_id == Some(session.id)
+            && matches!(
+                item.status.as_str(),
+                "active" | "waiting" | "review_pending"
+            )
+    });
+    let can_resume = matches!(
+        session.status.as_str(),
+        "waiting_branch_review"
+            | "waiting_dependency"
+            | "waiting_judgment"
+            | "exception_paused"
+            | "manual_paused"
+    ) && !blocking_proposal
+        && !active_child;
+
+    html! {
+        section class="session-actions" data-session-actions {
+            header {
+                div { span class="eyebrow" { "SESSION CONTROL" } h4 { "推进、拆分、暂停或收尾" } }
+                small { "一条枝干同时只有这一个可写现场" }
+            }
+            @if session.status == "running" {
+                div class="session-action-grid" {
+                    details class="session-action" open[current_contributions.is_empty()] {
+                        summary { "+ 记录 Contribution" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.add_contribution";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "类型"
+                                select name="contribution_kind" {
+                                    option value="code_change" { "代码变更" }
+                                    option value="finding" { "发现 / 结论" }
+                                    option value="evidence" { "证据 / 测试" }
+                                    option value="artifact" { "文件 / 产物" }
+                                    option value="decision" { "决定" }
+                                    option value="condition" { "客观条件" }
+                                    option value="other" { "其他" }
+                                }
+                            }
+                            label { "标题" input name="title" required; }
+                            label { "内容" textarea name="body" rows="3" required {} }
+                            button class="button button--primary button--small" type="submit" { "保存可回流产出" }
+                        }
+                    }
+                    details class="session-action" {
+                        summary { "⑂ 拆出子目标" }
+                        (proposal_editor(snapshot.project.id, "session.propose_child", None, Some(session.id), None))
+                    }
+                    details class="session-action" {
+                        summary { "? 请你做方向 / 品味判断" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.request_judgment";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "需要你判断什么？" textarea name="question" rows="3" required {} }
+                            label { "候选（每行一项）" textarea name="candidates" rows="2" {} }
+                            label { "现有证据" textarea name="evidence" rows="2" {} }
+                            label { "AI 建议" textarea name="recommendation" rows="2" {} }
+                            button class="button button--secondary button--small" type="submit" { "保存现场并暂停" }
+                        }
+                    }
+                    details class="session-action" {
+                        summary { "! 报告异常并安全暂停" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.pause_exception";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "异常原因" textarea name="reason" rows="2" required {} }
+                            label { "已保存到哪个安全点" textarea name="safe_checkpoint" rows="2" required {} }
+                            label { "已尝试什么" textarea name="attempted" rows="2" required {} }
+                            label { "继续的风险" textarea name="risk" rows="2" required {} }
+                            label { "需要你做什么" textarea name="user_action" rows="2" required {} }
+                            label { "AI 建议处理" textarea name="recommendation" rows="2" required {} }
+                            button class="button button--secondary button--small" type="submit" { "标记异常暂停" }
+                        }
+                    }
+                    details class="session-action" {
+                        summary { "Ⅱ 你手动暂停这个 Session" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.pause_manual";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "暂停原因" textarea name="reason" rows="2" required {} }
+                            button class="button button--secondary button--small" type="submit" { "暂停" }
+                        }
+                    }
+                    details class="session-action session-action--merge" open[!current_contributions.is_empty()] {
+                        summary { "→ Agent 声明整条目标枝干已达成" }
+                        @if branch_contributions.is_empty() {
+                            p class="worksite-empty-copy" { "至少要先记录一项 Contribution。" }
+                        } @else {
+                            form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                                input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                                input type="hidden" name="action" value="merge.propose";
+                                input type="hidden" name="session_id" value=(session.id);
+                                input type="hidden" name="contract_version_id" value=(contract.map(|item| item.id).unwrap_or(session.contract_version_id));
+                                input type="hidden" name="contribution_ids" value=(contribution_ids.as_str());
+                                div class="candidate-contributions" {
+                                    b { "冻结以下 Contribution" }
+                                    @for item in &branch_contributions { span { (&item.title) } }
+                                }
+                                label { "测试 / 浏览器证据（每行一项）" textarea name="test_evidence" rows="3" required {} }
+                                label { "已知风险（每行一项，可留空）" textarea name="risks" rows="2" {} }
+                                label { "Agent 逐条契约自查" textarea name="self_check" rows="3" required {} }
+                                button class="button button--primary" type="submit" { "冻结现场并进入拟合并审核" }
+                            }
+                        }
+                    }
+                }
+            } @else if can_resume {
+                div class="resume-card" {
+                    div { b { "现在可以显式恢复" } p { "填写你的判断或问题处理结果，再交还这条枝干的写权。" } }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="session.resume";
+                        input type="hidden" name="session_id" value=(session.id);
+                        label { "解决说明" textarea name="resolution" rows="3" required {} }
+                        button class="button button--primary" type="submit" { "恢复 Session" }
+                    }
+                }
+            } @else if session.status == "review_rejected" {
+                div class="resume-card" {
+                    div { b { "已退回，在同一目标枝干继续" } p { "上一 Session 保持不变；新 Session 继承契约、上下文与固定工具环境。" } }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="session.start_next";
+                        input type="hidden" name="goal_branch_id" value=(session.goal_branch_id);
+                        input type="hidden" name="previous_session_id" value=(session.id);
+                        label { "下一 Session 分配说明" textarea name="assignment" rows="3" required {} }
+                        label { "Agent 身份（可选）" input name="agent_identity" value=(session.agent_identity.as_deref().unwrap_or("")); }
+                        button class="button button--primary" type="submit" { "创建下一 Session" }
+                    }
+                }
+            } @else {
+                div class="session-terminal-note" {
+                    b { (goal_status_label(&session.status)) }
+                    p {
+                        @if blocking_proposal { "先在上方决定子目标 BranchProposal。" }
+                        @else if active_child { "子目标仍在推进或审核，父 Session 保持只读。" }
+                        @else if session.status == "awaiting_merge_review" { "候选现场已冻结，只能审核，不能继续写入。" }
+                        @else { "这个 Session 已结束或当前不可写。" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn latest_proposal_revision<'a>(
+    snapshot: &'a GoalGraphSnapshot,
+    proposal: &GoalProposalRecord,
+) -> Option<&'a GoalProposalRevisionRecord> {
+    snapshot
+        .proposal_revisions
+        .iter()
+        .find(|item| item.proposal_id == proposal.id && item.revision == proposal.current_revision)
+}
+
+fn candidate_contribution_ids(gate: &GoalReviewGateRecord) -> Vec<Uuid> {
+    gate.candidate_snapshot
+        .0
+        .get("contributionIds")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect()
+}
+
+fn json_value_strings(value: &serde_json::Value) -> Vec<&str> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
+}
+
+fn json_value_lines(value: &serde_json::Value) -> String {
+    json_value_strings(value).join("\n")
+}
+
+fn json_value_len(value: &serde_json::Value) -> usize {
+    value.as_array().map(Vec::len).unwrap_or_default()
+}
+
+fn json_array_len(value: &serde_json::Value, key: &str) -> usize {
+    value.get(key).map(json_value_len).unwrap_or_default()
+}
+
+fn goal_status_label(status: &str) -> &str {
+    match status {
+        "draft" => "草案",
+        "awaiting_approval" => "等待你批准",
+        "approved" => "已批准",
+        "cancelled" => "已取消",
+        "active" | "running" => "推进中",
+        "waiting" | "waiting_branch_review" | "waiting_dependency" => "等待子目标",
+        "waiting_judgment" => "等待你判断",
+        "exception_paused" => "异常暂停",
+        "manual_paused" => "手动暂停",
+        "review_pending" | "awaiting_merge_review" => "拟合并审核",
+        "review_rejected" | "rejected" => "已退回",
+        "accepted" => "已接受",
+        "integrated" => "已回流父目标",
+        "completed" => "已完成",
+        "stopped" => "已停止",
+        "archived" => "已归档",
+        _ => status,
+    }
+}
+
+fn goal_status_tone(status: &str) -> &str {
+    match status {
+        "active" | "running" | "approved" | "accepted" | "integrated" | "completed"
+        | "succeeded" => "active",
+        "waiting"
+        | "waiting_branch_review"
+        | "waiting_dependency"
+        | "waiting_judgment"
+        | "review_pending"
+        | "awaiting_merge_review"
+        | "pending_ai_review"
+        | "pending_human_review" => "waiting",
+        "exception_paused" | "review_rejected" | "rejected" | "failed" => "danger",
+        "manual_paused" | "stopped" | "archived" | "cancelled" => "muted",
+        _ => "shaping",
+    }
+}
+
+fn proposal_status_label(status: &str) -> &str {
+    goal_status_label(status)
+}
+
+fn review_status_label(status: &str) -> &str {
+    match status {
+        "pending_ai_review" => "等独立 AI",
+        "pending_human_review" => "等你决定",
+        "accepted" => "已接受",
+        "partially_accepted" => "部分接受",
+        "rejected" => "已退回",
+        "abandoned" => "已放弃",
+        "withdrawn" => "已撤回",
+        _ => status,
+    }
+}
+
+fn review_actor_label(actor: &str) -> &str {
+    match actor {
+        "review_ai" => "独立审核 AI",
+        "human" => "你的最终决定",
+        _ => actor,
+    }
+}
+
+fn review_decision_label(decision: &str) -> &str {
+    match decision {
+        "recommend_accept" => "建议接受",
+        "recommend_reject" => "建议退回",
+        "accept" => "接受",
+        "partial_accept" => "部分接受",
+        "reject" => "退回",
+        "abandon" => "放弃",
+        _ => decision,
+    }
+}
+
+fn attention_kind_label(kind: &str) -> &str {
+    match kind {
+        "branch_review" => "拟分枝审核",
+        "judgment" => "方向判断",
+        "exception" => "异常处理",
+        "manual_pause" => "手动暂停",
+        "merge_review" => "拟合并审核",
+        _ => kind,
+    }
+}
+
+fn goal_contribution_kind_label(kind: &str) -> &str {
+    match kind {
+        "code_change" => "代码变更",
+        "finding" => "发现",
+        "evidence" => "证据",
+        "artifact" => "产物",
+        "decision" => "决定",
+        "condition" => "条件",
+        _ => "其他",
+    }
+}
+
+fn input_status_label(status: &str) -> &str {
+    match status {
+        "staging" => "上传中",
+        "verified" => "已验证",
+        "available" => "可导入",
+        "imported" => "已导入",
+        "rejected" => "已拒绝",
+        "quarantined" => "已隔离",
+        _ => status,
+    }
+}
+
+fn import_mode_label(mode: &str) -> &str {
+    match mode {
+        "worktree_copy" => "worktree 副本",
+        "artifact_reference" => "产物引用",
+        "read_only_mount" => "只读挂载",
+        _ => mode,
+    }
+}
+
+fn tool_status_label(status: &str) -> &str {
+    match status {
+        "succeeded" => "成功",
+        "failed" => "失败",
+        "timed_out" => "超时",
+        "cancelled" => "已取消",
+        "workspace_conflict" => "工作区冲突",
+        "policy_denied" => "策略拒绝",
+        _ => status,
+    }
+}
+
+fn goal_short_title(value: &str, max: usize) -> String {
+    let value = value.trim();
+    if value.chars().count() <= max {
+        return value.to_owned();
+    }
+    value
+        .chars()
+        .take(max.saturating_sub(1))
+        .chain(std::iter::once('…'))
+        .collect()
 }
 
 fn graph_view(snapshot: &ProjectSnapshot, requested_node: Option<Uuid>) -> Markup {
