@@ -13,6 +13,7 @@ mod migrations;
 mod models;
 pub mod tooling;
 mod web;
+pub mod workspace;
 
 use std::sync::Arc;
 
@@ -47,6 +48,15 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&config.artifact_root)
         .await
         .context("创建产物目录失败")?;
+    tokio::fs::create_dir_all(&config.repository_root)
+        .await
+        .context("创建托管 Git 仓库目录失败")?;
+    tokio::fs::create_dir_all(&config.worktree_root)
+        .await
+        .context("创建目标 worktree 目录失败")?;
+    tokio::fs::create_dir_all(&config.runner_output_root)
+        .await
+        .context("创建 Runner 输出目录失败")?;
 
     let bind = config.bind.clone();
     let state = Arc::new(AppState { pool, config });

@@ -300,7 +300,15 @@ pub async fn create_snapshot(
     .bind(branch.id)
     .fetch_all(&mut **transaction)
     .await?;
-    let permissions = match &environment {
+    let workspace_policy: Option<(Uuid, String, Json<Value>)> = sqlx::query_as(
+        "SELECT id, policy_hash, policy FROM goal_workspace_policies \
+         WHERE goal_branch_id = $1 AND project_id = $2",
+    )
+    .bind(branch.id)
+    .bind(project_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let tool_environment = match &environment {
         Some((id, fingerprint, manifest)) => json!({
             "mode": "fixed_environment_manifest",
             "environmentManifestId": id,
@@ -311,8 +319,26 @@ pub async fn create_snapshot(
             "mode": "unbound_conservative",
             "network": "denied_until_bound",
             "externalWrites": false,
+            "note": "未绑定 EnvironmentManifest 时不推断任何工具环境权限",
+        }),
+    };
+    let permissions = match workspace_policy {
+        Some((id, policy_hash, policy)) => json!({
+            "mode": "branch_proposal_policy",
+            "workspacePolicyId": id,
+            "policyHash": policy_hash,
+            "policy": policy.0,
+            "toolEnvironment": tool_environment,
+        }),
+        None => json!({
+            "mode": "legacy_unprovisioned_conservative",
+            "network": "denied",
+            "externalWrites": [],
             "workspaceWrites": [],
-            "note": "未绑定 EnvironmentManifest 时不推断任何外部写权限",
+            "paidOperations": false,
+            "deployment": false,
+            "toolEnvironment": tool_environment,
+            "note": "旧枝干尚未固定 WorkspacePolicy；在安全补全前不给予写权限",
         }),
     };
     let (ancestor_contracts, parent_required_context_hash) =

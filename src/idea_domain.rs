@@ -390,6 +390,7 @@ mod tests {
                 exploration_plan: vec![],
                 context_inheritance: serde_json::json!({}),
                 tool_requirements: vec![],
+                capability_policy: Default::default(),
                 inferences: vec![],
                 revision_reason: None,
             },

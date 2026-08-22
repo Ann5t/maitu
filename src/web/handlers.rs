@@ -11,11 +11,13 @@ use chrono::Utc;
 use maud::Markup;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tracing::error;
 use uuid::Uuid;
 
 use crate::{
     application::{
         context_memory, goal_branches, graph, ideas, inputs, plugins, projects, workbench,
+        workspaces,
     },
     artifacts::ArtifactStore,
     domain::{
@@ -27,6 +29,7 @@ use crate::{
     idea_domain::{AttachIdeaSourceQuery, IdeaCommandRequest},
     input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
     tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
+    workspace::{FailRunnerJobRequest, FinalizeRunnerJobRequest, PrepareRunnerJobRequest},
 };
 
 use super::{AppState, views};
@@ -517,8 +520,8 @@ pub async fn goal_command_form(
     let payload = goal_form_payload(&form);
     let result = match payload {
         Ok(payload) => {
-            goal_branches::run_command(
-                &state.pool,
+            run_goal_command_with_workspace(
+                &state,
                 project_id,
                 goal_branches::GoalCommandRequest {
                     client_request_id: form.client_request_id.unwrap_or_else(Uuid::new_v4),
@@ -1129,8 +1132,123 @@ pub async fn api_goal_command(
     Path(project_id): Path<Uuid>,
     Json(request): Json<goal_branches::GoalCommandRequest>,
 ) -> AppResult<Json<Value>> {
-    let response = goal_branches::run_command(&state.pool, project_id, request).await?;
+    let response = run_goal_command_with_workspace(&state, project_id, request).await?;
     Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_goal_workspace(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, goal_branch_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let detail =
+        workspaces::get_workspace(&state.pool, &state.config, project_id, goal_branch_id).await?;
+    Ok(Json(serde_json::to_value(detail)?))
+}
+
+pub async fn api_prepare_runner_job(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<PrepareRunnerJobRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let response =
+        workspaces::prepare_runner_job(&state.pool, &state.config, project_id, session_id, request)
+            .await?;
+    let status = if response.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((status, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_finalize_runner_job(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, job_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(request): Json<FinalizeRunnerJobRequest>,
+) -> AppResult<Json<Value>> {
+    let outcome = workspaces::finalize_runner_job(
+        &state.pool,
+        &state.config,
+        project_id,
+        session_id,
+        job_id,
+        request,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(outcome)?))
+}
+
+pub async fn api_fail_runner_job(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, job_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(request): Json<FailRunnerJobRequest>,
+) -> AppResult<Json<Value>> {
+    let outcome =
+        workspaces::fail_runner_job(&state.pool, project_id, session_id, job_id, request).await?;
+    Ok(Json(serde_json::to_value(outcome)?))
+}
+
+async fn run_goal_command_with_workspace(
+    state: &AppState,
+    project_id: Uuid,
+    request: goal_branches::GoalCommandRequest,
+) -> AppResult<goal_branches::GoalCommandResponse> {
+    let action = request.action.clone();
+    let client_request_id = request.client_request_id;
+    let mut response = goal_branches::run_command(&state.pool, project_id, request).await?;
+    if action == "proposal.approve" {
+        let goal_branch_id = response
+            .result
+            .get("goalBranchId")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .ok_or_else(|| AppError::internal("Proposal 批准结果缺少 GoalBranch ID"))?;
+        let session_id = response
+            .result
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .ok_or_else(|| AppError::internal("Proposal 批准结果缺少 Session ID"))?;
+        let workspace = match workspaces::provision_goal_branch(
+            &state.pool,
+            &state.config,
+            project_id,
+            goal_branch_id,
+            session_id,
+            client_request_id,
+        )
+        .await
+        {
+            Ok(workspace) => workspace,
+            Err(provision_error) => {
+                if let Err(pause_error) = workspaces::pause_failed_workspace_provision(
+                    &state.pool,
+                    project_id,
+                    goal_branch_id,
+                    session_id,
+                    client_request_id,
+                    provision_error.code(),
+                    &provision_error.public_message(),
+                )
+                .await
+                {
+                    error!(
+                        error = %pause_error,
+                        goal_branch_id = %goal_branch_id,
+                        session_id = %session_id,
+                        "worktree 准备失败后无法持久化安全暂停"
+                    );
+                }
+                return Err(provision_error);
+            }
+        };
+        response
+            .result
+            .as_object_mut()
+            .ok_or_else(|| AppError::internal("Proposal 批准结果不是可扩展的 JSON 对象"))?
+            .insert("workspace".to_owned(), serde_json::to_value(workspace)?);
+    }
+    Ok(response)
 }
 
 pub async fn api_session_context(

@@ -54,6 +54,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0008_context_memory.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -77,6 +80,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0008_context_memory.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
@@ -120,6 +126,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0008_context_memory.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -153,13 +162,21 @@ migration_idea_table_count="$(docker exec "$migration_container" \
      'project_origins', 'project_origin_ideas', 'idea_command_receipts', 'idea_events',
      'idea_source_objects', 'idea_revision_sources'
    )")"
+migration_workspace_table_count="$(docker exec "$migration_container" \
+  psql -U fudian_test -d legacy -Atc \
+  "SELECT count(*) FROM information_schema.tables
+   WHERE table_schema = 'public' AND table_name IN (
+     'project_git_repositories', 'goal_workspace_policies', 'goal_workspaces',
+     'workspace_operations', 'workspace_snapshots', 'workspace_write_leases',
+     'runner_jobs', 'runner_job_files'
+   )")"
 
 if [[ "$migration_counts_before" != "$migration_counts_after" ]]; then
   echo "legacy counts changed: $migration_counts_before -> $migration_counts_after" >&2
   exit 1
 fi
-if [[ "$migration_goal_table_count" != 26 ]]; then
-  echo "expected 26 goal tables, found $migration_goal_table_count" >&2
+if [[ "$migration_goal_table_count" != 28 ]]; then
+  echo "expected 28 goal tables, found $migration_goal_table_count" >&2
   exit 1
 fi
 if [[ "$migration_tooling_table_count" != 5 ]]; then
@@ -172,6 +189,10 @@ if [[ "$migration_input_table_count" != 2 ]]; then
 fi
 if [[ "$migration_idea_table_count" != 12 ]]; then
   echo "expected 12 idea/project-origin tables, found $migration_idea_table_count" >&2
+  exit 1
+fi
+if [[ "$migration_workspace_table_count" != 8 ]]; then
+  echo "expected 8 workspace/Runner tables, found $migration_workspace_table_count" >&2
   exit 1
 fi
 

@@ -22,6 +22,7 @@ use crate::{
         GoalSessionRecord,
     },
     models::Project,
+    workspace::WorkspaceCapabilityPolicy,
 };
 
 type GoalTransaction<'a> = Transaction<'a, Postgres>;
@@ -270,6 +271,7 @@ struct ProposalRevisionRow {
     contract: Json<Value>,
     expected_contributions: Json<Value>,
     context_inheritance: Json<Value>,
+    capability_policy: Json<Value>,
     inferences: Json<Value>,
 }
 
@@ -1101,6 +1103,17 @@ async fn approve_proposal(
         .extend(proposal_contributions);
     contract.expected_contributions.sort();
     contract.expected_contributions.dedup();
+    let capability_policy =
+        serde_json::from_value::<WorkspaceCapabilityPolicy>(revision.capability_policy.0.clone())
+            .map_err(|_| {
+                AppError::bad_request(
+                    "invalid_workspace_policy",
+                    "BranchProposal 权限策略结构不合法",
+                )
+            })?
+            .normalize()?;
+    let capability_policy_value = serde_json::to_value(&capability_policy)?;
+    let capability_policy_hash = canonical_json_sha256(&capability_policy_value)?;
 
     if proposal.parent_goal_branch_id.is_none() {
         let root_exists: bool = sqlx::query_scalar(
@@ -1171,6 +1184,20 @@ async fn approve_proposal(
     .bind(session_id)
     .bind(&git_branch_name)
     .bind(inherited_environment.as_ref().map(|binding| &binding.1))
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO goal_workspace_policies \
+         (id, project_id, goal_branch_id, source_proposal_id, source_proposal_revision, \
+          policy, policy_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(goal_branch_id)
+    .bind(proposal.id)
+    .bind(proposal.current_revision)
+    .bind(Json(capability_policy_value))
+    .bind(capability_policy_hash)
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
@@ -3355,7 +3382,8 @@ async fn load_proposal_revision(
     revision: i32,
 ) -> AppResult<ProposalRevisionRow> {
     sqlx::query_as::<_, ProposalRevisionRow>(
-        "SELECT why_needed, contract, expected_contributions, context_inheritance, inferences \
+        "SELECT why_needed, contract, expected_contributions, context_inheritance, \
+                capability_policy, inferences \
          FROM goal_branch_proposal_revisions \
          WHERE proposal_id = $1 AND revision = $2",
     )
@@ -3445,9 +3473,9 @@ async fn insert_proposal_revision(
     sqlx::query(
         "INSERT INTO goal_branch_proposal_revisions \
          (id, proposal_id, revision, why_needed, contract, expected_contributions, \
-          exploration_plan, context_inheritance, tool_requirements, inferences, \
+          exploration_plan, context_inheritance, tool_requirements, capability_policy, inferences, \
           revision_reason, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(revision_id)
     .bind(proposal_id)
@@ -3460,6 +3488,7 @@ async fn insert_proposal_revision(
     .bind(Json(serde_json::to_value(&revision.exploration_plan)?))
     .bind(Json(revision.context_inheritance.clone()))
     .bind(Json(serde_json::to_value(&revision.tool_requirements)?))
+    .bind(Json(serde_json::to_value(&revision.capability_policy)?))
     .bind(Json(serde_json::to_value(&revision.inferences)?))
     .bind(&revision.revision_reason)
     .bind(created_by)

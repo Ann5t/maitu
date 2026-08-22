@@ -916,9 +916,9 @@ async fn approve_project_proposal(
     sqlx::query(
         "INSERT INTO goal_branch_proposal_revisions \
          (id, proposal_id, revision, why_needed, contract, expected_contributions, \
-          exploration_plan, context_inheritance, tool_requirements, inferences, \
+          exploration_plan, context_inheritance, tool_requirements, capability_policy, inferences, \
           revision_reason, created_by) \
-         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, 'human')",
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'human')",
     )
     .bind(Uuid::new_v4())
     .bind(root_proposal_id)
@@ -928,6 +928,7 @@ async fn approve_project_proposal(
     .bind(Json(&root.exploration_plan))
     .bind(Json(&root.context_inheritance))
     .bind(Json(&root.tool_requirements))
+    .bind(Json(&root.capability_policy))
     .bind(Json(&root.inferences))
     .bind(&root.revision_reason)
     .execute(&mut **transaction)

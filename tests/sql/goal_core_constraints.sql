@@ -549,6 +549,329 @@ BEGIN
 END;
 $$;
 
+INSERT INTO project_git_repositories
+  (id, project_id, storage_key, default_branch, default_head_commit, object_format)
+VALUES (
+  '00000000-0000-0000-0000-000000000090',
+  '00000000-0000-0000-0000-000000000001',
+  'projects/00000000-0000-0000-0000-000000000001.git',
+  'main', '1111111111111111111111111111111111111111', 'sha1'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO goal_workspace_policies
+      (id, project_id, goal_branch_id, source_proposal_id,
+       source_proposal_revision, policy, policy_hash)
+    VALUES (
+      '00000000-0000-0000-0000-000000000097',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000040', 1, '{}',
+      'sha256:4444444444444444444444444444444444444444444444444444444444444444'
+    );
+    RAISE EXCEPTION 'workspace policy accepted the wrong origin Proposal';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO goal_workspace_policies
+  (id, project_id, goal_branch_id, source_proposal_id,
+   source_proposal_revision, policy, policy_hash)
+VALUES (
+  '00000000-0000-0000-0000-000000000091',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000010', 1, '{}',
+  'sha256:4444444444444444444444444444444444444444444444444444444444444444'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO goal_workspaces
+      (id, project_id, goal_branch_id, repository_id, git_branch_name,
+       worktree_key, status)
+    VALUES (
+      '00000000-0000-0000-0000-000000000098',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000090',
+      'goal/00000000-0000-0000-0000-000000000020',
+      'projects/00000000-0000-0000-0000-000000000002/goals/00000000-0000-0000-0000-000000000020',
+      'provisioning'
+    );
+    RAISE EXCEPTION 'cross-project GoalWorkspace was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO goal_workspaces
+  (id, project_id, goal_branch_id, repository_id, git_branch_name,
+   worktree_key, base_commit, head_commit, tree_id, workspace_snapshot,
+   dirty, status)
+VALUES (
+  '00000000-0000-0000-0000-000000000092',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000090',
+  'goal/00000000-0000-0000-0000-000000000020',
+  'projects/00000000-0000-0000-0000-000000000001/goals/00000000-0000-0000-0000-000000000020',
+  '1111111111111111111111111111111111111111',
+  '1111111111111111111111111111111111111111',
+  '2222222222222222222222222222222222222222',
+  'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+  false, 'ready'
+);
+
+INSERT INTO workspace_operations
+  (id, project_id, goal_branch_id, workspace_id, operation_kind, status,
+   request_hash, expected_head_commit, candidate_commit, completed_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000093',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000092',
+  'provision', 'applied',
+  'sha256:5555555555555555555555555555555555555555555555555555555555555555',
+  '1111111111111111111111111111111111111111',
+  '1111111111111111111111111111111111111111', now()
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO workspace_operations
+      (id, project_id, goal_branch_id, workspace_id, operation_kind, status,
+       request_hash)
+    VALUES (
+      '00000000-0000-0000-0000-000000000099',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000092',
+      'reconcile', 'planned',
+      'sha256:5555555555555555555555555555555555555555555555555555555555555555'
+    );
+    RAISE EXCEPTION 'cross-project WorkspaceOperation was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO workspace_snapshots
+  (id, project_id, goal_branch_id, session_id, workspace_id, operation_id,
+   head_commit, tree_id, dirty, snapshot_hash)
+VALUES (
+  '00000000-0000-0000-0000-000000000094',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022',
+  '00000000-0000-0000-0000-000000000092',
+  '00000000-0000-0000-0000-000000000093',
+  '1111111111111111111111111111111111111111',
+  '2222222222222222222222222222222222222222', false,
+  'sha256:3333333333333333333333333333333333333333333333333333333333333333'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE goal_workspace_policies SET policy = '{"deployment":true}'
+    WHERE id = '00000000-0000-0000-0000-000000000091';
+    RAISE EXCEPTION 'immutable WorkspacePolicy accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE workspace_snapshots SET dirty = true
+    WHERE id = '00000000-0000-0000-0000-000000000094';
+    RAISE EXCEPTION 'immutable WorkspaceSnapshot accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO workspace_write_leases
+  (id, project_id, goal_branch_id, session_id, workspace_id,
+   client_request_id, request_hash, status, fencing_token,
+   renewal_token_digest, base_commit, base_workspace_snapshot,
+   allowed_writes, capabilities, resource_policy, output_key,
+   soft_expires_at, hard_expires_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000095',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022',
+  '00000000-0000-0000-0000-000000000092',
+  '00000000-0000-0000-0000-000000000195',
+  'sha256:6666666666666666666666666666666666666666666666666666666666666666',
+  'active', 1,
+  'sha256:7777777777777777777777777777777777777777777777777777777777777777',
+  '1111111111111111111111111111111111111111',
+  'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+  '["docs/**"]', '{}', '{}',
+  'jobs/00000000-0000-0000-0000-000000000095',
+  now() + interval '5 minutes', now() + interval '10 minutes'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO workspace_write_leases
+      (id, project_id, goal_branch_id, session_id, workspace_id,
+       client_request_id, request_hash, status, fencing_token,
+       renewal_token_digest, base_commit, base_workspace_snapshot,
+       allowed_writes, capabilities, resource_policy, output_key,
+       soft_expires_at, hard_expires_at)
+    VALUES (
+      '00000000-0000-0000-0000-000000000101',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000022',
+      '00000000-0000-0000-0000-000000000092',
+      '00000000-0000-0000-0000-000000000201',
+      'sha256:8888888888888888888888888888888888888888888888888888888888888888',
+      'active', 2,
+      'sha256:9999999999999999999999999999999999999999999999999999999999999999',
+      '1111111111111111111111111111111111111111',
+      'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+      '["docs/**"]', '{}', '{}',
+      'jobs/00000000-0000-0000-0000-000000000101',
+      now() + interval '5 minutes', now() + interval '10 minutes'
+    );
+    RAISE EXCEPTION 'second active Workspace Lease was accepted';
+  EXCEPTION WHEN unique_violation THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE workspace_write_leases SET fencing_token = 9
+    WHERE id = '00000000-0000-0000-0000-000000000095';
+    RAISE EXCEPTION 'Workspace Lease identity accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE workspace_write_leases SET delete_paths = '["docs/old.md"]'
+    WHERE id = '00000000-0000-0000-0000-000000000095';
+    RAISE EXCEPTION 'Workspace Lease deletion identity accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO runner_jobs
+  (id, project_id, goal_branch_id, session_id, workspace_id, lease_id,
+   client_request_id, request_hash, status, spec, spec_hash, runtime_digest)
+VALUES (
+  '00000000-0000-0000-0000-000000000096',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022',
+  '00000000-0000-0000-0000-000000000092',
+  '00000000-0000-0000-0000-000000000095',
+  '00000000-0000-0000-0000-000000000196',
+  'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  'prepared', '{}',
+  'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+);
+
+INSERT INTO runner_job_files
+  (runner_job_id, project_id, path, sha256, size_bytes, executable)
+VALUES (
+  '00000000-0000-0000-0000-000000000096',
+  '00000000-0000-0000-0000-000000000001',
+  'docs/readme..md',
+  'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  12, false
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO runner_job_files
+      (runner_job_id, project_id, path, sha256, size_bytes, executable)
+    VALUES (
+      '00000000-0000-0000-0000-000000000096',
+      '00000000-0000-0000-0000-000000000001', '.git/config',
+      'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      1, false
+    );
+    RAISE EXCEPTION 'Runner output accepted reserved .git metadata path';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  BEGIN
+    INSERT INTO runner_job_files
+      (runner_job_id, project_id, path, sha256, size_bytes, executable)
+    VALUES (
+      '00000000-0000-0000-0000-000000000096',
+      '00000000-0000-0000-0000-000000000001', 'docs/README..md',
+      'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      1, false
+    );
+    RAISE EXCEPTION 'Runner output accepted a case-folded path collision';
+  EXCEPTION WHEN unique_violation THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE runner_job_files SET size_bytes = 99
+    WHERE runner_job_id = '00000000-0000-0000-0000-000000000096';
+    RAISE EXCEPTION 'immutable RunnerJobFile accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE runner_jobs SET runtime_digest =
+      'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+    WHERE id = '00000000-0000-0000-0000-000000000096';
+    RAISE EXCEPTION 'RunnerJob request identity accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+UPDATE runner_jobs
+SET status = 'failed', result = '{"reason":"constraint test"}', completed_at = now()
+WHERE id = '00000000-0000-0000-0000-000000000096';
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE runner_jobs SET result = '{"reason":"tampered"}'
+    WHERE id = '00000000-0000-0000-0000-000000000096';
+    RAISE EXCEPTION 'terminal RunnerJob accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+UPDATE workspace_write_leases
+SET status = 'released', completed_at = now()
+WHERE id = '00000000-0000-0000-0000-000000000095';
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE workspace_write_leases SET completed_at = now() + interval '1 minute'
+    WHERE id = '00000000-0000-0000-0000-000000000095';
+    RAISE EXCEPTION 'terminal Workspace Lease accepted mutation';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
 DO $$
 BEGIN
   IF (SELECT count(*) FROM goal_branches) <> 1

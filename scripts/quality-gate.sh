@@ -16,6 +16,7 @@ cd "$quality_repo_root"
 docker pull postgres:17-alpine >/dev/null
 docker pull mcr.microsoft.com/playwright:v1.62.0-noble >/dev/null
 docker build --target development --tag fudian-nextgen-app:latest .
+docker build --target runner-runtime --tag fudian-nextgen-runner:latest .
 
 docker run --rm \
   --mount "type=bind,src=$quality_repo_root,dst=/app" \
@@ -31,6 +32,7 @@ docker run --rm \
 ./scripts/test-goal-migrations.sh
 ./scripts/test-goal-http.sh
 ./scripts/test-context-http.sh
+./scripts/test-workspace-runner-http.sh
 ./scripts/test-ideas-http.sh
 ./scripts/test-tooling-http.sh
 ./scripts/test-inputs-http.sh

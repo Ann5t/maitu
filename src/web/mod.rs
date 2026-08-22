@@ -97,6 +97,22 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::api_goal_command),
         )
         .route(
+            "/api/v1/projects/{project_id}/goal-branches/{goal_branch_id}/workspace",
+            get(handlers::api_goal_workspace),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/runner-jobs",
+            post(handlers::api_prepare_runner_job),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/runner-jobs/{job_id}/finalize",
+            post(handlers::api_finalize_runner_job),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/runner-jobs/{job_id}/fail",
+            post(handlers::api_fail_runner_job),
+        )
+        .route(
             "/api/v1/projects/{project_id}/sessions/{session_id}/context",
             get(handlers::api_session_context),
         )

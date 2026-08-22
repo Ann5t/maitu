@@ -33,6 +33,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0008_context_memory.sql",
         include_str!("../migrations/0008_context_memory.sql"),
     ),
+    (
+        "0009_workspace_runner.sql",
+        include_str!("../migrations/0009_workspace_runner.sql"),
+    ),
 ];
 
 pub async fn run(pool: &PgPool) -> Result<(), sqlx::Error> {

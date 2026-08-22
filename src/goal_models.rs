@@ -35,6 +35,7 @@ pub struct GoalProposalRevisionRecord {
     pub exploration_plan: Json<Value>,
     pub context_inheritance: Json<Value>,
     pub tool_requirements: Json<Value>,
+    pub capability_policy: Json<Value>,
     pub inferences: Json<Value>,
     pub revision_reason: Option<String>,
     pub created_by: String,
@@ -162,6 +163,7 @@ pub struct GoalContributionRecord {
     pub artifact_id: Option<Uuid>,
     pub evidence_refs: Json<Value>,
     pub supersedes_id: Option<Uuid>,
+    pub runner_job_id: Option<Uuid>,
     pub content_hash: String,
     pub created_at: DateTime<Utc>,
 }

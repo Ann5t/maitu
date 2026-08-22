@@ -40,6 +40,14 @@ impl AppError {
         }
     }
 
+    pub fn forbidden(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Operation {
+            status: StatusCode::FORBIDDEN,
+            code,
+            message: message.into(),
+        }
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::Operation {
             status: StatusCode::NOT_FOUND,

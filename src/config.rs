@@ -8,6 +8,10 @@ pub struct Config {
     pub database_url: String,
     pub database_max_connections: u32,
     pub artifact_root: PathBuf,
+    pub repository_root: PathBuf,
+    pub worktree_root: PathBuf,
+    pub runner_output_root: PathBuf,
+    pub runner_runtime_digest: String,
     pub input_max_bytes: u64,
     pub input_chunk_max_bytes: usize,
     pub input_inbox_copy_max_bytes: u64,
@@ -20,6 +24,30 @@ impl Config {
         let artifact_root = env::var("ARTIFACT_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data/artifacts"));
+        let data_root = artifact_root
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("./data"));
+        let repository_root = env::var("REPOSITORY_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| data_root.join("repositories"));
+        let worktree_root = env::var("WORKTREE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| data_root.join("worktrees"));
+        let runner_output_root = env::var("RUNNER_OUTPUT_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| data_root.join("runner"));
+        let runner_runtime_digest = env::var("RUNNER_RUNTIME_DIGEST").unwrap_or_else(|_| {
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned()
+        });
+        if runner_runtime_digest.len() != 71
+            || !runner_runtime_digest.starts_with("sha256:")
+            || !runner_runtime_digest[7..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+        {
+            bail!("RUNNER_RUNTIME_DIGEST 必须是规范 sha256 摘要");
+        }
         let database_max_connections = env::var("DATABASE_MAX_CONNECTIONS")
             .unwrap_or_else(|_| "10".to_owned())
             .parse::<u32>()
@@ -42,6 +70,10 @@ impl Config {
             database_url,
             database_max_connections,
             artifact_root,
+            repository_root,
+            worktree_root,
+            runner_output_root,
+            runner_runtime_digest,
             input_max_bytes,
             input_chunk_max_bytes,
             input_inbox_copy_max_bytes,

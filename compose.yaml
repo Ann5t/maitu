@@ -3,6 +3,10 @@ name: fudian-nextgen
 x-app-environment: &app-environment
   DATABASE_URL: ${DATABASE_URL:-postgres://fudian_nextgen:fudian_nextgen_dev@postgres:5432/fudian_nextgen}
   ARTIFACT_ROOT: /data/artifacts
+  REPOSITORY_ROOT: /data/repositories
+  WORKTREE_ROOT: /data/worktrees
+  RUNNER_OUTPUT_ROOT: /data/runner
+  RUNNER_RUNTIME_DIGEST: ${RUNNER_RUNTIME_DIGEST:-sha256:0000000000000000000000000000000000000000000000000000000000000000}
   FUDIAN_BIND: 0.0.0.0:3000
   RUST_LOG: ${RUST_LOG:-fudian=debug,tower_http=info}
   INPUT_MAX_BYTES: ${INPUT_MAX_BYTES:-67108864}
@@ -30,9 +34,12 @@ services:
   artifact-init:
     image: postgres:17-alpine
     user: "0:0"
-    command: ["sh", "-c", "mkdir -p /data/artifacts && chown -R 1000:1000 /data/artifacts"]
+    command: ["sh", "-c", "mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner"]
     volumes:
       - artifacts:/data/artifacts
+      - repositories:/data/repositories
+      - worktrees:/data/worktrees
+      - runner_outputs:/data/runner
     tmpfs:
       - /var/lib/postgresql/data
     restart: "no"
@@ -57,6 +64,9 @@ services:
       - cargo_git:/usr/local/cargo/git
       - target:/app/target
       - artifacts:/data/artifacts
+      - repositories:/data/repositories
+      - worktrees:/data/worktrees
+      - runner_outputs:/data/runner
     init: true
 
   app-prod:
@@ -74,6 +84,9 @@ services:
       - "${APP_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
     volumes:
       - artifacts:/data/artifacts
+      - repositories:/data/repositories
+      - worktrees:/data/worktrees
+      - runner_outputs:/data/runner
     init: true
     restart: unless-stopped
 
@@ -82,6 +95,12 @@ volumes:
     name: fudian_nextgen_postgres_data
   artifacts:
     name: fudian_nextgen_artifacts
+  repositories:
+    name: fudian_nextgen_repositories
+  worktrees:
+    name: fudian_nextgen_worktrees
+  runner_outputs:
+    name: fudian_nextgen_runner_outputs
   cargo_registry:
     name: fudian_rust_cargo_registry
   cargo_git:

@@ -2,6 +2,9 @@
 
 FROM rust:1.97-slim AS toolchain
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM toolchain AS development
 RUN rustup component add rustfmt clippy
@@ -16,9 +19,9 @@ COPY src ./src
 COPY migrations ./migrations
 RUN cargo build --release --locked
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 1000 --create-home fudian \
     && mkdir -p /app/assets /data/artifacts \
@@ -32,3 +35,12 @@ ENV FUDIAN_BIND=0.0.0.0:3000 \
     RUST_LOG=fudian=info,tower_http=info
 EXPOSE 3000
 CMD ["fudian"]
+
+FROM debian:trixie-slim AS runner-runtime
+RUN useradd --system --uid 1000 --create-home runner \
+    && mkdir -p /workspace/input /workspace/output /workspace/result /tmp/fudian-home \
+    && chown -R runner:runner /workspace/output /workspace/result /tmp/fudian-home
+COPY --from=builder /app/target/release/fudian-runner /usr/local/bin/fudian-runner
+USER runner
+WORKDIR /workspace/input
+ENTRYPOINT ["/usr/local/bin/fudian-runner"]

@@ -3,7 +3,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    workspace::WorkspaceCapabilityPolicy,
+};
 
 const MAX_OUTCOME_CHARS: usize = 4_000;
 const MAX_LIST_ITEMS: usize = 100;
@@ -525,6 +528,8 @@ pub struct BranchProposalRevisionDraft {
     #[serde(default)]
     pub tool_requirements: Vec<String>,
     #[serde(default)]
+    pub capability_policy: WorkspaceCapabilityPolicy,
+    #[serde(default)]
     pub inferences: Vec<String>,
     pub revision_reason: Option<String>,
 }
@@ -540,6 +545,7 @@ impl BranchProposalRevisionDraft {
         normalize_list("期望回流贡献", &mut self.expected_contributions)?;
         normalize_list("探索计划", &mut self.exploration_plan)?;
         normalize_list("工具需求", &mut self.tool_requirements)?;
+        self.capability_policy = self.capability_policy.normalize()?;
         normalize_list("AI 推断", &mut self.inferences)?;
         if !self.context_inheritance.is_object() {
             return Err(AppError::bad_request(
