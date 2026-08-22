@@ -1,7 +1,77 @@
 const { test, expect } = require('@playwright/test');
+const { randomUUID } = require('node:crypto');
 
 const baseURL = process.env.BASE_URL;
 const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/screenshots';
+const workerBootstrap = process.env.WORKER_BOOTSTRAP;
+
+async function completeIndependentReview(page, reviewGateId) {
+  const projectId = new URL(page.url()).pathname.match(/\/projects\/([0-9a-f-]+)/)[1];
+  const workerId = randomUUID();
+  const workerToken = `browser_review_worker_${workerId.replaceAll('-', '')}`;
+  const leaseToken = `browser_review_lease_${workerId.replaceAll('-', '')}`;
+  const registration = await page.request.post('/api/v1/scheduler/workers', {
+    headers: { 'x-fudian-worker-bootstrap': workerBootstrap },
+    data: {
+      clientRequestId: randomUUID(),
+      workerId,
+      workerToken,
+      displayName: `browser-independent-reviewer-${workerId}`,
+      capabilities: ['review.goal_candidate.v1'],
+    },
+  });
+  expect(registration.ok()).toBeTruthy();
+  const claimResponse = await page.request.post('/api/v1/scheduler/claim', {
+    data: {
+      workerId,
+      workerToken,
+      clientRequestId: randomUUID(),
+      leaseToken,
+      softTtlSeconds: 120,
+      hardTtlSeconds: 300,
+    },
+  });
+  expect(claimResponse.ok()).toBeTruthy();
+  const claim = await claimResponse.json();
+  expect(claim.action.projectId).toBe(projectId);
+  expect(claim.action.subjectId).toBe(reviewGateId);
+  const payload = claim.action.payload;
+  const completion = await page.request.post(
+    `/api/v1/scheduler/action-runs/${claim.action.id}/complete`,
+    {
+      data: {
+        workerId,
+        workerToken,
+        leaseId: claim.lease.id,
+        leaseToken,
+        fencingToken: claim.lease.fencingToken,
+        result: {
+          schemaVersion: 1,
+          candidateDigest: payload.candidateDigest,
+          contractVersionId: payload.contractVersionId,
+          observedHeadCommit: payload.headCommit,
+          observedTreeId: payload.treeId,
+          observedWorkspaceSnapshot: payload.workspaceSnapshot,
+          environmentFingerprint: payload.environmentFingerprint,
+          decision: 'recommend_accept',
+          rationale: '独立浏览器 Worker 复验契约与冻结证据后建议接受',
+          contractCheck: { browserFlow: 'passed', frozenCandidate: 'passed' },
+          counterexamples: [],
+          retestEvidence: ['重跑 Chromium 关键流程'],
+          isolation: {
+            candidateReadOnly: true,
+            noWorkspaceWrites: true,
+            noNewPrivileges: true,
+            dockerSocketAbsent: true,
+            hostSecretsAbsent: true,
+            effectiveCapabilitiesHex: '0000000000000000',
+          },
+        },
+      },
+    },
+  );
+  expect(completion.ok()).toBeTruthy();
+}
 
 async function renderedFontSize(locator) {
   return locator.first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
@@ -150,11 +220,9 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('.review-evidence-grid')).toContainText('结构化 Evidence');
   await expect(page.locator('.review-evidence-grid')).toContainText('工作台在真实 Chromium 可操作');
 
-  const aiReview = page.locator('form:has(input[value="review.ai_record"])');
-  await aiReview.locator('[name="reviewer_identity"]').fill('browser-reviewer');
-  await aiReview.locator('[name="rationale"]').fill('契约和浏览器证据完整，建议接受');
-  await aiReview.locator('[name="test_evidence"]').fill('重跑 Chromium 关键流程');
-  await aiReview.getByRole('button', { name: '保存独立审核' }).click();
+  const reviewGateId = await page.locator('[data-review-gate-id]').getAttribute('data-review-gate-id');
+  await completeIndependentReview(page, reviewGateId);
+  await page.reload({ waitUntil: 'networkidle' });
 
   const humanAccept = page.locator('form:has(input[value="accept"])');
   await humanAccept.locator('[name="rationale"]').fill('用户确认这条目标枝干已达成');

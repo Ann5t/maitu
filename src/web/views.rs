@@ -1738,20 +1738,21 @@ fn review_gate_panel(
                 }
             }
             @if gate.status == "pending_ai_review" {
-                details class="review-action" open {
-                    summary { "独立审核 AI 记录建议" }
-                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
-                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
-                        input type="hidden" name="action" value="review.ai_record";
-                        input type="hidden" name="review_gate_id" value=(gate.id);
-                        input type="hidden" name="return_session_id" value=(session.id);
-                        label { "审核身份" input name="reviewer_identity" required value="reviewer-v0.1"; }
-                        label { "建议"
-                            select name="review_decision" { option value="recommend_accept" { "建议接受" } option value="recommend_reject" { "建议退回" } }
+                div class="review-automation-status" role="status" {
+                    b { "独立审核已排队" }
+                    p { "系统正在等待持有专用 ActionLease 的 Review Worker 只读复验；工作 Agent 和普通表单都不能代录审核结论。" }
+                    details {
+                        summary { "查看冻结绑定" }
+                        dl class="review-binding-list" {
+                            dt { "候选摘要" }
+                            dd { code { (gate.frozen_candidate_digest.as_deref().unwrap_or("旧候选无物理摘要")) } }
+                            dt { "Git HEAD" }
+                            dd { code { (gate.git_head_commit.as_deref().unwrap_or("未绑定")) } }
+                            dt { "Tree" }
+                            dd { code { (gate.tree_id.as_deref().unwrap_or("未绑定")) } }
+                            dt { "Workspace snapshot" }
+                            dd { code { (gate.workspace_snapshot.as_deref().unwrap_or("未绑定")) } }
                         }
-                        label { "理由" textarea name="rationale" rows="3" required {} }
-                        label { "复验证据（每行一项）" textarea name="test_evidence" rows="2" {} }
-                        button class="button button--primary button--small" type="submit" { "保存独立审核" }
                     }
                 }
             } @else if gate.status == "pending_human_review" {

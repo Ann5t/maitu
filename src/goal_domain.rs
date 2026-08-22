@@ -617,6 +617,10 @@ pub struct CandidateSnapshot {
     pub git_base_commit: Option<String>,
     pub git_head_commit: Option<String>,
     pub git_dirty: bool,
+    #[serde(default)]
+    pub tree_id: Option<String>,
+    #[serde(default)]
+    pub workspace_snapshot: Option<String>,
     pub environment_fingerprint: Option<String>,
     #[serde(default)]
     pub test_evidence: Vec<String>,
@@ -665,6 +669,11 @@ impl CandidateSnapshot {
         }
         self.git_base_commit = optional_text("Git 基线", self.git_base_commit, 200)?;
         self.git_head_commit = optional_text("Git 头", self.git_head_commit, 200)?;
+        self.tree_id = optional_text("Git tree", self.tree_id, 200)?;
+        self.workspace_snapshot = self
+            .workspace_snapshot
+            .map(|snapshot| validate_sha256_id("workspace snapshot", snapshot))
+            .transpose()?;
         self.environment_fingerprint = self
             .environment_fingerprint
             .map(|fingerprint| validate_sha256_id("环境指纹", fingerprint))
@@ -1025,6 +1034,8 @@ mod tests {
             git_base_commit: Some("abc".into()),
             git_head_commit: Some("def".into()),
             git_dirty: false,
+            tree_id: Some("cab".into()),
+            workspace_snapshot: Some(format!("sha256:{}", "b".repeat(64))),
             environment_fingerprint: Some(format!("sha256:{}", "a".repeat(64))),
             test_evidence: vec!["cargo test".into()],
             risks: vec![],

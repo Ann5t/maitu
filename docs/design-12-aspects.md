@@ -27,13 +27,13 @@
 | 1 | 产品定位与“想法 / 项目”两级空间 | 待用户判断 | 想法版本/关系、文件/图片/语音、多来源 ProjectProposal、精确来源、原子立项及两种投影均已验证 | 旧直建兼容入口的最终迁移时机；用户尚未选择默认投影并接受手感 | 想法空间的组织方式与手感 |
 | 2 | 核心领域模型 | 完成 | 稳定聚合/状态约束、真实 Git/worktree、单写 Lease，以及同一 Session 内 ActionRun/Worker 崩溃恢复均已验证 | 无本阶段必要缺口；旧 DAG/旧 ActionRun 保持兼容且不被重解释 | 用户已明确接受“一目标一枝干、Session 为枝干节点”的语义 |
 | 3 | 目标契约与探索型目标 | 完成 | 最少表单、按需细节、不可变版本/差异/来源、人工决定、安全暂停，以及带预算/候选/收敛条件的探索/混合模式均已验证 | 无本阶段必要缺口；后续只能通过新契约版本演化，不能静默降低标准 | 用户已接受“未知可诚实保留、按需披露、灵感持续演化契约”的语义 |
-| 4 | 执行、暂停、拆分、拟合并与回流 | 部分实现 | 逻辑状态机、枝干内真实 Git/CAS、ActionRun 恢复，以及异常暂停/通知已验证 | 跨枝干选择性整合、冲突处理和父目标复验待 BP-07 | 暂停和合并在图中的最终表达 |
+| 4 | 执行、暂停、拆分、拟合并与回流 | 完成 | 完整状态机、持久 ActionRun、冻结候选、独立复验、选择性父整合、Git CAS、冲突暂停与崩溃恢复均已验证 | 无领域闭环缺口；暂停和集成的视觉表达归第 11 项，不反向改变领域事实 | 用户已接受“未达成就继续或拆分，只有达成后才拟合并；一枝干单写”的语义 |
 | 5 | 上下文、记忆与渐进式披露 | 完成 | 精确父快照、不可折叠契约/权限信封、完整来源目录、来源边、三层按需读取审计与可重建派生索引均已验证 | 无本阶段必要缺口；Git commit 来源由 BP-04 以既定 Artifact/来源边协议补入 | 用户已接受按需/渐进式披露原则；具体视觉密度仍归第 11 项判断 |
 | 6 | 单写者、worktree、权限与 Runner 隔离 | 完成 | 真实 bare repo/branch/worktree、不可变权限和 Lease、fencing、断网无能力 Worker、资源上限、输出/删除清单及 Git CAS 均已通过攻击/竞态测试 | 联网与外部副作用适配器属于第 7 项；不存在适配器时明确拒绝，不降级放权 | 用户已接受 Session 内固定权限免逐次审核；高风险能力继续按插件适配器细化 |
 | 7 | 中央插件、Tool Broker 与版本环境 | 部分实现 | 签名安装/撤销、冲突环境、四类 OCI Worker、Git CAS、PPTMaster 安装请求及物理 ToolLease 启停/恢复均已验证 | 插件安装与运行现场 UI、持久日志/Trace 和 endpoint proxy 待 BP-08/BP-09 | 插件发现、安装与运行现场交互 |
 | 8 | PostgreSQL、Git、文件、产物、证据、备份恢复 | 部分实现 | 内容寻址输入/Artifact/Evidence；BP-04 已实现 Git 候选—ref CAS—数据库操作日志、快照与冲突封存 | 跨存储 reconcile、孤儿回收、完整恢复/回退演练和保留策略 | 文件默认复制还是引用的体验 |
 | 9 | 持久调度、ActionRun、心跳、恢复与通知 | 完成 | PostgreSQL 队列、Worker/Action Lease、心跳/fencing、安全重排、人工暂停、取消、通知/outbox 及真实 ToolLease 恢复矩阵已验证 | 无本阶段必要缺口；具体站外适配器由私有部署配置，不存在时明确 suppressed | 用户已要求“暂停后让我知道”；所有需人工介入的恢复均生成站内待处理与通知 |
-| 10 | 测试、证据、独立 AI 审核与用户验收 | 部分实现 | 一键质量门覆盖单元/SQL/HTTP/浏览器/Git/OCI/调度恢复；Runner Contribution 绑定真实 commit/环境 | 独立审核 Worker、跨枝干整合复验和备份恢复证据待 BP-07/BP-09 | 审核摘要的信息量与信任感 |
+| 10 | 测试、证据、独立 AI 审核与用户验收 | 完成 | 一键质量门覆盖单元/SQL/HTTP/浏览器/Git/OCI/调度恢复；Contribution、候选、审核与集成均绑定准确 commit/环境；独立只读 Worker 和父契约复验已验证 | 部署备份/回退演练归第 8、12 项；审核信息密度归第 11 项，不降低本项事实与权限门 | 用户仍可在第 11 项调整审核摘要的展示密度；AI 只能建议、用户最终决定的语义已接受 |
 | 11 | Git 图 + 工作现场式多设备前端 | 待用户判断 | 可替换投影和全流程 UI；Session 02 已提高字号/对比度 | 用户尚未接受；平板、键盘、无障碍及真实大图数据未验收 | 布局、字号、密度、暂停/合并视觉 |
 | 12 | 私有部署、认证与安全运维 | 部分实现 | Compose、非 root runtime、只读根文件系统、回环应用端口 | 无认证/授权/CSRF/限速/HTTPS；当前旧 DB 容器仍公开映射 55432 | 登录方式和真实访问范围 |
 
@@ -104,6 +104,14 @@
 - 未接受候选不影响父枝干；接受只回流选中的 Contribution；
 - 实际 Git 合并、冲突处理和父目标整合复验不能被 `not_attempted` 冒充；
 - 根目标只有用户可以最终确认完成。
+
+完成记录（`0011_action_scheduler.sql`、`0012_review_integration.sql`、[`review-integration-v1.md`](review-integration-v1.md)）：
+
+- 枝干内推进由持久 ActionRun、Lease、心跳和 fencing 驱动；正常、判断、异常、手动、取消和停止均保留准确安全点、Attention 与 Notification；
+- `merge.propose` 从干净且无 active Lease 的真实 worktree 冻结契约、Contribution、Evidence、环境、HEAD/tree/snapshot 与完整摘要，并自动排队独立 Review Worker；
+- 用户接受只创建待执行 Integration；选中代码按绑定 Runner commit 的顺序在隔离候选中选择性应用，非代码结果经明确来源边进入父上下文，父 ref 在最终验证前保持不动；
+- Integration Worker 以父契约复验后才可 CAS 发布；内容冲突、父 ref 抢先移动、worktree 漂移、验证失败和旧 fencing 均安全暂停，CAS 后数据库前崩溃可幂等恢复；
+- 只有 Git、父 worktree/snapshot、数据库和上下文全部确认后子枝干才终结，父 Session 只恢复而不自动完成；根目标仍只能由用户在独立审核后确认完成，因此本项标为完成。
 
 ## 5. 上下文与记忆
 
@@ -193,6 +201,14 @@
 - 子枝干接受后，父枝干必须重新整合验证；
 - CI 使用最小只读权限，不发布、不部署、不接触真实数据。
 
+完成记录（[`review-integration-v1.md`](review-integration-v1.md)、`scripts/quality-gate.sh`）：
+
+- 工作 Agent 的代码 Contribution 必须绑定成功 RunnerJob、准确 base/head/tree、EnvironmentManifest、输出清单与证据；无法解释的 worktree HEAD 不能进入审核；
+- Review ActionRun 由调度器分配给与工作 Agent 不同的已注册 Worker；候选以只读挂载提供，报告严格绑定候选摘要、契约、Git 现场、环境、逐项检查与反例，错误观察值和旧 fencing 无法写回；
+- 用户决定前父现场不变；决定后仍由独立 Integration Worker 在隔离候选按父契约复验，只有物理 CAS 与跨存储确认完成才形成已集成事实；
+- 一键门覆盖格式、Clippy、Rust 单元、迁移/旧 fixture/SQL 负约束、HTTP、浏览器、真实 Git/Runner/OCI、Worker 重启、竞态、故障注入、非 root 只读发行镜像和残留检查；
+- CI 模板只运行同一隔离门，不发布、不部署、不挂真实卷。部署备份/回退的专门演练继续由第 8、12 项负责，不把它重复算作本项缺口，因此本项标为完成。
+
 ## 11. 多设备项目工作台
 
 必须同时满足：
@@ -232,7 +248,7 @@
 | BP-04 worktree Runner（逻辑闭环完成） | 6、8 | BP-02 | Git 竞态、隔离、资源、删除与逃逸测试全部通过 |
 | BP-05 中央真实插件（逻辑闭环完成） | 7 | BP-04 | 签名 OCI、四类真实插件、冲突环境、Git CAS、撤销和既有 ToolLease 接管契约均已验证；物理持续 Lease 归 BP-06 |
 | BP-06 持久调度恢复（逻辑闭环完成） | 2、4、7、9、10 | BP-04、BP-05 | kill/recreate/timeout/cancel/重复投递、通知及物理 ToolLease 测试全部通过 |
-| BP-07 证据与审核闭环 | 10 | BP-03–06 | commit/环境绑定、独立复验、父整合 |
+| BP-07 证据与审核闭环（逻辑闭环完成） | 4、10 | BP-03–06 | 冻结 commit/环境、独立只读复验、完整/部分父整合、冲突/CAS/崩溃恢复及根目标人工终结均已验证 |
 | BP-08 完整多设备工作台 | 11 | BP-01–07 | 大图、键盘、三尺寸、性能 + 用户判断 |
 | BP-09 私有部署安全 | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS/恢复演练 |
 

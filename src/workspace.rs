@@ -5,9 +5,13 @@ use fudian::runner_protocol::{
     is_portable_workspace_file_path,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    scheduler::ActionLeaseCredentials,
+};
 
 pub const RUNNER_PROGRAM: &str = "/usr/local/bin/fudian-runner";
 
@@ -281,6 +285,61 @@ pub struct RunnerJobOutcome {
     pub workspace_snapshot: String,
     pub head_commit: String,
     pub session_status: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareIntegrationRequest {
+    #[serde(flatten)]
+    pub credentials: ActionLeaseCredentials,
+}
+
+impl PrepareIntegrationRequest {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        self.credentials = self.credentials.normalize()?;
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationIsolationAttestation {
+    pub candidate_read_only: bool,
+    pub no_workspace_writes: bool,
+    pub no_new_privileges: bool,
+    pub docker_socket_absent: bool,
+    pub host_secrets_absent: bool,
+    pub effective_capabilities_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationValidationReport {
+    pub schema_version: u32,
+    pub candidate_commit: String,
+    pub candidate_tree_id: String,
+    pub candidate_workspace_snapshot: String,
+    pub status: String,
+    #[serde(default)]
+    pub checks: Vec<String>,
+    #[serde(default)]
+    pub contract_check: Value,
+    pub isolation: IntegrationIsolationAttestation,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizeIntegrationRequest {
+    #[serde(flatten)]
+    pub credentials: ActionLeaseCredentials,
+    pub validation: IntegrationValidationReport,
+}
+
+impl FinalizeIntegrationRequest {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        self.credentials = self.credentials.normalize()?;
+        Ok(self)
+    }
 }
 
 fn denied_network() -> String {

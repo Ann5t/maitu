@@ -7,6 +7,10 @@ goal_http_network="fudian-goal-http-test-$goal_http_suffix"
 goal_http_db="fudian-goal-http-db-$goal_http_suffix"
 goal_http_app="fudian-goal-http-app-$goal_http_suffix"
 goal_http_tmp="$(mktemp -d)"
+goal_http_worker_bootstrap="goal_http_worker_bootstrap_0123456789abcdef"
+
+# shellcheck source=scripts/review-worker-test-lib.sh
+. "$goal_http_repo_root/scripts/review-worker-test-lib.sh"
 
 cleanup_goal_http() {
   local goal_http_status="$?"
@@ -89,6 +93,7 @@ docker run -d --name "$goal_http_app" --network "$goal_http_network" \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@goal-db:5432/fudian_test \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   -e ARTIFACT_ROOT=/tmp/fudian-goal-http-artifacts \
+  -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$goal_http_worker_bootstrap" \
   -e RUST_LOG=fudian=info \
   --mount "type=bind,src=$goal_http_repo_root,dst=/app" \
   --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
@@ -197,9 +202,8 @@ goal_response="$(post_goal merge.propose \
   "{\"sessionId\":\"$goal_child_session_1\",\"candidate\":{\"contributionIds\":[\"$goal_contribution_1\"],\"contractVersionId\":\"$goal_child_contract_id\",\"gitBaseCommit\":null,\"gitHeadCommit\":null,\"gitDirty\":false,\"environmentFingerprint\":null,\"testEvidence\":[\"第一轮 HTTP 请求成功\"],\"risks\":[\"证据覆盖不足\"],\"selfCheck\":\"已检查状态，但缺少退回路径证据\"}}" \
   "$(new_uuid)")"
 goal_gate_1="$(json_field "$goal_response" result.reviewGateId)"
-post_goal review.ai_record \
-  "{\"reviewGateId\":\"$goal_gate_1\",\"reviewerIdentity\":\"reviewer-a\",\"decision\":\"recommend_reject\",\"rationale\":\"缺少退回后的继续证据\",\"contractCheck\":{\"missing\":[\"下一 Session\"]},\"retestEvidence\":[]}" \
-  "$(new_uuid)" >/dev/null
+test_review_gate "$goal_http_base" "$goal_http_worker_bootstrap" "$goal_project_id" \
+  "$goal_gate_1" recommend_reject "缺少退回后的继续证据"
 goal_reject_request_id="$(new_uuid)"
 goal_reject_payload="{\"reviewGateId\":\"$goal_gate_1\",\"decision\":\"reject\",\"rationale\":\"补齐下一 Session 与再次审核证据\",\"selectedContributionIds\":[]}"
 goal_response="$(post_goal review.human_decide "$goal_reject_payload" "$goal_reject_request_id")"
@@ -239,16 +243,14 @@ goal_response="$(post_goal merge.propose \
   "{\"sessionId\":\"$goal_child_session_2\",\"candidate\":{\"contributionIds\":[\"$goal_contribution_1\",\"$goal_contribution_2\"],\"contractVersionId\":\"$goal_child_contract_id\",\"gitBaseCommit\":null,\"gitHeadCommit\":null,\"gitDirty\":false,\"environmentFingerprint\":null,\"testEvidence\":[\"退回路径通过\",\"幂等重放通过\"],\"risks\":[],\"selfCheck\":\"逐条检查目标契约，已补齐下一 Session 证据\"}}" \
   "$(new_uuid)")"
 goal_gate_2="$(json_field "$goal_response" result.reviewGateId)"
-post_goal review.ai_record \
-  "{\"reviewGateId\":\"$goal_gate_2\",\"reviewerIdentity\":\"reviewer-b\",\"decision\":\"recommend_accept\",\"rationale\":\"退回要求已经满足\",\"contractCheck\":{\"passed\":true},\"retestEvidence\":[\"重跑 HTTP 流程\"]}" \
-  "$(new_uuid)" >/dev/null
-post_goal review.human_decide \
+test_review_gate "$goal_http_base" "$goal_http_worker_bootstrap" "$goal_project_id" \
+  "$goal_gate_2" recommend_accept "退回要求已经满足"
+goal_response="$(post_goal review.human_decide \
   "{\"reviewGateId\":\"$goal_gate_2\",\"decision\":\"accept\",\"rationale\":\"接受子目标完整贡献\",\"selectedContributionIds\":[\"$goal_contribution_1\",\"$goal_contribution_2\"]}" \
-  "$(new_uuid)" >/dev/null
-
-post_goal session.resume \
-  "{\"sessionId\":\"$goal_root_session_id\",\"resolution\":\"子目标已接受，回到父目标做整合验证\"}" \
-  "$(new_uuid)" >/dev/null
+  "$(new_uuid)")"
+goal_integration_id="$(json_field "$goal_response" result.integrationId)"
+test_integrate_goal "$goal_http_base" "$goal_http_worker_bootstrap" "$goal_project_id" \
+  "$goal_integration_id" >/dev/null
 goal_response="$(post_goal session.add_contribution \
   "{\"sessionId\":\"$goal_root_session_id\",\"kind\":\"evidence\",\"title\":\"父目标整合验证\",\"body\":\"父 Session 显式恢复并核验子目标回流\",\"artifactId\":null,\"evidenceRefs\":[],\"supersedesId\":null}" \
   "$(new_uuid)")"
@@ -257,9 +259,8 @@ goal_response="$(post_goal merge.propose \
   "{\"sessionId\":\"$goal_root_session_id\",\"candidate\":{\"contributionIds\":[\"$goal_root_contribution\"],\"contractVersionId\":\"$goal_root_contract_id\",\"gitBaseCommit\":null,\"gitHeadCommit\":null,\"gitDirty\":false,\"environmentFingerprint\":null,\"testEvidence\":[\"父目标整合验证通过\"],\"risks\":[],\"selfCheck\":\"子目标已接受且父目标已整合验证\"}}" \
   "$(new_uuid)")"
 goal_root_gate="$(json_field "$goal_response" result.reviewGateId)"
-post_goal review.ai_record \
-  "{\"reviewGateId\":\"$goal_root_gate\",\"reviewerIdentity\":\"reviewer-root\",\"decision\":\"recommend_accept\",\"rationale\":\"根契约证据完整\",\"contractCheck\":{\"passed\":true},\"retestEvidence\":[\"完整快照核验\"]}" \
-  "$(new_uuid)" >/dev/null
+test_review_gate "$goal_http_base" "$goal_http_worker_bootstrap" "$goal_project_id" \
+  "$goal_root_gate" recommend_accept "根契约证据完整"
 post_goal review.human_decide \
   "{\"reviewGateId\":\"$goal_root_gate\",\"decision\":\"accept\",\"rationale\":\"确认根目标完成\",\"selectedContributionIds\":[\"$goal_root_contribution\"]}" \
   "$(new_uuid)" >/dev/null
@@ -275,8 +276,8 @@ assert s["project"]["state"] == "completed"
 assert branches[root]["status"] == "completed"
 assert branches[child]["status"] == "integrated"
 assert [x["status"] for x in sessions] == ["review_rejected", "accepted"]
-assert len(s["integrations"]) == 2
-assert all(i["gitIntegrationStatus"] == "not_attempted" for i in s["integrations"])
+assert len(s["integrations"]) == 1
+assert s["integrations"][0]["gitIntegrationStatus"] == "applied"
 assert not [a for a in s["attentionItems"] if a["status"] == "open"]' \
   "$goal_snapshot" "$goal_root_branch_id" "$goal_child_branch_id"
 

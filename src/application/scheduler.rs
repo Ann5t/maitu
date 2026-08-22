@@ -57,10 +57,10 @@ pub struct ActionRunRecord {
 }
 
 #[derive(Clone, Debug, FromRow)]
-struct WorkerRecord {
-    id: Uuid,
+pub(crate) struct WorkerRecord {
+    pub(crate) id: Uuid,
     client_request_id: Uuid,
-    display_name: String,
+    pub(crate) display_name: String,
     token_digest: String,
     capabilities: Json<Vec<String>>,
     status: String,
@@ -81,18 +81,18 @@ pub struct WorkerRegistrationResponse {
 }
 
 #[derive(Clone, Debug, FromRow)]
-struct ActionLeaseRecord {
-    id: Uuid,
-    action_run_id: Uuid,
-    worker_id: Uuid,
-    attempt_number: i32,
-    fencing_token: i64,
+pub(crate) struct ActionLeaseRecord {
+    pub(crate) id: Uuid,
+    pub(crate) action_run_id: Uuid,
+    pub(crate) worker_id: Uuid,
+    pub(crate) attempt_number: i32,
+    pub(crate) fencing_token: i64,
     renewal_token_digest: String,
-    status: String,
+    pub(crate) status: String,
     acquired_at: DateTime<Utc>,
     last_heartbeat_at: DateTime<Utc>,
-    soft_expires_at: DateTime<Utc>,
-    hard_expires_at: DateTime<Utc>,
+    pub(crate) soft_expires_at: DateTime<Utc>,
+    pub(crate) hard_expires_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1417,34 +1417,74 @@ pub async fn complete_action_run(
             "持续工具必须先由 ToolLease 完成入口确认进程已清理",
         ));
     }
+    if action.subject_kind == "integration" {
+        return Err(AppError::conflict(
+            "integration_finish_required",
+            "物理集成必须通过受约束的 Integration finalize 入口完成",
+        ));
+    }
     if action.status == "cancellation_requested" {
         return Err(AppError::conflict(
             "action_cancellation_requested",
             "用户取消已先到达；Worker 必须确认取消而不能提交成功",
         ));
     }
+    if action.subject_kind == "review_gate" {
+        let review_gate_id = action.subject_id.ok_or_else(|| {
+            AppError::conflict("action_subject_missing", "Review ActionRun 缺少 ReviewGate")
+        })?;
+        crate::application::goal_branches::record_worker_review_result(
+            &mut transaction,
+            action.project_id,
+            action.id,
+            review_gate_id,
+            lease.id,
+            lease.worker_id,
+            &request.result,
+        )
+        .await?;
+    }
+    action =
+        complete_verified_action_in_transaction(&mut transaction, &lease, &action, request.result)
+            .await?;
+    transaction.commit().await?;
+    Ok(action)
+}
+
+pub(crate) async fn complete_verified_action_in_transaction(
+    transaction: &mut DbTransaction<'_>,
+    lease: &ActionLeaseRecord,
+    action: &ActionRunRecord,
+    result: Value,
+) -> AppResult<ActionRunRecord> {
     let now = Utc::now();
     sqlx::query(
         "UPDATE action_run_leases SET status = 'succeeded', outcome = $1, completed_at = $2 \
-         WHERE id = $3",
+         WHERE id = $3 AND status = 'active'",
     )
-    .bind(Json(request.result.clone()))
+    .bind(Json(result.clone()))
     .bind(now)
     .bind(lease.id)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
-    action = sqlx::query_as::<_, ActionRunRecord>(
+    let updated = sqlx::query_as::<_, ActionRunRecord>(
         "UPDATE goal_action_runs SET status = 'succeeded', result = $1, updated_at = $2, \
-         completed_at = $2 WHERE id = $3 RETURNING *",
+         completed_at = $2 WHERE id = $3 AND status = 'running' RETURNING *",
     )
-    .bind(Json(request.result))
+    .bind(Json(result))
     .bind(now)
     .bind(action.id)
-    .fetch_one(&mut *transaction)
-    .await?;
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| {
+        AppError::conflict(
+            "stale_action_fencing",
+            "ActionRun 已不再由当前 Worker 持有，不能完成",
+        )
+    })?;
     insert_action_event(
-        &mut transaction,
-        &action,
+        transaction,
+        &updated,
         Some(lease.id),
         "action.succeeded",
         "worker",
@@ -1452,9 +1492,8 @@ pub async fn complete_action_run(
         json!({ "attemptNumber": lease.attempt_number }),
     )
     .await?;
-    touch_worker(&mut transaction, lease.worker_id).await?;
-    transaction.commit().await?;
-    Ok(action)
+    touch_worker(transaction, lease.worker_id).await?;
+    Ok(updated)
 }
 
 pub async fn fail_action_run(
@@ -2250,7 +2289,7 @@ async fn authenticate_worker(
     Ok(worker)
 }
 
-async fn verified_active_lease(
+pub(crate) async fn verified_active_lease(
     transaction: &mut DbTransaction<'_>,
     action_run_id: Uuid,
     credentials: &ActionLeaseCredentials,

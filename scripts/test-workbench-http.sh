@@ -7,6 +7,10 @@ workbench_network="fudian-workbench-test-$workbench_suffix"
 workbench_db="fudian-workbench-db-$workbench_suffix"
 workbench_app="fudian-workbench-app-$workbench_suffix"
 workbench_tmp="$(mktemp -d)"
+workbench_worker_bootstrap="workbench_worker_bootstrap_0123456789abcdef"
+
+# shellcheck source=scripts/review-worker-test-lib.sh
+. "$workbench_repo_root/scripts/review-worker-test-lib.sh"
 
 cleanup_workbench_stack() {
   local exit_status="$?"
@@ -59,6 +63,7 @@ docker run -d --name "$workbench_app" --network "$workbench_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@workbench-db:5432/fudian_test \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-workbench-artifacts \
+  -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$workbench_worker_bootstrap" \
   -e RUST_LOG=fudian=info \
   --mount "type=bind,src=$workbench_repo_root,dst=/app" \
   --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
@@ -154,13 +159,9 @@ workbench_html="$(curl -fsS "$workbench_project_url?tab=goals&session=$workbench
 workbench_gate_id="$(html_attribute data-review-gate-id <<< "$workbench_html")"
 grep -q '候选现场已冻结' <<< "$workbench_html"
 
-post_form "$workbench_command_url" \
-  --data-urlencode "client_request_id=$(new_uuid)" --data-urlencode 'action=review.ai_record' \
-  --data-urlencode "review_gate_id=$workbench_gate_id" \
-  --data-urlencode 'reviewer_identity=workbench-reviewer' \
-  --data-urlencode 'review_decision=recommend_accept' \
-  --data-urlencode 'rationale=契约、证据和暂停边界都已满足' \
-  --data-urlencode 'test_evidence=独立重跑 HTML 表单流程'
+test_review_gate "$workbench_base" "$workbench_worker_bootstrap" \
+  "$workbench_project_id" "$workbench_gate_id" recommend_accept \
+  "契约、证据和暂停边界都已满足"
 post_form "$workbench_command_url" \
   --data-urlencode "client_request_id=$(new_uuid)" --data-urlencode 'action=review.human_decide' \
   --data-urlencode "review_gate_id=$workbench_gate_id" --data-urlencode 'review_decision=accept' \

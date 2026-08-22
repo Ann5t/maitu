@@ -39,7 +39,10 @@ use crate::{
         EnvironmentManifest, PluginInstallStatementRequest, PluginManifestDraft,
         PluginPublisherDraft, PluginSelector, SignedPluginInstallRequest,
     },
-    workspace::{FailRunnerJobRequest, FinalizeRunnerJobRequest, PrepareRunnerJobRequest},
+    workspace::{
+        FailRunnerJobRequest, FinalizeIntegrationRequest, FinalizeRunnerJobRequest,
+        PrepareIntegrationRequest, PrepareRunnerJobRequest,
+    },
 };
 
 use super::{AppState, views};
@@ -1305,6 +1308,54 @@ pub async fn api_fail_action_run(
     Ok(Json(serde_json::to_value(action)?))
 }
 
+pub async fn api_prepare_integration(
+    State(state): State<Arc<AppState>>,
+    Path((action_run_id, integration_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<PrepareIntegrationRequest>,
+) -> AppResult<Json<Value>> {
+    let project_id: Uuid = sqlx::query_scalar(
+        "SELECT project_id FROM goal_action_runs WHERE id = $1 AND subject_kind = 'integration'",
+    )
+    .bind(action_run_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::not_found("Integration ActionRun 不存在"))?;
+    let response = workspaces::prepare_integration(
+        &state.pool,
+        &state.config,
+        project_id,
+        action_run_id,
+        integration_id,
+        request,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_finalize_integration(
+    State(state): State<Arc<AppState>>,
+    Path((action_run_id, integration_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<FinalizeIntegrationRequest>,
+) -> AppResult<Json<Value>> {
+    let project_id: Uuid = sqlx::query_scalar(
+        "SELECT project_id FROM goal_action_runs WHERE id = $1 AND subject_kind = 'integration'",
+    )
+    .bind(action_run_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::not_found("Integration ActionRun 不存在"))?;
+    let response = workspaces::finalize_integration(
+        &state.pool,
+        &state.config,
+        project_id,
+        action_run_id,
+        integration_id,
+        request,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
 pub async fn api_reconcile_action_runs(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ReconcileActionRunsRequest>,
@@ -1406,10 +1457,42 @@ pub async fn api_acknowledge_tool_cleanup(
 async fn run_goal_command_with_workspace(
     state: &AppState,
     project_id: Uuid,
-    request: goal_branches::GoalCommandRequest,
+    mut request: goal_branches::GoalCommandRequest,
 ) -> AppResult<goal_branches::GoalCommandResponse> {
     let action = request.action.clone();
     let client_request_id = request.client_request_id;
+    if action == "merge.propose" {
+        let session_id = request
+            .payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .ok_or_else(|| AppError::bad_request("invalid_input", "拟合并缺少 Session ID"))?;
+        let binding = workspaces::review_workspace_binding(
+            &state.pool,
+            &state.config,
+            project_id,
+            session_id,
+        )
+        .await?;
+        let candidate = request
+            .payload
+            .get_mut("candidate")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| AppError::bad_request("invalid_input", "拟合并缺少候选对象"))?;
+        candidate.insert("gitBaseCommit".into(), json!(binding.base_commit));
+        candidate.insert("gitHeadCommit".into(), json!(binding.head_commit));
+        candidate.insert("gitDirty".into(), json!(false));
+        candidate.insert("treeId".into(), json!(binding.tree_id));
+        candidate.insert(
+            "workspaceSnapshot".into(),
+            json!(binding.workspace_snapshot),
+        );
+        candidate.insert(
+            "environmentFingerprint".into(),
+            json!(binding.environment_fingerprint),
+        );
+    }
     let mut response = goal_branches::run_command(&state.pool, project_id, request).await?;
     if action == "proposal.approve" {
         let goal_branch_id = response

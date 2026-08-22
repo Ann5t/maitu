@@ -874,6 +874,91 @@ $$;
 
 DO $$
 BEGIN
+  BEGIN
+    INSERT INTO goal_review_gates
+      (id, project_id, goal_branch_id, session_id, contract_version_id,
+       candidate_snapshot, candidate_hash, workspace_id)
+    VALUES (
+      '00000000-0000-0000-0000-000000000160',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000073',
+      '00000000-0000-0000-0000-000000000021',
+      '{"contributionIds":[],"evidenceIds":[]}',
+      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '00000000-0000-0000-0000-000000000092'
+    );
+    RAISE EXCEPTION 'ReviewGate accepted a partial physical binding';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  BEGIN
+    INSERT INTO goal_review_decisions
+      (id, project_id, review_gate_id, actor_role, actor_identity, decision,
+       rationale, candidate_digest)
+    VALUES (
+      '00000000-0000-0000-0000-000000000161',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000060',
+      'review_ai', 'forged-worker', 'recommend_accept', '缺少租约绑定',
+      'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    );
+    RAISE EXCEPTION 'ReviewDecision accepted a partial Worker binding';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  BEGIN
+    INSERT INTO goal_integrations
+      (id, project_id, source_goal_branch_id, target_goal_branch_id,
+       review_gate_id, kind, summary, git_integration_status, source_workspace_id)
+    VALUES (
+      '00000000-0000-0000-0000-000000000162',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000060',
+      'full', '缺少父基线与摘要', 'pending',
+      '00000000-0000-0000-0000-000000000092'
+    );
+    RAISE EXCEPTION 'GoalIntegration accepted a partial physical binding';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO goal_integrations
+  (id, project_id, source_goal_branch_id, target_goal_branch_id,
+   review_gate_id, kind, summary, git_integration_status)
+VALUES (
+  '00000000-0000-0000-0000-000000000163',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020', NULL,
+  '00000000-0000-0000-0000-000000000060',
+  'full', '兼容旧逻辑回执', 'not_attempted'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE goal_integrations SET summary = '篡改冻结身份'
+    WHERE id = '00000000-0000-0000-0000-000000000163';
+    RAISE EXCEPTION 'GoalIntegration accepted frozen identity mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE goal_integrations SET git_integration_status = 'applied'
+    WHERE id = '00000000-0000-0000-0000-000000000163';
+    RAISE EXCEPTION 'GoalIntegration skipped the physical state machine';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+DO $$
+BEGIN
   IF (SELECT count(*) FROM goal_branches) <> 1
      OR (SELECT count(*) FROM goal_sessions WHERE status = 'running') <> 1
      OR (SELECT count(*) FROM goal_events) <> 1 THEN

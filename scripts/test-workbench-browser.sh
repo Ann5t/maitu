@@ -8,6 +8,7 @@ browser_db="fudian-browser-db-$browser_suffix"
 browser_app="fudian-browser-app-$browser_suffix"
 browser_image="mcr.microsoft.com/playwright:v1.62.0-noble"
 browser_screenshot_dir="${SCREENSHOT_DIR:-$browser_repo_root/docs/screenshots}"
+browser_worker_bootstrap="browser_worker_bootstrap_0123456789abcdef"
 
 cleanup_browser_stack() {
   local exit_status="$?"
@@ -42,6 +43,7 @@ docker run -d --name "$browser_app" --network "$browser_network" \
   --network-alias browser-app \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@browser-db:5432/fudian_test \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-browser-artifacts \
+  -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$browser_worker_bootstrap" \
   -e RUST_LOG=fudian=info \
   --mount "type=bind,src=$browser_repo_root,dst=/app" \
   --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
@@ -57,6 +59,7 @@ done
 docker run --rm --init --ipc=host --network "$browser_network" \
   -e BASE_URL=http://browser-app:3000 \
   -e SCREENSHOT_DIR=/screenshots \
+  -e WORKER_BOOTSTRAP="$browser_worker_bootstrap" \
   --mount "type=bind,src=$browser_repo_root,dst=/work" \
   --mount "type=bind,src=$browser_screenshot_dir,dst=/screenshots" \
   --mount type=volume,src=fudian_playwright_npm_cache,dst=/root/.npm \

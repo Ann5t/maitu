@@ -619,6 +619,13 @@ textarea::placeholder, input::placeholder { color: var(--faint); }
 .review-decision-record { margin-top: 9px; border-left: 4px solid var(--lime); border-radius: 8px; background: var(--panel); padding: 11px; }
 .review-decision-record header { display: flex; justify-content: space-between; color: var(--faint); font-size: 12px; }
 .review-decision-record p { margin: 7px 0 0; font-size: 14px; line-height: 1.6; }
+.review-automation-status { display: grid; gap: 7px; margin-top: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 12px; }
+.review-automation-status > b { font-size: 15px; }
+.review-automation-status p { margin: 0; color: var(--soft); font-size: 14px; line-height: 1.6; }
+.review-automation-status summary { color: var(--soft); cursor: pointer; font-size: 14px; font-weight: 700; }
+.review-binding-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin: 10px 0 0; font-size: 12px; }
+.review-binding-list dt { color: var(--faint); }
+.review-binding-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .review-action { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .review-action > summary { padding: 11px; color: var(--soft); cursor: pointer; font-size: 13px; font-weight: 700; list-style: none; }
 .review-action[open] > summary { border-bottom: 1px solid var(--line); }

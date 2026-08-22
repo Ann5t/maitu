@@ -45,11 +45,13 @@
 | `session.stop` | 用户明确停止 Session/枝干，保留未达成结论 |
 | `merge.propose` | 冻结 Contribution、Git、环境与证据候选 |
 | `merge.withdraw` | 发现反例后撤回冻结候选，要求下一 Session |
-| `review.ai_record` | 独立审核 AI 记录建议和复验 |
+| `review.ai_record` | 仅兼容没有物理 workspace 的旧 Gate；真实候选拒绝表单代录 |
 | `review.human_decide` | 用户接受、部分接受、退回或放弃 |
 | `goal_branch.archive` | 用户归档终态枝干并保留归档前结论 |
 
-`review.human_decide` 完整接受时必须选择冻结候选中的全部 Contribution；部分接受必须选择非空真子集；退回和放弃不得选择 Contribution。领域接受只把选中贡献放入父上下文，Git 状态明确记录为 `not_attempted`，不会把尚未执行的物理 merge 冒充完成。
+真实候选由 `merge.propose` 自动产生 `review.goal_candidate.v1` ActionRun。Review Worker 通过 `/api/v1/scheduler/claim` 获得 ActionLease，只读复验后向 `/api/v1/scheduler/action-runs/:id/complete` 提交绑定候选摘要、HEAD、tree、workspace snapshot、环境、契约检查、反例与隔离证明的报告。Worker 身份来自调度器注册信息，不能与工作 Agent 相同；错误摘要、错误观察值和旧 fencing token 均拒绝。
+
+`review.human_decide` 完整接受时必须选择冻结候选中的全部 Contribution；部分接受必须选择非空真子集；退回和放弃不得选择 Contribution。对子枝干，接受只创建 `pending` Integration 和 `integration.goal_branch.v1` ActionRun，源枝干仍是 `review_pending`。Integration Worker 先调用 `.../integrations/:integration_id/prepare` 形成只读父候选，再用绑定父契约回归的报告调用 `.../finalize`。只有 Git CAS、父 worktree/snapshot、上下文和数据库同时确认后，子枝干才成为 `integrated`/`stopped`；根枝干不创建虚假 Integration，用户接受后直接完成。完整协议见 [`review-integration-v1.md`](review-integration-v1.md)。
 
 契约中的 `exploration` 支持 `delivery | exploration | hybrid`。探索/混合模式还必须提供 `budgets`、`candidateOutputs` 和 `uncertaintyReduction`；否则在 Proposal 批准或契约修订时返回 422 / `insufficient_exploration_contract`。完整语义见 [`core-domain-v2.md`](core-domain-v2.md)。
 

@@ -1,10 +1,11 @@
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction, types::Json};
 use uuid::Uuid;
 
 use crate::{
-    application::context_memory,
+    application::{context_memory, scheduler as scheduler_app},
     error::{AppError, AppResult},
     goal_domain::{
         BranchProposalRevisionDraft, CandidateSnapshot, CommandReceiptIdentity,
@@ -22,6 +23,7 @@ use crate::{
         GoalSessionRecord,
     },
     models::Project,
+    scheduler::RetrySafety,
     workspace::WorkspaceCapabilityPolicy,
 };
 
@@ -306,6 +308,27 @@ struct GateStateRow {
     status: String,
     candidate_hash: String,
     candidate_snapshot: Json<Value>,
+    workspace_id: Option<Uuid>,
+    contract_version_id: Uuid,
+    git_head_commit: Option<String>,
+    tree_id: Option<String>,
+    workspace_snapshot: Option<String>,
+    environment_fingerprint: Option<String>,
+    frozen_material: Option<Json<Value>>,
+    frozen_candidate_digest: Option<String>,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct ReviewWorkspaceRow {
+    id: Uuid,
+    status: String,
+    base_commit: Option<String>,
+    head_commit: Option<String>,
+    tree_id: Option<String>,
+    workspace_snapshot: Option<String>,
+    dirty: bool,
+    worktree_key: String,
+    storage_key: String,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -315,6 +338,38 @@ struct ContractRevisionStateRow {
     based_on_contract_version_id: Uuid,
     proposed_contract_version_id: Uuid,
     status: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerReviewResult {
+    schema_version: u32,
+    candidate_digest: String,
+    contract_version_id: Uuid,
+    observed_head_commit: String,
+    observed_tree_id: String,
+    observed_workspace_snapshot: String,
+    environment_fingerprint: Option<String>,
+    decision: ReviewDecisionKind,
+    rationale: String,
+    #[serde(default = "empty_object")]
+    contract_check: Value,
+    #[serde(default)]
+    counterexamples: Vec<String>,
+    #[serde(default)]
+    retest_evidence: Vec<String>,
+    isolation: ReviewIsolationAttestation,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewIsolationAttestation {
+    candidate_read_only: bool,
+    no_workspace_writes: bool,
+    no_new_privileges: bool,
+    docker_socket_absent: bool,
+    host_secrets_absent: bool,
+    effective_capabilities_hex: String,
 }
 
 pub async fn run_command(
@@ -2633,6 +2688,69 @@ async fn propose_merge(
         ));
     }
 
+    let workspace = sqlx::query_as::<_, ReviewWorkspaceRow>(
+        "SELECT w.id, w.status, w.base_commit, w.head_commit, w.tree_id, \
+                w.workspace_snapshot, w.dirty, w.worktree_key, r.storage_key \
+         FROM goal_workspaces w JOIN project_git_repositories r ON r.id = w.repository_id \
+         WHERE w.project_id = $1 AND w.goal_branch_id = $2 FOR UPDATE OF w, r",
+    )
+    .bind(project_id)
+    .bind(session.goal_branch_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| {
+        AppError::conflict(
+            "workspace_missing",
+            "拟合并必须绑定已经建立并验证的真实 GoalBranch worktree",
+        )
+    })?;
+    if workspace.status != "ready" || workspace.dirty {
+        return Err(AppError::conflict(
+            "workspace_not_freezable",
+            "拟合并只能冻结 ready 且干净的 worktree",
+        ));
+    }
+    let base_commit = workspace
+        .base_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("workspace_base_missing", "worktree 缺少 Git 基线"))?;
+    let head_commit = workspace
+        .head_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("workspace_head_missing", "worktree 缺少 Git HEAD"))?;
+    let tree_id = workspace
+        .tree_id
+        .clone()
+        .ok_or_else(|| AppError::conflict("workspace_tree_missing", "worktree 缺少 Git tree"))?;
+    let workspace_snapshot = workspace
+        .workspace_snapshot
+        .clone()
+        .ok_or_else(|| AppError::conflict("workspace_snapshot_missing", "worktree 缺少安全快照"))?;
+    if candidate.git_base_commit.as_deref() != Some(base_commit.as_str())
+        || candidate.git_head_commit.as_deref() != Some(head_commit.as_str())
+        || candidate.tree_id.as_deref() != Some(tree_id.as_str())
+        || candidate.workspace_snapshot.as_deref() != Some(workspace_snapshot.as_str())
+        || candidate.git_dirty
+    {
+        return Err(AppError::conflict(
+            "candidate_workspace_mismatch",
+            "候选 Git/文件现场不是服务端刚验证的准确安全点",
+        ));
+    }
+    let active_write_lease: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM workspace_write_leases \
+         WHERE workspace_id = $1 AND status = 'active')",
+    )
+    .bind(workspace.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if active_write_lease {
+        return Err(AppError::conflict(
+            "workspace_busy",
+            "worktree 尚有 active 写 Lease，不能冻结移动中的候选",
+        ));
+    }
+
     let matching_contributions: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM goal_contributions \
          WHERE project_id = $1 AND goal_branch_id = $2 AND id = ANY($3)",
@@ -2646,6 +2764,57 @@ async fn propose_merge(
         return Err(AppError::bad_request(
             "cross_project_reference",
             "候选 Contribution 必须全部属于当前目标枝干",
+        ));
+    }
+    let invalid_or_unselected_code: bool = sqlx::query_scalar(
+        "SELECT EXISTS (\
+           SELECT 1 FROM goal_contributions c \
+           LEFT JOIN runner_jobs j ON j.id = c.runner_job_id \
+           WHERE c.project_id = $1 AND c.goal_branch_id = $2 AND c.kind = 'code_change' \
+             AND (NOT (c.id = ANY($3)) OR c.runner_job_id IS NULL \
+                  OR j.status <> 'succeeded' OR j.candidate_commit IS NULL)\
+         )",
+    )
+    .bind(project_id)
+    .bind(session.goal_branch_id)
+    .bind(&candidate.contribution_ids)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if invalid_or_unselected_code {
+        return Err(AppError::conflict(
+            "unbounded_code_change",
+            "冻结候选必须覆盖枝干全部代码提交，且每项代码 Contribution 都要绑定成功 RunnerJob commit",
+        ));
+    }
+    let latest_explained_commit: Option<String> = sqlx::query_scalar(
+        "SELECT commit FROM (\
+           SELECT j.candidate_commit AS commit, j.completed_at AS occurred_at, \
+                  0 AS source_order, j.id \
+           FROM goal_contributions c JOIN runner_jobs j ON j.id = c.runner_job_id \
+           WHERE c.project_id = $1 AND c.goal_branch_id = $2 AND c.kind = 'code_change' \
+             AND j.status = 'succeeded' AND j.candidate_commit IS NOT NULL \
+           UNION ALL \
+           SELECT i.candidate_commit AS commit, i.applied_at AS occurred_at, \
+                  1 AS source_order, i.id \
+           FROM goal_integrations i \
+           WHERE i.project_id = $1 AND i.target_goal_branch_id = $2 \
+             AND i.git_integration_status = 'applied' AND i.candidate_commit IS NOT NULL\
+         ) explained \
+         ORDER BY occurred_at DESC NULLS LAST, source_order DESC, id DESC LIMIT 1",
+    )
+    .bind(project_id)
+    .bind(session.goal_branch_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .flatten();
+    if latest_explained_commit
+        .as_deref()
+        .unwrap_or(base_commit.as_str())
+        != head_commit
+    {
+        return Err(AppError::conflict(
+            "unbound_workspace_head",
+            "worktree HEAD 含有未由冻结 Runner Contribution 解释的变更",
         ));
     }
     let current_session_has_contribution: bool = sqlx::query_scalar(
@@ -2707,15 +2876,81 @@ async fn propose_merge(
         ));
     }
 
+    let contribution_material: Json<Value> = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(jsonb_build_object(\
+             'id', c.id, 'kind', c.kind, 'contentHash', c.content_hash, \
+             'runnerJobId', c.runner_job_id, 'candidateCommit', j.candidate_commit, \
+             'runnerSpecHash', j.spec_hash, 'runtimeDigest', j.runtime_digest\
+           ) ORDER BY c.id), '[]'::jsonb) \
+         FROM goal_contributions c LEFT JOIN runner_jobs j ON j.id = c.runner_job_id \
+         WHERE c.id = ANY($1)",
+    )
+    .bind(&candidate.contribution_ids)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let evidence_material: Json<Value> = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(jsonb_build_object(\
+             'id', e.id, 'contentHash', e.content_hash, \
+             'verificationStatus', e.verification_status\
+           ) ORDER BY e.id), '[]'::jsonb) \
+         FROM goal_evidence e WHERE e.id = ANY($1)",
+    )
+    .bind(&candidate.evidence_ids)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let integration_material: Json<Value> = sqlx::query_scalar(
+        "SELECT COALESCE(jsonb_agg(jsonb_build_object(\
+             'id', i.id, 'sourceGoalBranchId', i.source_goal_branch_id, \
+             'reviewGateId', i.review_gate_id, 'kind', i.kind, \
+             'candidateCommit', i.candidate_commit, \
+             'candidateTreeId', i.candidate_tree_id, \
+             'candidateWorkspaceSnapshot', i.candidate_workspace_snapshot, \
+             'validationReportDigest', i.validation_report_digest, \
+             'selectedCommits', i.selected_commits, 'appliedAt', i.applied_at\
+           ) ORDER BY i.applied_at, i.id), '[]'::jsonb) \
+         FROM goal_integrations i \
+         WHERE i.project_id = $1 AND i.target_goal_branch_id = $2 \
+           AND i.git_integration_status = 'applied'",
+    )
+    .bind(project_id)
+    .bind(session.goal_branch_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let contract_material: Json<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(c) FROM goal_contract_versions c WHERE c.id = $1")
+            .bind(session.contract_version_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+
     let review_gate_id = Uuid::new_v4();
     let candidate_hash = candidate.fingerprint()?;
     let candidate_json = serde_json::to_value(&candidate)?;
+    let frozen_material = json!({
+        "schemaVersion": 1,
+        "candidate": candidate_json,
+        "contract": contract_material.0,
+        "contributions": contribution_material.0,
+        "evidence": evidence_material.0,
+        "appliedIntegrations": integration_material.0,
+        "workspace": {
+            "id": workspace.id,
+            "repositoryKey": workspace.storage_key,
+            "worktreeKey": workspace.worktree_key,
+            "baseCommit": base_commit,
+            "headCommit": head_commit,
+            "treeId": tree_id,
+            "workspaceSnapshot": workspace_snapshot,
+        },
+    });
+    let frozen_candidate_digest = canonical_json_sha256(&frozen_material)?;
     sqlx::query(
         "INSERT INTO goal_review_gates \
          (id, project_id, goal_branch_id, session_id, contract_version_id, status, \
           candidate_snapshot, candidate_hash, git_base_commit, git_head_commit, git_dirty, \
-          environment_fingerprint, test_evidence, risks, self_check) \
-         VALUES ($1, $2, $3, $4, $5, 'pending_ai_review', $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+          environment_fingerprint, test_evidence, risks, self_check, workspace_id, tree_id, \
+          workspace_snapshot, frozen_material, frozen_candidate_digest) \
+         VALUES ($1, $2, $3, $4, $5, 'pending_ai_review', $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                 $15, $16, $17, $18, $19)",
     )
     .bind(review_gate_id)
     .bind(project_id)
@@ -2731,6 +2966,11 @@ async fn propose_merge(
     .bind(Json(candidate.test_evidence.clone()))
     .bind(Json(candidate.risks.clone()))
     .bind(Json(json!({ "summary": candidate.self_check })))
+    .bind(workspace.id)
+    .bind(&tree_id)
+    .bind(&workspace_snapshot)
+    .bind(Json(frozen_material.clone()))
+    .bind(&frozen_candidate_digest)
     .execute(&mut **transaction)
     .await?;
     for contribution_id in &candidate.contribution_ids {
@@ -2753,6 +2993,42 @@ async fn propose_merge(
         .execute(&mut **transaction)
         .await?;
     }
+    sqlx::query(
+        "UPDATE goal_workspaces SET status = 'frozen', updated_at = now() \
+         WHERE id = $1 AND status = 'ready'",
+    )
+    .bind(workspace.id)
+    .execute(&mut **transaction)
+    .await?;
+    let review_action = scheduler_app::insert_specialized_action_run(
+        transaction,
+        project_id,
+        session.goal_branch_id,
+        session.id,
+        Uuid::new_v4(),
+        &frozen_candidate_digest,
+        "review",
+        "review.goal_candidate.v1",
+        "review_gate",
+        review_gate_id,
+        json!({
+            "schemaVersion": 1,
+            "reviewGateId": review_gate_id,
+            "candidateDigest": frozen_candidate_digest,
+            "candidateHash": candidate_hash,
+            "repositoryKey": workspace.storage_key,
+            "worktreeKey": workspace.worktree_key,
+            "headCommit": head_commit,
+            "treeId": tree_id,
+            "workspaceSnapshot": workspace_snapshot,
+            "environmentFingerprint": session.environment_fingerprint,
+            "contractVersionId": session.contract_version_id,
+        }),
+        RetrySafety::Safe,
+        3,
+        Some(Utc::now() + Duration::days(7)),
+    )
+    .await?;
     sqlx::query("UPDATE goal_sessions SET status = $1, updated_at = now() WHERE id = $2")
         .bind(next_session_status.as_str())
         .bind(session.id)
@@ -2793,6 +3069,8 @@ async fn propose_merge(
             "goalBranchId": session.goal_branch_id,
             "sessionId": session.id,
             "candidateHash": candidate_hash,
+            "candidateDigest": frozen_candidate_digest,
+            "reviewActionRunId": review_action.id,
             "contributionIds": candidate.contribution_ids,
             "evidenceIds": candidate.evidence_ids,
         }),
@@ -2801,6 +3079,8 @@ async fn propose_merge(
     Ok(json!({
         "reviewGateId": review_gate_id,
         "candidateHash": candidate_hash,
+        "candidateDigest": frozen_candidate_digest,
+        "reviewActionRunId": review_action.id,
         "status": ReviewGateStatus::PendingAiReview.as_str(),
     }))
 }
@@ -2841,6 +3121,15 @@ async fn withdraw_merge(
         .bind(branch.id)
         .execute(&mut **transaction)
         .await?;
+    if let Some(workspace_id) = gate.workspace_id {
+        sqlx::query(
+            "UPDATE goal_workspaces SET status = 'ready', updated_at = now() \
+             WHERE id = $1 AND status = 'frozen'",
+        )
+        .bind(workspace_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     resolve_attention_by_key(
         transaction,
         project_id,
@@ -2905,6 +3194,12 @@ async fn record_ai_review(
     }
     let gate = load_gate_for_update(transaction, project_id, input.review_gate_id).await?;
     ensure_gate_hash(&gate)?;
+    if gate.frozen_candidate_digest.is_some() {
+        return Err(AppError::conflict(
+            "review_worker_required",
+            "真实冻结候选必须由持有 ActionLease 的独立 Review Worker 提交，不能从普通表单代录",
+        ));
+    }
     let session = load_session_for_update(transaction, project_id, gate.session_id).await?;
     if session.agent_identity.as_deref() == Some(input.reviewer_identity.as_str()) {
         return Err(AppError::conflict(
@@ -2957,6 +3252,162 @@ async fn record_ai_review(
         "decisionId": decision_id,
         "status": status.as_str(),
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_worker_review_result(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    action_run_id: Uuid,
+    review_gate_id: Uuid,
+    action_lease_id: Uuid,
+    worker_id: Uuid,
+    result: &Value,
+) -> AppResult<Uuid> {
+    let report_digest = canonical_json_sha256(result)?;
+    let mut report: WorkerReviewResult = serde_json::from_value(result.clone()).map_err(|_| {
+        AppError::bad_request(
+            "invalid_review_report",
+            "Review Worker 结果不符合冻结审核报告协议",
+        )
+    })?;
+    if report.schema_version != 1 {
+        return Err(AppError::bad_request(
+            "invalid_review_report",
+            "Review Worker 报告版本不受支持",
+        ));
+    }
+    report.rationale = clean_text("审核理由", report.rationale, 12_000)?;
+    normalize_text_list("反例", &mut report.counterexamples, 100, 4_000)?;
+    normalize_text_list("复验证据", &mut report.retest_evidence, 100, 4_000)?;
+    if !report.contract_check.is_object()
+        || report
+            .contract_check
+            .as_object()
+            .is_none_or(serde_json::Map::is_empty)
+    {
+        return Err(AppError::bad_request(
+            "invalid_contract_check",
+            "独立审核必须提交非空的逐条契约检查对象",
+        ));
+    }
+    if !report.isolation.candidate_read_only
+        || !report.isolation.no_workspace_writes
+        || !report.isolation.no_new_privileges
+        || !report.isolation.docker_socket_absent
+        || !report.isolation.host_secrets_absent
+        || report.isolation.effective_capabilities_hex.is_empty()
+        || !report
+            .isolation
+            .effective_capabilities_hex
+            .chars()
+            .all(|character| character == '0')
+    {
+        return Err(AppError::forbidden(
+            "unsafe_review_attestation",
+            "Review Worker 没有证明候选只读、无写权、无宿主秘密和无有效 capabilities",
+        ));
+    }
+
+    let gate = load_gate_for_update(transaction, project_id, review_gate_id).await?;
+    ensure_gate_hash(&gate)?;
+    let expected_digest = gate.frozen_candidate_digest.as_deref().ok_or_else(|| {
+        AppError::conflict(
+            "physical_candidate_required",
+            "该 ReviewGate 没有 BP-07 物理冻结候选",
+        )
+    })?;
+    if gate.status != ReviewGateStatus::PendingAiReview.as_str()
+        || report.candidate_digest != expected_digest
+        || report.contract_version_id != gate.contract_version_id
+        || gate.git_head_commit.as_deref() != Some(report.observed_head_commit.as_str())
+        || gate.tree_id.as_deref() != Some(report.observed_tree_id.as_str())
+        || gate.workspace_snapshot.as_deref() != Some(report.observed_workspace_snapshot.as_str())
+        || gate.environment_fingerprint != report.environment_fingerprint
+    {
+        return Err(AppError::conflict(
+            "review_candidate_mismatch",
+            "Review Worker 观察值没有绑定准确候选摘要、HEAD、tree、workspace snapshot 或环境",
+        ));
+    }
+    let session = load_session_for_update(transaction, project_id, gate.session_id).await?;
+    let worker_display_name: String = sqlx::query_scalar(
+        "SELECT display_name FROM scheduler_workers WHERE id = $1 AND status = 'active'",
+    )
+    .bind(worker_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| AppError::forbidden("invalid_worker", "Review Worker 身份不存在或已撤销"))?;
+    if session.agent_identity.as_deref() == Some(worker_display_name.as_str())
+        || session.agent_identity.as_deref() == Some(worker_id.to_string().as_str())
+    {
+        return Err(AppError::conflict(
+            "independent_reviewer_required",
+            "Review Worker 不能与形成候选的工作 Agent 使用同一身份",
+        ));
+    }
+    let next_status = ReviewGateStatus::try_from(gate.status.as_str())?
+        .record_ai_review(GoalActor::ReviewAi, report.decision)?;
+    let reviewer_identity = format!("worker:{worker_id}:{worker_display_name}");
+    let decision_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO goal_review_decisions \
+         (id, project_id, review_gate_id, actor_role, actor_identity, decision, rationale, \
+          contract_check, retest_evidence, selected_contribution_ids, action_run_id, \
+          action_lease_id, worker_id, candidate_digest, report_digest, observed_snapshot, \
+          counterexamples) \
+         VALUES ($1, $2, $3, 'review_ai', $4, $5, $6, $7, $8, '[]'::jsonb, \
+                 $9, $10, $11, $12, $13, $14, $15)",
+    )
+    .bind(decision_id)
+    .bind(project_id)
+    .bind(gate.id)
+    .bind(&reviewer_identity)
+    .bind(report.decision.as_str())
+    .bind(&report.rationale)
+    .bind(Json(report.contract_check.clone()))
+    .bind(Json(report.retest_evidence.clone()))
+    .bind(action_run_id)
+    .bind(action_lease_id)
+    .bind(worker_id)
+    .bind(expected_digest)
+    .bind(&report_digest)
+    .bind(Json(json!({
+        "headCommit": report.observed_head_commit,
+        "treeId": report.observed_tree_id,
+        "workspaceSnapshot": report.observed_workspace_snapshot,
+        "environmentFingerprint": report.environment_fingerprint,
+        "isolation": report.isolation,
+    })))
+    .bind(Json(report.counterexamples.clone()))
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query("UPDATE goal_review_gates SET status = $1, updated_at = now() WHERE id = $2")
+        .bind(next_status.as_str())
+        .bind(gate.id)
+        .execute(&mut **transaction)
+        .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "review_gate",
+        gate.id,
+        "review.worker_completed",
+        "review_ai",
+        Some(&reviewer_identity),
+        Uuid::new_v4(),
+        json!({
+            "decisionId": decision_id,
+            "actionRunId": action_run_id,
+            "actionLeaseId": action_lease_id,
+            "workerId": worker_id,
+            "decision": report.decision.as_str(),
+            "candidateDigest": expected_digest,
+            "reportDigest": report_digest,
+        }),
+    )
+    .await?;
+    Ok(decision_id)
 }
 
 async fn record_human_review(
@@ -3063,109 +3514,344 @@ async fn record_human_review(
     )
     .await?;
 
+    let mut physical_integration_pending = false;
     let integration_id = match input.decision {
         ReviewDecisionKind::Accept | ReviewDecisionKind::PartialAccept => {
-            let integration_id = Uuid::new_v4();
-            let integration_kind = if input.decision == ReviewDecisionKind::Accept {
-                "full"
+            if let Some(target_goal_branch_id) = branch.parent_goal_branch_id {
+                let integration_id = Uuid::new_v4();
+                let integration_kind = if input.decision == ReviewDecisionKind::Accept {
+                    "full"
+                } else {
+                    "partial"
+                };
+                if let (
+                    Some(source_workspace_id),
+                    Some(source_head_commit),
+                    Some(source_tree_id),
+                    Some(source_workspace_snapshot),
+                    Some(source_candidate_digest),
+                ) = (
+                    gate.workspace_id,
+                    gate.git_head_commit.as_deref(),
+                    gate.tree_id.as_deref(),
+                    gate.workspace_snapshot.as_deref(),
+                    gate.frozen_candidate_digest.as_deref(),
+                ) {
+                    let target: (Uuid, String, Option<String>, Option<String>, bool) =
+                        sqlx::query_as(
+                            "SELECT id, status, head_commit, workspace_snapshot, dirty \
+                         FROM goal_workspaces WHERE project_id = $1 AND goal_branch_id = $2 \
+                         FOR UPDATE",
+                        )
+                        .bind(project_id)
+                        .bind(target_goal_branch_id)
+                        .fetch_optional(&mut **transaction)
+                        .await?
+                        .ok_or_else(|| {
+                            AppError::conflict(
+                                "target_workspace_missing",
+                                "父目标没有可执行真实集成的 worktree",
+                            )
+                        })?;
+                    if target.1 != "ready" || target.4 {
+                        return Err(AppError::conflict(
+                            "target_workspace_not_safe",
+                            "父 worktree 必须处于 ready 且干净的依赖等待安全点",
+                        ));
+                    }
+                    let target_busy: bool = sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM workspace_write_leases \
+                         WHERE workspace_id = $1 AND status = 'active')",
+                    )
+                    .bind(target.0)
+                    .fetch_one(&mut **transaction)
+                    .await?;
+                    if target_busy {
+                        return Err(AppError::conflict(
+                            "target_workspace_busy",
+                            "父 worktree 尚有 active 写 Lease，不能授权跨枝干集成",
+                        ));
+                    }
+                    let expected_target_head = target.2.ok_or_else(|| {
+                        AppError::conflict("target_workspace_not_safe", "父 worktree 缺少 HEAD")
+                    })?;
+                    let expected_target_snapshot = target.3.ok_or_else(|| {
+                        AppError::conflict("target_workspace_not_safe", "父 worktree 缺少安全快照")
+                    })?;
+                    let selected_commits: Json<Value> = sqlx::query_scalar(
+                        "SELECT COALESCE(jsonb_agg(jsonb_build_object(\
+                             'contributionId', c.id, 'runnerJobId', j.id, \
+                             'commit', j.candidate_commit, 'completedAt', j.completed_at\
+                           ) ORDER BY j.completed_at, j.id), '[]'::jsonb) \
+                         FROM goal_contributions c JOIN runner_jobs j ON j.id = c.runner_job_id \
+                         WHERE c.id = ANY($1) AND c.kind = 'code_change' \
+                           AND j.status = 'succeeded' AND j.candidate_commit IS NOT NULL",
+                    )
+                    .bind(&input.selected_contribution_ids)
+                    .fetch_one(&mut **transaction)
+                    .await?;
+                    let operation_hash = canonical_json_sha256(&json!({
+                        "integrationId": integration_id,
+                        "sourceCandidateDigest": source_candidate_digest,
+                        "selectedContributionIds": input.selected_contribution_ids,
+                        "selectedCommits": selected_commits.0,
+                        "expectedTargetHeadCommit": expected_target_head,
+                        "expectedTargetWorkspaceSnapshot": expected_target_snapshot,
+                    }))?;
+                    let operation_id = Uuid::new_v4();
+                    sqlx::query(
+                        "INSERT INTO workspace_operations \
+                         (id, project_id, goal_branch_id, workspace_id, operation_kind, status, \
+                          request_hash, expected_head_commit, detail) \
+                         VALUES ($1, $2, $3, $4, 'integration', 'planned', $5, $6, $7)",
+                    )
+                    .bind(operation_id)
+                    .bind(project_id)
+                    .bind(target_goal_branch_id)
+                    .bind(target.0)
+                    .bind(&operation_hash)
+                    .bind(&expected_target_head)
+                    .bind(Json(json!({
+                        "integrationId": integration_id,
+                        "reviewGateId": gate.id,
+                        "sourceGoalBranchId": branch.id,
+                    })))
+                    .execute(&mut **transaction)
+                    .await?;
+                    sqlx::query(
+                        "INSERT INTO goal_integrations \
+                         (id, project_id, source_goal_branch_id, target_goal_branch_id, \
+                          review_gate_id, kind, summary, git_integration_status, \
+                          source_workspace_id, target_workspace_id, operation_id, \
+                          source_head_commit, source_tree_id, source_workspace_snapshot, \
+                          source_candidate_digest, expected_target_head_commit, \
+                          expected_target_workspace_snapshot, selected_commits) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, \
+                                 $11, $12, $13, $14, $15, $16, $17)",
+                    )
+                    .bind(integration_id)
+                    .bind(project_id)
+                    .bind(branch.id)
+                    .bind(target_goal_branch_id)
+                    .bind(gate.id)
+                    .bind(integration_kind)
+                    .bind(&input.rationale)
+                    .bind(source_workspace_id)
+                    .bind(target.0)
+                    .bind(operation_id)
+                    .bind(source_head_commit)
+                    .bind(source_tree_id)
+                    .bind(source_workspace_snapshot)
+                    .bind(source_candidate_digest)
+                    .bind(&expected_target_head)
+                    .bind(&expected_target_snapshot)
+                    .bind(Json(selected_commits.0.clone()))
+                    .execute(&mut **transaction)
+                    .await?;
+                    for contribution_id in &input.selected_contribution_ids {
+                        sqlx::query(
+                            "INSERT INTO goal_integration_contributions \
+                             (integration_id, contribution_id) VALUES ($1, $2)",
+                        )
+                        .bind(integration_id)
+                        .bind(contribution_id)
+                        .execute(&mut **transaction)
+                        .await?;
+                    }
+                    let action_hash = canonical_json_sha256(&json!({
+                        "operationHash": operation_hash,
+                        "integrationId": integration_id,
+                    }))?;
+                    let integration_action = scheduler_app::insert_specialized_action_run(
+                        transaction,
+                        project_id,
+                        branch.id,
+                        session.id,
+                        Uuid::new_v4(),
+                        &action_hash,
+                        "integration",
+                        "integration.goal_branch.v1",
+                        "integration",
+                        integration_id,
+                        json!({
+                            "schemaVersion": 1,
+                            "integrationId": integration_id,
+                            "operationId": operation_id,
+                            "sourceCandidateDigest": source_candidate_digest,
+                            "sourceHeadCommit": source_head_commit,
+                            "expectedTargetHeadCommit": expected_target_head,
+                            "selectedCommits": selected_commits.0,
+                        }),
+                        RetrySafety::Safe,
+                        3,
+                        Some(Utc::now() + Duration::days(7)),
+                    )
+                    .await?;
+                    sqlx::query(
+                        "UPDATE goal_integrations SET action_run_id = $1, updated_at = now() \
+                         WHERE id = $2",
+                    )
+                    .bind(integration_action.id)
+                    .bind(integration_id)
+                    .execute(&mut **transaction)
+                    .await?;
+                    physical_integration_pending = true;
+                } else {
+                    sqlx::query(
+                        "INSERT INTO goal_integrations \
+                         (id, project_id, source_goal_branch_id, target_goal_branch_id, \
+                          review_gate_id, kind, summary, git_integration_status) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, 'not_attempted')",
+                    )
+                    .bind(integration_id)
+                    .bind(project_id)
+                    .bind(branch.id)
+                    .bind(target_goal_branch_id)
+                    .bind(gate.id)
+                    .bind(integration_kind)
+                    .bind(&input.rationale)
+                    .execute(&mut **transaction)
+                    .await?;
+                    for contribution_id in &input.selected_contribution_ids {
+                        sqlx::query(
+                            "INSERT INTO goal_integration_contributions \
+                             (integration_id, contribution_id) VALUES ($1, $2)",
+                        )
+                        .bind(integration_id)
+                        .bind(contribution_id)
+                        .execute(&mut **transaction)
+                        .await?;
+                    }
+                }
+                Some(integration_id)
             } else {
-                "partial"
-            };
-            sqlx::query(
-                "INSERT INTO goal_integrations \
-                 (id, project_id, source_goal_branch_id, target_goal_branch_id, review_gate_id, \
-                  kind, summary, git_integration_status) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'not_attempted')",
-            )
-            .bind(integration_id)
-            .bind(project_id)
-            .bind(branch.id)
-            .bind(branch.parent_goal_branch_id)
-            .bind(gate.id)
-            .bind(integration_kind)
-            .bind(&input.rationale)
-            .execute(&mut **transaction)
-            .await?;
-            for contribution_id in &input.selected_contribution_ids {
-                sqlx::query(
-                    "INSERT INTO goal_integration_contributions \
-                     (integration_id, contribution_id) VALUES ($1, $2)",
-                )
-                .bind(integration_id)
-                .bind(contribution_id)
-                .execute(&mut **transaction)
-                .await?;
+                None
             }
-            Some(integration_id)
         }
         _ => None,
     };
 
     match input.decision {
         ReviewDecisionKind::Accept => {
-            let session_status =
-                SessionStatus::try_from(session.status.as_str())?.mark_accepted()?;
-            sqlx::query(
-                "UPDATE goal_sessions SET status = $1, updated_at = now(), ended_at = now() \
-                 WHERE id = $2",
-            )
-            .bind(session_status.as_str())
-            .bind(session.id)
-            .execute(&mut **transaction)
-            .await?;
-            if branch.parent_goal_branch_id.is_some() {
-                sqlx::query(
-                    "UPDATE goal_branches SET status = 'integrated', updated_at = now(), \
-                     completed_at = now() WHERE id = $1",
+            if physical_integration_pending {
+                insert_goal_event(
+                    transaction,
+                    project_id,
+                    "integration",
+                    integration_id.expect("physical integration has an ID"),
+                    "integration.queued",
+                    "system",
+                    None,
+                    Uuid::new_v4(),
+                    json!({
+                        "sourceGoalBranchId": branch.id,
+                        "targetGoalBranchId": branch.parent_goal_branch_id,
+                        "reviewGateId": gate.id,
+                        "sourceStatus": "review_pending",
+                        "parentGitChanged": false,
+                    }),
                 )
-                .bind(branch.id)
-                .execute(&mut **transaction)
                 .await?;
-                mark_child_result_ready(transaction, project_id, &branch, &input.rationale).await?;
             } else {
+                let session_status =
+                    SessionStatus::try_from(session.status.as_str())?.mark_accepted()?;
                 sqlx::query(
-                    "UPDATE goal_branches SET status = 'completed', updated_at = now(), \
+                    "UPDATE goal_sessions SET status = $1, updated_at = now(), ended_at = now() \
+                 WHERE id = $2",
+                )
+                .bind(session_status.as_str())
+                .bind(session.id)
+                .execute(&mut **transaction)
+                .await?;
+                if branch.parent_goal_branch_id.is_some() {
+                    sqlx::query(
+                        "UPDATE goal_branches SET status = 'integrated', updated_at = now(), \
                      completed_at = now() WHERE id = $1",
-                )
-                .bind(branch.id)
-                .execute(&mut **transaction)
-                .await?;
-                sqlx::query(
-                    "UPDATE projects SET state = 'completed', completion_reason = $1, \
+                    )
+                    .bind(branch.id)
+                    .execute(&mut **transaction)
+                    .await?;
+                    mark_child_result_ready(transaction, project_id, &branch, &input.rationale)
+                        .await?;
+                } else {
+                    sqlx::query(
+                        "UPDATE goal_branches SET status = 'completed', updated_at = now(), \
+                     completed_at = now() WHERE id = $1",
+                    )
+                    .bind(branch.id)
+                    .execute(&mut **transaction)
+                    .await?;
+                    sqlx::query(
+                        "UPDATE projects SET state = 'completed', completion_reason = $1, \
                      current_focus = NULL, updated_at = now() WHERE id = $2",
-                )
-                .bind(&input.rationale)
-                .bind(project_id)
-                .execute(&mut **transaction)
-                .await?;
+                    )
+                    .bind(&input.rationale)
+                    .bind(project_id)
+                    .execute(&mut **transaction)
+                    .await?;
+                }
             }
         }
         ReviewDecisionKind::PartialAccept => {
-            sqlx::query(
+            if physical_integration_pending {
+                insert_goal_event(
+                    transaction,
+                    project_id,
+                    "integration",
+                    integration_id.expect("physical integration has an ID"),
+                    "integration.queued",
+                    "system",
+                    None,
+                    Uuid::new_v4(),
+                    json!({
+                        "sourceGoalBranchId": branch.id,
+                        "targetGoalBranchId": branch.parent_goal_branch_id,
+                        "reviewGateId": gate.id,
+                        "kind": "partial",
+                        "sourceStatus": "review_pending",
+                        "parentGitChanged": false,
+                    }),
+                )
+                .await?;
+            } else {
+                sqlx::query(
                 "UPDATE goal_sessions SET status = 'accepted', updated_at = now(), ended_at = now() \
                  WHERE id = $1",
             )
             .bind(session.id)
             .execute(&mut **transaction)
             .await?;
-            sqlx::query(
+                sqlx::query(
                 "UPDATE goal_branches SET status = 'stopped', updated_at = now(), stopped_at = now() \
                  WHERE id = $1",
             )
             .bind(branch.id)
             .execute(&mut **transaction)
             .await?;
-            if branch.parent_goal_branch_id.is_some() {
-                mark_child_result_ready(transaction, project_id, &branch, &input.rationale).await?;
-            } else {
-                sqlx::query(
-                    "UPDATE projects SET state = 'stopped', completion_reason = $1, \
+                if branch.parent_goal_branch_id.is_some() {
+                    mark_child_result_ready(transaction, project_id, &branch, &input.rationale)
+                        .await?;
+                } else {
+                    sqlx::query(
+                        "UPDATE projects SET state = 'stopped', completion_reason = $1, \
                      current_focus = NULL, updated_at = now() WHERE id = $2",
-                )
-                .bind(&input.rationale)
-                .bind(project_id)
-                .execute(&mut **transaction)
-                .await?;
+                    )
+                    .bind(&input.rationale)
+                    .bind(project_id)
+                    .execute(&mut **transaction)
+                    .await?;
+                }
+                if branch.parent_goal_branch_id.is_none()
+                    && let Some(workspace_id) = gate.workspace_id
+                {
+                    sqlx::query(
+                        "UPDATE goal_workspaces SET status = 'retired', updated_at = now() \
+                     WHERE id = $1 AND status = 'frozen'",
+                    )
+                    .bind(workspace_id)
+                    .execute(&mut **transaction)
+                    .await?;
+                }
             }
         }
         ReviewDecisionKind::Reject => {
@@ -3185,6 +3871,15 @@ async fn record_human_review(
             .bind(branch.id)
             .execute(&mut **transaction)
             .await?;
+            if let Some(workspace_id) = gate.workspace_id {
+                sqlx::query(
+                    "UPDATE goal_workspaces SET status = 'ready', updated_at = now() \
+                     WHERE id = $1 AND status = 'frozen'",
+                )
+                .bind(workspace_id)
+                .execute(&mut **transaction)
+                .await?;
+            }
             insert_attention(
                 transaction,
                 project_id,
@@ -3217,6 +3912,15 @@ async fn record_human_review(
             .bind(branch.id)
             .execute(&mut **transaction)
             .await?;
+            if let Some(workspace_id) = gate.workspace_id {
+                sqlx::query(
+                    "UPDATE goal_workspaces SET status = 'retired', updated_at = now() \
+                     WHERE id = $1 AND status = 'frozen'",
+                )
+                .bind(workspace_id)
+                .execute(&mut **transaction)
+                .await?;
+            }
             if branch.parent_goal_branch_id.is_none() {
                 sqlx::query(
                     "UPDATE projects SET state = 'stopped', completion_reason = $1, \
@@ -3252,7 +3956,11 @@ async fn record_human_review(
             "candidateHash": gate.candidate_hash,
             "selectedContributionIds": input.selected_contribution_ids,
             "integrationId": integration_id,
-            "gitIntegrationStatus": integration_id.map(|_| "not_attempted"),
+            "gitIntegrationStatus": integration_id.map(|_| if physical_integration_pending {
+                "pending"
+            } else {
+                "not_attempted"
+            }),
         }),
     )
     .await?;
@@ -3260,8 +3968,15 @@ async fn record_human_review(
         "reviewGateId": gate.id,
         "decisionId": decision_id,
         "integrationId": integration_id,
+        "gitIntegrationStatus": integration_id.map(|_| if physical_integration_pending {
+            "pending"
+        } else {
+            "not_attempted"
+        }),
         "status": status.as_str(),
         "goalBranchStatus": match input.decision {
+            ReviewDecisionKind::Accept | ReviewDecisionKind::PartialAccept
+                if physical_integration_pending => "review_pending",
             ReviewDecisionKind::Accept if branch.parent_goal_branch_id.is_some() => "integrated",
             ReviewDecisionKind::Accept => "completed",
             ReviewDecisionKind::PartialAccept | ReviewDecisionKind::Abandon => "stopped",
@@ -3360,6 +4075,182 @@ async fn mark_child_result_ready(
     Ok(())
 }
 
+pub(crate) async fn finalize_applied_integration(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    integration_id: Uuid,
+    client_request_id: Uuid,
+) -> AppResult<()> {
+    let (source_goal_branch_id, target_goal_branch_id, kind, summary, status): (
+        Uuid,
+        Option<Uuid>,
+        String,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT source_goal_branch_id, target_goal_branch_id, kind, summary, \
+                git_integration_status FROM goal_integrations \
+         WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(integration_id)
+    .bind(project_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| AppError::not_found("GoalIntegration 不存在"))?;
+    if status != "applied" {
+        return Err(AppError::conflict(
+            "integration_not_applied",
+            "只有物理 Git 和 workspace 均确认 applied 后才能结束源枝干",
+        ));
+    }
+    let target_goal_branch_id = target_goal_branch_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_target_missing",
+            "根目标不应存在父枝干 Integration",
+        )
+    })?;
+    let source_branch =
+        load_branch_for_update(transaction, project_id, source_goal_branch_id).await?;
+    if source_branch.parent_goal_branch_id != Some(target_goal_branch_id) {
+        return Err(AppError::conflict(
+            "integration_target_mismatch",
+            "Integration 目标不是源枝干的准确父枝干",
+        ));
+    }
+    let (source_session_id, source_session_status): (Uuid, String) = sqlx::query_as(
+        "SELECT s.id, s.status FROM goal_review_gates g \
+         JOIN goal_sessions s ON s.id = g.session_id \
+         JOIN goal_integrations i ON i.review_gate_id = g.id \
+         WHERE i.id = $1 FOR UPDATE OF s",
+    )
+    .bind(integration_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if source_session_status != SessionStatus::AwaitingMergeReview.as_str()
+        || GoalBranchStatus::try_from(source_branch.status.as_str())?
+            != GoalBranchStatus::ReviewPending
+    {
+        return Err(AppError::conflict(
+            "integration_source_state_mismatch",
+            "源 Session/GoalBranch 已不再等待该物理集成",
+        ));
+    }
+    sqlx::query(
+        "UPDATE goal_sessions SET status = 'accepted', updated_at = now(), ended_at = now() \
+         WHERE id = $1",
+    )
+    .bind(source_session_id)
+    .execute(&mut **transaction)
+    .await?;
+    if kind == "full" {
+        sqlx::query(
+            "UPDATE goal_branches SET status = 'integrated', updated_at = now(), \
+             completed_at = now() WHERE id = $1",
+        )
+        .bind(source_goal_branch_id)
+        .execute(&mut **transaction)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE goal_branches SET status = 'stopped', updated_at = now(), \
+             stopped_at = now() WHERE id = $1",
+        )
+        .bind(source_goal_branch_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
+
+    let parent_session_id = source_branch.inherited_from_session_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_parent_session_missing",
+            "子枝干没有记录准确的父 Session 安全点",
+        )
+    })?;
+    resolve_attention_by_key(
+        transaction,
+        project_id,
+        &format!("session:{parent_session_id}:dependency:{source_goal_branch_id}"),
+        &format!("物理集成 {} 已通过父目标回归：{summary}", integration_id),
+    )
+    .await?;
+    resolve_attention_by_key(
+        transaction,
+        project_id,
+        &format!("integration:{integration_id}:conflict"),
+        "Integration 已由准确候选成功应用",
+    )
+    .await?;
+    let remaining_dependencies: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_branches \
+         WHERE parent_goal_branch_id = $1 AND id <> $2 \
+           AND status IN ('active', 'waiting', 'review_pending'))",
+    )
+    .bind(target_goal_branch_id)
+    .bind(source_goal_branch_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !remaining_dependencies {
+        sqlx::query(
+            "UPDATE goal_sessions SET status = 'running', updated_at = now() \
+             WHERE id = $1 AND project_id = $2 AND status = 'waiting_dependency'",
+        )
+        .bind(parent_session_id)
+        .bind(project_id)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE goal_branches SET status = 'active', updated_at = now() \
+             WHERE id = $1 AND project_id = $2 AND status = 'waiting'",
+        )
+        .bind(target_goal_branch_id)
+        .bind(project_id)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE projects SET state = 'active', current_focus = $1, updated_at = now() \
+             WHERE id = $2",
+        )
+        .bind(target_goal_branch_id)
+        .bind(project_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    let previous_context: Option<Uuid> =
+        sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+            .bind(parent_session_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    context_memory::create_snapshot(
+        transaction,
+        project_id,
+        parent_session_id,
+        previous_context,
+        previous_context.map(|_| parent_session_id),
+        client_request_id,
+    )
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "integration",
+        integration_id,
+        "integration.domain_finalized",
+        "system",
+        None,
+        client_request_id,
+        json!({
+            "sourceGoalBranchId": source_goal_branch_id,
+            "targetGoalBranchId": target_goal_branch_id,
+            "sourceGoalBranchStatus": if kind == "full" { "integrated" } else { "stopped" },
+            "parentSessionId": parent_session_id,
+            "parentSessionResumed": !remaining_dependencies,
+            "parentGoalAutomaticallyCompleted": false,
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn load_proposal_for_update(
     transaction: &mut GoalTransaction<'_>,
     project_id: Uuid,
@@ -3434,7 +4325,9 @@ async fn load_gate_for_update(
     review_gate_id: Uuid,
 ) -> AppResult<GateStateRow> {
     sqlx::query_as::<_, GateStateRow>(
-        "SELECT id, goal_branch_id, session_id, status, candidate_hash, candidate_snapshot \
+        "SELECT id, goal_branch_id, session_id, status, candidate_hash, candidate_snapshot, \
+                workspace_id, contract_version_id, git_head_commit, tree_id, workspace_snapshot, \
+                environment_fingerprint, frozen_material, frozen_candidate_digest \
          FROM goal_review_gates WHERE id = $1 AND project_id = $2 FOR UPDATE",
     )
     .bind(review_gate_id)
@@ -3658,13 +4551,25 @@ async fn resolve_attention_by_key(
 
 fn ensure_gate_hash(gate: &GateStateRow) -> AppResult<()> {
     let observed = canonical_json_sha256(&gate.candidate_snapshot.0)?;
-    if observed == gate.candidate_hash {
-        return Ok(());
+    if observed != gate.candidate_hash {
+        return Err(AppError::conflict(
+            "candidate_frozen",
+            "拟合并候选内容与冻结哈希不一致",
+        ));
     }
-    Err(AppError::conflict(
-        "candidate_frozen",
-        "拟合并候选内容与冻结哈希不一致",
-    ))
+    if let (Some(material), Some(expected)) = (
+        gate.frozen_material.as_ref(),
+        gate.frozen_candidate_digest.as_ref(),
+    ) {
+        let material_digest = canonical_json_sha256(&material.0)?;
+        if &material_digest != expected {
+            return Err(AppError::conflict(
+                "candidate_frozen",
+                "拟合并物理现场与完整冻结摘要不一致",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn contract_change_summary(

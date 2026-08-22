@@ -13,6 +13,7 @@ use fudian::runner_protocol::{
     RunnerCapabilities, RunnerExecutionResult, RunnerJobSpec, RunnerOutputFile,
     RunnerResourceLimits, canonical_json_sha256 as runner_canonical_json_sha256,
 };
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -20,13 +21,16 @@ use sqlx::{FromRow, PgPool, Postgres, Transaction, types::Json};
 use uuid::Uuid;
 
 use crate::{
+    application::{goal_branches, scheduler as scheduler_app},
     config::Config,
     error::{AppError, AppResult},
     goal_domain::{CommandReceiptIdentity, canonical_json_sha256},
+    scheduler::{ActionRunStatus, FailActionRunRequest},
     workspace::{
-        FailRunnerJobRequest, FinalizeRunnerJobRequest, PrepareRunnerJobRequest,
-        PrepareRunnerJobResponse, RunnerJobOutcome, WorkspaceCapabilityPolicy,
-        normalize_relative_file_path, path_matches_pattern,
+        FailRunnerJobRequest, FinalizeIntegrationRequest, FinalizeRunnerJobRequest,
+        PrepareIntegrationRequest, PrepareRunnerJobRequest, PrepareRunnerJobResponse,
+        RunnerJobOutcome, WorkspaceCapabilityPolicy, normalize_relative_file_path,
+        path_matches_pattern,
     },
 };
 
@@ -119,6 +123,19 @@ pub struct WorkspaceDetail {
     pub matches_record: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewWorkspaceBinding {
+    pub workspace_id: Uuid,
+    pub repository_key: String,
+    pub worktree_key: String,
+    pub base_commit: String,
+    pub head_commit: String,
+    pub tree_id: String,
+    pub workspace_snapshot: String,
+    pub environment_fingerprint: Option<String>,
+}
+
 #[derive(Clone, Debug, FromRow)]
 struct BranchProvisionState {
     id: Uuid,
@@ -162,6 +179,80 @@ struct LeaseState {
     resource_policy: Json<Value>,
     output_key: String,
     hard_expires_at: DateTime<Utc>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, FromRow)]
+struct IntegrationState {
+    id: Uuid,
+    project_id: Uuid,
+    source_goal_branch_id: Uuid,
+    target_goal_branch_id: Option<Uuid>,
+    review_gate_id: Uuid,
+    kind: String,
+    summary: String,
+    git_integration_status: String,
+    source_workspace_id: Option<Uuid>,
+    target_workspace_id: Option<Uuid>,
+    operation_id: Option<Uuid>,
+    action_run_id: Option<Uuid>,
+    source_head_commit: Option<String>,
+    source_tree_id: Option<String>,
+    source_workspace_snapshot: Option<String>,
+    source_candidate_digest: Option<String>,
+    expected_target_head_commit: Option<String>,
+    expected_target_workspace_snapshot: Option<String>,
+    selected_commits: Json<Value>,
+    preparation_key: Option<String>,
+    prepared_fencing_token: Option<i64>,
+    candidate_commit: Option<String>,
+    candidate_tree_id: Option<String>,
+    candidate_workspace_snapshot: Option<String>,
+    validation_report: Option<Json<Value>>,
+    validation_report_digest: Option<String>,
+    last_error_code: Option<String>,
+    last_error_summary: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    applied_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectedIntegrationCommit {
+    contribution_id: Uuid,
+    runner_job_id: Uuid,
+    commit: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareIntegrationResponse {
+    pub replayed: bool,
+    pub action_run_id: Uuid,
+    pub integration_id: Uuid,
+    pub prepared_fencing_token: i64,
+    pub preparation_key: String,
+    pub candidate_commit: String,
+    pub candidate_tree_id: String,
+    pub candidate_workspace_snapshot: String,
+    pub expected_target_head_commit: String,
+    pub source_candidate_digest: String,
+    pub selected_commits: Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizeIntegrationOutcome {
+    pub replayed: bool,
+    pub integration_id: Uuid,
+    pub status: String,
+    pub source_goal_branch_id: Uuid,
+    pub target_goal_branch_id: Uuid,
+    pub target_head_commit: String,
+    pub target_tree_id: String,
+    pub target_workspace_snapshot: String,
+    pub validation_report_digest: String,
 }
 
 #[derive(Clone, Debug)]
@@ -603,6 +694,856 @@ pub async fn get_workspace(
 ) -> AppResult<WorkspaceDetail> {
     let roots = ManagedRoots::from_config(config).await?;
     verified_workspace_detail(pool, &roots, project_id, goal_branch_id).await
+}
+
+pub async fn review_workspace_binding(
+    pool: &PgPool,
+    config: &Config,
+    project_id: Uuid,
+    session_id: Uuid,
+) -> AppResult<ReviewWorkspaceBinding> {
+    let (goal_branch_id, session_status, environment_fingerprint): (Uuid, String, Option<String>) =
+        sqlx::query_as(
+            "SELECT goal_branch_id, status, environment_fingerprint FROM goal_sessions \
+         WHERE id = $1 AND project_id = $2",
+        )
+        .bind(session_id)
+        .bind(project_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::not_found("Agent Session 不存在"))?;
+    if !matches!(
+        session_status.as_str(),
+        "running" | "awaiting_merge_review" | "review_rejected" | "accepted" | "stopped"
+    ) {
+        return Err(AppError::conflict(
+            "invalid_state_transition",
+            "只有运行中或已冻结待审核的 Session 可以绑定拟合并现场",
+        ));
+    }
+    let roots = ManagedRoots::from_config(config).await?;
+    let detail = verified_workspace_detail(pool, &roots, project_id, goal_branch_id).await?;
+    if !detail.matches_record || detail.observed.dirty {
+        return Err(AppError::conflict(
+            "workspace_record_drifted",
+            "拟合并前 worktree 的磁盘现场必须与已记录干净安全点完全一致",
+        ));
+    }
+    if !matches!(
+        detail.workspace.status.as_str(),
+        "ready" | "frozen" | "retired"
+    ) {
+        return Err(AppError::conflict(
+            "workspace_not_reviewable",
+            "GoalBranch worktree 当前状态不能形成冻结候选",
+        ));
+    }
+    let active_lease: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM workspace_write_leases \
+         WHERE workspace_id = $1 AND status = 'active')",
+    )
+    .bind(detail.workspace.id)
+    .fetch_one(pool)
+    .await?;
+    if active_lease {
+        return Err(AppError::conflict(
+            "workspace_busy",
+            "拟合并前仍有 active 写 Lease，不能冻结移动中的现场",
+        ));
+    }
+    Ok(ReviewWorkspaceBinding {
+        workspace_id: detail.workspace.id,
+        repository_key: detail.repository.storage_key,
+        worktree_key: detail.workspace.worktree_key,
+        base_commit: detail
+            .workspace
+            .base_commit
+            .ok_or_else(|| AppError::conflict("workspace_base_missing", "worktree 缺少基线"))?,
+        head_commit: detail.observed.head_commit,
+        tree_id: detail.observed.tree_id,
+        workspace_snapshot: detail.observed.workspace_snapshot,
+        environment_fingerprint,
+    })
+}
+
+pub async fn prepare_integration(
+    pool: &PgPool,
+    config: &Config,
+    project_id: Uuid,
+    action_run_id: Uuid,
+    integration_id: Uuid,
+    request: PrepareIntegrationRequest,
+) -> AppResult<PrepareIntegrationResponse> {
+    let request = request.normalize()?;
+    let credentials = request.credentials.clone();
+    let roots = ManagedRoots::from_config(config).await?;
+    let mut transaction = pool.begin().await?;
+    let (lease, action) =
+        scheduler_app::verified_active_lease(&mut transaction, action_run_id, &credentials, true)
+            .await?;
+    if action.project_id != project_id
+        || action.kind != "integration"
+        || action.subject_kind != "integration"
+        || action.subject_id != Some(integration_id)
+    {
+        return Err(AppError::forbidden(
+            "integration_action_mismatch",
+            "ActionLease 没有绑定该 Project/Integration",
+        ));
+    }
+    let integration =
+        load_integration_for_update(&mut transaction, project_id, integration_id).await?;
+    if integration.action_run_id != Some(action_run_id) {
+        return Err(AppError::conflict(
+            "integration_action_mismatch",
+            "Integration 的固定 ActionRun 与当前 Lease 不一致",
+        ));
+    }
+    if !matches!(
+        integration.git_integration_status.as_str(),
+        "pending" | "preparing" | "validating"
+    ) {
+        return Err(AppError::conflict(
+            "integration_not_preparable",
+            "Integration 已不处于可准备状态",
+        ));
+    }
+    let source_workspace_id = integration.source_workspace_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_binding_missing",
+            "Integration 缺少源 workspace",
+        )
+    })?;
+    let target_workspace_id = integration.target_workspace_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_binding_missing",
+            "Integration 缺少父 workspace",
+        )
+    })?;
+    let source_workspace: GoalWorkspaceRecord = sqlx::query_as(
+        "SELECT * FROM goal_workspaces WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(source_workspace_id)
+    .bind(project_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let target_workspace: GoalWorkspaceRecord = sqlx::query_as(
+        "SELECT * FROM goal_workspaces WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(target_workspace_id)
+    .bind(project_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if source_workspace.repository_id != target_workspace.repository_id
+        || source_workspace.status != "frozen"
+        || source_workspace.dirty
+        || !matches!(target_workspace.status.as_str(), "ready" | "applying")
+        || target_workspace.dirty
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            credentials.clone(),
+            "integration_workspace_not_safe",
+            "源候选或父 workspace 已离开人工接受时的受控状态",
+            "集成 workspace 不再安全；父枝干未被改写",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_not_safe",
+            "源候选必须 frozen，父 workspace 必须保持同仓库的干净安全点；已暂停等待处理",
+        ));
+    }
+    if ensure_integration_workspace_records(&integration, &source_workspace, &target_workspace)
+        .is_err()
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            credentials.clone(),
+            "integration_workspace_record_mismatch",
+            "Integration 固定基线与 workspace 权威记录不一致",
+            "集成记录与 workspace 安全点不一致；已停止自动推进",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_record_mismatch",
+            "Integration 固定基线与 workspace 权威记录不一致；已暂停等待处理",
+        ));
+    }
+    let repository: GitRepositoryRecord =
+        sqlx::query_as("SELECT * FROM project_git_repositories WHERE id = $1 AND project_id = $2")
+            .bind(source_workspace.repository_id)
+            .bind(project_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+    let repository_path = managed_path(&roots.repositories, &repository.storage_key, false)?;
+    let source_path = managed_path(&roots.worktrees, &source_workspace.worktree_key, false)?;
+    let target_path = managed_path(&roots.worktrees, &target_workspace.worktree_key, false)?;
+    let source_branch = source_workspace.git_branch_name.clone();
+    let target_branch = target_workspace.git_branch_name.clone();
+    let repository_for_inspection = repository_path.clone();
+    let source_inspection = tokio::task::spawn_blocking(move || {
+        inspect_managed_worktree(&repository_for_inspection, &source_path, &source_branch)
+    })
+    .await
+    .map_err(|_| AppError::internal("检查源候选 worktree 的阻塞任务异常结束"))?
+    .map_err(|error| AppError::conflict("source_candidate_drifted", error))?;
+    let repository_for_target = repository_path.clone();
+    let target_inspection = tokio::task::spawn_blocking(move || {
+        inspect_managed_worktree(&repository_for_target, &target_path, &target_branch)
+    })
+    .await
+    .map_err(|_| AppError::internal("检查父 worktree 的阻塞任务异常结束"))?
+    .map_err(|error| AppError::conflict("target_workspace_drifted", error))?;
+    if source_inspection.dirty
+        || source_inspection.head_commit != integration.source_head_commit.as_deref().unwrap_or("")
+        || source_inspection.tree_id != integration.source_tree_id.as_deref().unwrap_or("")
+        || source_inspection.workspace_snapshot
+            != integration
+                .source_workspace_snapshot
+                .as_deref()
+                .unwrap_or("")
+        || target_inspection.dirty
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            credentials.clone(),
+            "integration_workspace_drifted",
+            "源候选或父安全点偏离人工接受时冻结的准确现场",
+            "检测到集成现场漂移；父枝干未被本次操作覆盖",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_drifted",
+            "源候选或父安全点已经偏离人工接受时冻结的准确现场；已暂停等待处理",
+        ));
+    }
+    let target_is_expected = target_inspection.head_commit
+        == integration
+            .expected_target_head_commit
+            .as_deref()
+            .unwrap_or("")
+        && target_inspection.workspace_snapshot
+            == integration
+                .expected_target_workspace_snapshot
+                .as_deref()
+                .unwrap_or("");
+    let target_is_recoverable_candidate = integration.git_integration_status == "validating"
+        && integration.candidate_commit.as_deref() == Some(target_inspection.head_commit.as_str())
+        && integration.candidate_tree_id.as_deref() == Some(target_inspection.tree_id.as_str());
+    if !target_is_expected && !target_is_recoverable_candidate {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            credentials.clone(),
+            "integration_workspace_drifted",
+            "父 worktree 既不是冻结基线，也不是可恢复的准确集成候选",
+            "父安全点无法唯一判定；系统拒绝猜测并已暂停",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_drifted",
+            "父 worktree 既不是冻结基线，也不是可恢复的准确集成候选；已暂停等待处理",
+        ));
+    }
+    if integration.git_integration_status == "validating" {
+        let preparation_key = integration.preparation_key.clone().ok_or_else(|| {
+            AppError::conflict(
+                "integration_candidate_missing",
+                "validating Integration 缺少准备 key",
+            )
+        })?;
+        let preparation_path = managed_path(&roots.runner_outputs, &preparation_key, true)?;
+        if !preparation_path.exists() {
+            let candidate_commit = integration.candidate_commit.as_deref().ok_or_else(|| {
+                AppError::conflict("integration_candidate_missing", "缺少候选 commit")
+            })?;
+            let repository_for_recovery = repository_path.clone();
+            let preparation_for_recovery = preparation_path.clone();
+            let candidate_for_recovery = candidate_commit.to_owned();
+            tokio::task::spawn_blocking(move || {
+                run_git([
+                    OsStr::new("--git-dir"),
+                    repository_for_recovery.as_os_str(),
+                    OsStr::new("worktree"),
+                    OsStr::new("add"),
+                    OsStr::new("--detach"),
+                    preparation_for_recovery.as_os_str(),
+                    OsStr::new(&candidate_for_recovery),
+                ])
+            })
+            .await
+            .map_err(|_| AppError::internal("恢复集成候选 worktree 的阻塞任务异常结束"))?
+            .map_err(|error| AppError::conflict("integration_recovery_failed", error))?;
+        }
+        let response = existing_prepared_integration(
+            &roots,
+            &integration,
+            action_run_id,
+            lease.fencing_token,
+        )?;
+        sqlx::query(
+            "UPDATE goal_integrations SET prepared_fencing_token = $1, updated_at = now() \
+             WHERE id = $2",
+        )
+        .bind(lease.fencing_token)
+        .bind(integration.id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        return Ok(PrepareIntegrationResponse {
+            replayed: true,
+            ..response
+        });
+    }
+    if integration.git_integration_status == "pending" {
+        sqlx::query(
+            "UPDATE goal_integrations SET git_integration_status = 'preparing', \
+             last_error_code = NULL, last_error_summary = NULL, updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(integration.id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE workspace_operations SET status = 'applying', updated_at = now() \
+             WHERE id = $1 AND status = 'planned'",
+        )
+        .bind(integration.operation_id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE goal_workspaces SET status = 'applying', updated_at = now() \
+             WHERE id = $1 AND status = 'ready'",
+        )
+        .bind(target_workspace.id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
+
+    let preparation_key = format!("integrations/{integration_id}");
+    let preparation_path = managed_path(&roots.runner_outputs, &preparation_key, true)?;
+    let expected_target_head = integration
+        .expected_target_head_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("integration_binding_missing", "缺少父 HEAD"))?;
+    let source_head = integration
+        .source_head_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("integration_binding_missing", "缺少源 HEAD"))?;
+    let selected_commits: Vec<SelectedIntegrationCommit> =
+        serde_json::from_value(integration.selected_commits.0.clone()).map_err(|_| {
+            AppError::conflict(
+                "integration_binding_corrupt",
+                "选中 Contribution 的 commit 边界无法解析",
+            )
+        })?;
+    let repository_for_build = repository_path.clone();
+    let preparation_for_build = preparation_path.clone();
+    let build = tokio::task::spawn_blocking(move || {
+        build_integration_candidate(
+            &repository_for_build,
+            &preparation_for_build,
+            &expected_target_head,
+            &source_head,
+            &selected_commits,
+        )
+    })
+    .await
+    .map_err(|_| AppError::internal("构建隔离集成候选的阻塞任务异常结束"))?;
+    let inspection = match build {
+        Ok(inspection) => inspection,
+        Err(summary) => {
+            pause_integration_problem(
+                pool,
+                project_id,
+                integration_id,
+                action_run_id,
+                credentials,
+                "integration_conflict",
+                &summary,
+                "隔离 cherry-pick 发生冲突；父枝干未改变",
+            )
+            .await?;
+            return Err(AppError::conflict(
+                "integration_conflict",
+                "选中 Contribution 无法在父安全点形成无冲突候选，已暂停等待处理",
+            ));
+        }
+    };
+
+    let mut transaction = pool.begin().await?;
+    let (lease, action) = scheduler_app::verified_active_lease(
+        &mut transaction,
+        action_run_id,
+        &request.credentials,
+        true,
+    )
+    .await?;
+    if action.subject_id != Some(integration_id) {
+        return Err(AppError::conflict(
+            "integration_action_mismatch",
+            "集成候选形成后 ActionRun 已不再绑定该 Integration",
+        ));
+    }
+    let current = load_integration_for_update(&mut transaction, project_id, integration_id).await?;
+    if current.git_integration_status != "preparing" {
+        return Err(AppError::conflict(
+            "stale_integration_fencing",
+            "集成候选形成期间 Integration 已被其他决定接管",
+        ));
+    }
+    sqlx::query(
+        "UPDATE goal_integrations SET git_integration_status = 'validating', \
+         preparation_key = $1, prepared_fencing_token = $2, candidate_commit = $3, \
+         candidate_tree_id = $4, candidate_workspace_snapshot = $5, updated_at = now() \
+         WHERE id = $6",
+    )
+    .bind(&preparation_key)
+    .bind(lease.fencing_token)
+    .bind(&inspection.head_commit)
+    .bind(&inspection.tree_id)
+    .bind(&inspection.workspace_snapshot)
+    .bind(integration_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE workspace_operations SET candidate_commit = $1, detail = detail || $2, \
+         updated_at = now() WHERE id = $3 AND status = 'applying'",
+    )
+    .bind(&inspection.head_commit)
+    .bind(Json(json!({
+        "candidateTreeId": inspection.tree_id,
+        "candidateWorkspaceSnapshot": inspection.workspace_snapshot,
+        "preparedFencingToken": lease.fencing_token,
+    })))
+    .bind(integration.operation_id)
+    .execute(&mut *transaction)
+    .await?;
+    insert_workspace_event(
+        &mut transaction,
+        project_id,
+        "integration",
+        integration_id,
+        "integration.candidate_prepared",
+        Uuid::new_v4(),
+        json!({
+            "actionRunId": action_run_id,
+            "actionLeaseId": lease.id,
+            "fencingToken": lease.fencing_token,
+            "candidateCommit": inspection.head_commit,
+            "candidateTreeId": inspection.tree_id,
+            "candidateWorkspaceSnapshot": inspection.workspace_snapshot,
+            "parentGitChanged": false,
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(PrepareIntegrationResponse {
+        replayed: false,
+        action_run_id,
+        integration_id,
+        prepared_fencing_token: lease.fencing_token,
+        preparation_key,
+        candidate_commit: inspection.head_commit,
+        candidate_tree_id: inspection.tree_id,
+        candidate_workspace_snapshot: inspection.workspace_snapshot,
+        expected_target_head_commit: integration
+            .expected_target_head_commit
+            .expect("validated target HEAD"),
+        source_candidate_digest: integration
+            .source_candidate_digest
+            .expect("validated source candidate digest"),
+        selected_commits: integration.selected_commits.0,
+    })
+}
+
+pub async fn finalize_integration(
+    pool: &PgPool,
+    config: &Config,
+    project_id: Uuid,
+    action_run_id: Uuid,
+    integration_id: Uuid,
+    request: FinalizeIntegrationRequest,
+) -> AppResult<FinalizeIntegrationOutcome> {
+    let request = request.normalize()?;
+    validate_integration_report(&request.validation)?;
+    let report_value = serde_json::to_value(&request.validation)?;
+    let report_digest = canonical_json_sha256(&report_value)?;
+    let roots = ManagedRoots::from_config(config).await?;
+    let mut transaction = pool.begin().await?;
+    let (lease, action) = scheduler_app::verified_active_lease(
+        &mut transaction,
+        action_run_id,
+        &request.credentials,
+        true,
+    )
+    .await?;
+    if action.project_id != project_id
+        || action.kind != "integration"
+        || action.subject_kind != "integration"
+        || action.subject_id != Some(integration_id)
+        || action.status != ActionRunStatus::Running.as_str()
+    {
+        return Err(AppError::forbidden(
+            "integration_action_mismatch",
+            "当前 ActionLease 不能发布该 Integration",
+        ));
+    }
+    let integration =
+        load_integration_for_update(&mut transaction, project_id, integration_id).await?;
+    if integration.action_run_id != Some(action_run_id)
+        || integration.git_integration_status != "validating"
+        || integration.prepared_fencing_token != Some(lease.fencing_token)
+        || integration.candidate_commit.as_deref()
+            != Some(request.validation.candidate_commit.as_str())
+        || integration.candidate_tree_id.as_deref()
+            != Some(request.validation.candidate_tree_id.as_str())
+        || integration.candidate_workspace_snapshot.as_deref()
+            != Some(request.validation.candidate_workspace_snapshot.as_str())
+    {
+        return Err(AppError::conflict(
+            "stale_integration_fencing",
+            "验证报告没有绑定当前 fencing 下的准确集成候选",
+        ));
+    }
+    let target_goal_branch_id = integration.target_goal_branch_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_target_missing",
+            "根目标不能创建父枝干 Integration",
+        )
+    })?;
+    let source_workspace_id = integration.source_workspace_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_binding_missing",
+            "Integration 缺少源 workspace",
+        )
+    })?;
+    let target_workspace_id = integration.target_workspace_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_binding_missing",
+            "Integration 缺少父 workspace",
+        )
+    })?;
+    let source_workspace: GoalWorkspaceRecord = sqlx::query_as(
+        "SELECT * FROM goal_workspaces WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(source_workspace_id)
+    .bind(project_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let target_workspace: GoalWorkspaceRecord = sqlx::query_as(
+        "SELECT * FROM goal_workspaces WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(target_workspace_id)
+    .bind(project_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if source_workspace.status != "frozen"
+        || source_workspace.dirty
+        || target_workspace.status != "applying"
+        || target_workspace.dirty
+        || source_workspace.repository_id != target_workspace.repository_id
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            request.credentials.clone(),
+            "integration_workspace_not_safe",
+            "发布前源候选或父 workspace 已离开受控状态",
+            "发布前 workspace 不再安全；父 Git 未被本次验证覆盖",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_not_safe",
+            "发布前源候选或父 workspace 已离开受控状态；已暂停等待处理",
+        ));
+    }
+    if ensure_integration_workspace_records(&integration, &source_workspace, &target_workspace)
+        .is_err()
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            request.credentials.clone(),
+            "integration_workspace_record_mismatch",
+            "发布前 Integration 固定基线与 workspace 权威记录不一致",
+            "发布记录与 workspace 安全点不一致；已停止自动推进",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_workspace_record_mismatch",
+            "发布记录与 workspace 安全点不一致；已暂停等待处理",
+        ));
+    }
+    let repository: GitRepositoryRecord =
+        sqlx::query_as("SELECT * FROM project_git_repositories WHERE id = $1 AND project_id = $2")
+            .bind(source_workspace.repository_id)
+            .bind(project_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+    let repository_path = managed_path(&roots.repositories, &repository.storage_key, false)?;
+    let source_path = managed_path(&roots.worktrees, &source_workspace.worktree_key, false)?;
+    let target_path = managed_path(&roots.worktrees, &target_workspace.worktree_key, false)?;
+    let preparation_key = integration.preparation_key.as_deref().ok_or_else(|| {
+        AppError::conflict("integration_candidate_missing", "Integration 缺少准备现场")
+    })?;
+    let preparation_path = managed_path(&roots.runner_outputs, preparation_key, false)?;
+    let source_branch = source_workspace.git_branch_name.clone();
+    let repository_for_source = repository_path.clone();
+    let source_inspection = tokio::task::spawn_blocking(move || {
+        inspect_managed_worktree(&repository_for_source, &source_path, &source_branch)
+    })
+    .await
+    .map_err(|_| AppError::internal("发布前检查源 worktree 的阻塞任务异常结束"))?
+    .map_err(|error| AppError::conflict("source_candidate_drifted", error))?;
+    let candidate_path = preparation_path.clone();
+    let candidate_inspection =
+        tokio::task::spawn_blocking(move || inspect_worktree(&candidate_path))
+            .await
+            .map_err(|_| AppError::internal("发布前检查集成候选的阻塞任务异常结束"))?
+            .map_err(|error| AppError::conflict("integration_candidate_drifted", error))?;
+    if source_inspection.dirty
+        || source_inspection.head_commit != integration.source_head_commit.as_deref().unwrap_or("")
+        || source_inspection.tree_id != integration.source_tree_id.as_deref().unwrap_or("")
+        || source_inspection.workspace_snapshot
+            != integration
+                .source_workspace_snapshot
+                .as_deref()
+                .unwrap_or("")
+        || candidate_inspection.dirty
+        || candidate_inspection.head_commit != request.validation.candidate_commit
+        || candidate_inspection.tree_id != request.validation.candidate_tree_id
+        || candidate_inspection.workspace_snapshot
+            != request.validation.candidate_workspace_snapshot
+    {
+        transaction.rollback().await?;
+        pause_integration_problem(
+            pool,
+            project_id,
+            integration_id,
+            action_run_id,
+            request.credentials.clone(),
+            "integration_candidate_drifted",
+            "源候选或隔离集成候选在验证后发生变化",
+            "验证后的候选发生漂移；父 Git 未被发布",
+        )
+        .await?;
+        return Err(AppError::conflict(
+            "integration_candidate_drifted",
+            "源候选或隔离集成候选在验证后发生变化；已暂停等待处理",
+        ));
+    }
+    sqlx::query(
+        "UPDATE goal_integrations SET git_integration_status = 'applying', updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(integration.id)
+    .execute(&mut *transaction)
+    .await?;
+
+    let expected_target_head = integration
+        .expected_target_head_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("integration_binding_missing", "缺少父 HEAD"))?;
+    let candidate_commit = integration
+        .candidate_commit
+        .clone()
+        .ok_or_else(|| AppError::conflict("integration_candidate_missing", "缺少候选 commit"))?;
+    let target_branch_ref = format!("refs/heads/{}", target_workspace.git_branch_name);
+    let repository_for_publish = repository_path.clone();
+    let target_for_publish = target_path.clone();
+    let preparation_for_publish = preparation_path.clone();
+    let publish = tokio::task::spawn_blocking(move || {
+        publish_candidate_commit(
+            &repository_for_publish,
+            &target_for_publish,
+            &preparation_for_publish,
+            &target_branch_ref,
+            &expected_target_head,
+            &candidate_commit,
+        )
+    })
+    .await
+    .map_err(|_| AppError::internal("发布集成候选的阻塞任务异常结束"))?;
+    let target_inspection = match publish {
+        Ok(inspection) => inspection,
+        Err(summary) => {
+            transaction.rollback().await?;
+            pause_integration_problem(
+                pool,
+                project_id,
+                integration_id,
+                action_run_id,
+                request.credentials,
+                "integration_publish_conflict",
+                &summary,
+                "父 Git 安全点发生变化；CAS 未覆盖现有现场",
+            )
+            .await?;
+            return Err(AppError::conflict(
+                "integration_publish_conflict",
+                "父枝干已变化或 worktree 漂移，CAS 拒绝覆盖并已暂停",
+            ));
+        }
+    };
+
+    let parent_workspace_snapshot_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM workspace_snapshots WHERE workspace_id = $1 \
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(target_workspace.id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let target_session_id: Uuid = sqlx::query_scalar(
+        "SELECT head_session_id FROM goal_branches WHERE id = $1 AND project_id = $2",
+    )
+    .bind(target_goal_branch_id)
+    .bind(project_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let operation_id = integration.operation_id.ok_or_else(|| {
+        AppError::conflict(
+            "integration_binding_missing",
+            "Integration 缺少 workspace operation",
+        )
+    })?;
+    sqlx::query(
+        "UPDATE workspace_operations SET status = 'applied', candidate_commit = $1, \
+         detail = detail || $2, updated_at = now(), completed_at = now() \
+         WHERE id = $3 AND status = 'applying'",
+    )
+    .bind(&target_inspection.head_commit)
+    .bind(Json(json!({
+        "validationReportDigest": report_digest,
+        "targetTreeId": target_inspection.tree_id,
+        "targetWorkspaceSnapshot": target_inspection.workspace_snapshot,
+    })))
+    .bind(operation_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_workspaces SET status = 'ready', head_commit = $1, tree_id = $2, \
+         workspace_snapshot = $3, dirty = false, last_error_code = NULL, \
+         last_error_summary = NULL, updated_at = now() WHERE id = $4",
+    )
+    .bind(&target_inspection.head_commit)
+    .bind(&target_inspection.tree_id)
+    .bind(&target_inspection.workspace_snapshot)
+    .bind(target_workspace.id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO workspace_snapshots \
+         (id, project_id, goal_branch_id, session_id, workspace_id, operation_id, \
+          parent_snapshot_id, head_commit, tree_id, dirty, snapshot_hash) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, $10)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(target_goal_branch_id)
+    .bind(target_session_id)
+    .bind(target_workspace.id)
+    .bind(operation_id)
+    .bind(parent_workspace_snapshot_id)
+    .bind(&target_inspection.head_commit)
+    .bind(&target_inspection.tree_id)
+    .bind(&target_inspection.workspace_snapshot)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_integrations SET git_integration_status = 'applied', \
+         validation_report = $1, validation_report_digest = $2, last_error_code = NULL, \
+         last_error_summary = NULL, updated_at = now(), applied_at = now() WHERE id = $3",
+    )
+    .bind(Json(report_value.clone()))
+    .bind(&report_digest)
+    .bind(integration.id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_workspaces SET status = 'retired', updated_at = now() \
+         WHERE id = $1 AND status = 'frozen'",
+    )
+    .bind(source_workspace.id)
+    .execute(&mut *transaction)
+    .await?;
+    goal_branches::finalize_applied_integration(
+        &mut transaction,
+        project_id,
+        integration.id,
+        Uuid::new_v4(),
+    )
+    .await?;
+    let action_result = json!({
+        "schemaVersion": 1,
+        "integrationId": integration.id,
+        "status": "applied",
+        "candidateCommit": target_inspection.head_commit,
+        "candidateTreeId": target_inspection.tree_id,
+        "targetWorkspaceSnapshot": target_inspection.workspace_snapshot,
+        "validationReportDigest": report_digest,
+    });
+    scheduler_app::complete_verified_action_in_transaction(
+        &mut transaction,
+        &lease,
+        &action,
+        action_result,
+    )
+    .await?;
+    insert_workspace_event(
+        &mut transaction,
+        project_id,
+        "integration",
+        integration.id,
+        "integration.applied",
+        Uuid::new_v4(),
+        json!({
+            "actionRunId": action_run_id,
+            "actionLeaseId": lease.id,
+            "fencingToken": lease.fencing_token,
+            "sourceGoalBranchId": integration.source_goal_branch_id,
+            "targetGoalBranchId": target_goal_branch_id,
+            "targetHeadCommit": target_inspection.head_commit,
+            "targetTreeId": target_inspection.tree_id,
+            "targetWorkspaceSnapshot": target_inspection.workspace_snapshot,
+            "validationReportDigest": report_digest,
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(FinalizeIntegrationOutcome {
+        replayed: false,
+        integration_id,
+        status: "applied".into(),
+        source_goal_branch_id: integration.source_goal_branch_id,
+        target_goal_branch_id,
+        target_head_commit: target_inspection.head_commit,
+        target_tree_id: target_inspection.tree_id,
+        target_workspace_snapshot: target_inspection.workspace_snapshot,
+        validation_report_digest: report_digest,
+    })
 }
 
 pub async fn pause_failed_workspace_provision(
@@ -1636,6 +2577,394 @@ pub async fn fail_runner_job(
     Ok(outcome)
 }
 
+async fn load_integration_for_update(
+    transaction: &mut WorkspaceTransaction<'_>,
+    project_id: Uuid,
+    integration_id: Uuid,
+) -> AppResult<IntegrationState> {
+    sqlx::query_as::<_, IntegrationState>(
+        "SELECT * FROM goal_integrations WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(integration_id)
+    .bind(project_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| AppError::not_found("GoalIntegration 不存在"))
+}
+
+fn ensure_integration_workspace_records(
+    integration: &IntegrationState,
+    source: &GoalWorkspaceRecord,
+    target: &GoalWorkspaceRecord,
+) -> AppResult<()> {
+    if integration.source_workspace_id != Some(source.id)
+        || integration.target_workspace_id != Some(target.id)
+        || integration.source_head_commit != source.head_commit
+        || integration.source_tree_id != source.tree_id
+        || integration.source_workspace_snapshot != source.workspace_snapshot
+        || integration.expected_target_head_commit != target.head_commit
+        || integration.expected_target_workspace_snapshot != target.workspace_snapshot
+    {
+        return Err(AppError::conflict(
+            "integration_workspace_record_mismatch",
+            "Integration 固定的源候选或父基线与 workspace 权威记录不一致",
+        ));
+    }
+    Ok(())
+}
+
+fn existing_prepared_integration(
+    roots: &ManagedRoots,
+    integration: &IntegrationState,
+    action_run_id: Uuid,
+    fencing_token: i64,
+) -> AppResult<PrepareIntegrationResponse> {
+    let preparation_key = integration.preparation_key.clone().ok_or_else(|| {
+        AppError::conflict(
+            "integration_candidate_missing",
+            "validating Integration 缺少准备 key",
+        )
+    })?;
+    let preparation_path = managed_path(&roots.runner_outputs, &preparation_key, false)?;
+    let observed = inspect_worktree(&preparation_path)
+        .map_err(|error| AppError::conflict("integration_candidate_drifted", error))?;
+    if observed.dirty
+        || integration.candidate_commit.as_deref() != Some(observed.head_commit.as_str())
+        || integration.candidate_tree_id.as_deref() != Some(observed.tree_id.as_str())
+        || integration.candidate_workspace_snapshot.as_deref()
+            != Some(observed.workspace_snapshot.as_str())
+    {
+        return Err(AppError::conflict(
+            "integration_candidate_drifted",
+            "已准备的隔离集成候选与权威摘要不一致",
+        ));
+    }
+    Ok(PrepareIntegrationResponse {
+        replayed: false,
+        action_run_id,
+        integration_id: integration.id,
+        prepared_fencing_token: fencing_token,
+        preparation_key,
+        candidate_commit: observed.head_commit,
+        candidate_tree_id: observed.tree_id,
+        candidate_workspace_snapshot: observed.workspace_snapshot,
+        expected_target_head_commit: integration
+            .expected_target_head_commit
+            .clone()
+            .ok_or_else(|| AppError::conflict("integration_binding_missing", "缺少父 HEAD"))?,
+        source_candidate_digest: integration
+            .source_candidate_digest
+            .clone()
+            .ok_or_else(|| AppError::conflict("integration_binding_missing", "缺少源摘要"))?,
+        selected_commits: integration.selected_commits.0.clone(),
+    })
+}
+
+fn validate_integration_report(
+    report: &crate::workspace::IntegrationValidationReport,
+) -> AppResult<()> {
+    if report.schema_version != 1 || report.status != "passed" {
+        return Err(AppError::bad_request(
+            "integration_validation_failed",
+            "Integration Worker 只有在父契约回归全部通过后才能提交 passed 报告",
+        ));
+    }
+    validate_git_oid(&report.candidate_commit)
+        .map_err(|error| AppError::bad_request("invalid_integration_report", error))?;
+    validate_git_oid(&report.candidate_tree_id)
+        .map_err(|error| AppError::bad_request("invalid_integration_report", error))?;
+    validate_prefixed_sha256(
+        "Integration candidate workspace snapshot",
+        &report.candidate_workspace_snapshot,
+    )?;
+    if report.checks.is_empty()
+        || report.checks.len() > 100
+        || report
+            .checks
+            .iter()
+            .any(|check| check.trim().is_empty() || check.chars().count() > 4_000)
+        || !report.contract_check.is_object()
+        || report
+            .contract_check
+            .as_object()
+            .is_none_or(serde_json::Map::is_empty)
+    {
+        return Err(AppError::bad_request(
+            "invalid_integration_report",
+            "父目标回归必须包含非空检查清单和逐条契约检查",
+        ));
+    }
+    let isolation = &report.isolation;
+    if !isolation.candidate_read_only
+        || !isolation.no_workspace_writes
+        || !isolation.no_new_privileges
+        || !isolation.docker_socket_absent
+        || !isolation.host_secrets_absent
+        || isolation.effective_capabilities_hex.is_empty()
+        || !isolation
+            .effective_capabilities_hex
+            .chars()
+            .all(|character| character == '0')
+    {
+        return Err(AppError::forbidden(
+            "unsafe_integration_attestation",
+            "Integration Worker 没有证明候选只读、无写权、无宿主秘密和无有效 capabilities",
+        ));
+    }
+    Ok(())
+}
+
+fn build_integration_candidate(
+    repository_path: &Path,
+    preparation_path: &Path,
+    expected_target_head: &str,
+    source_head: &str,
+    selected_commits: &[SelectedIntegrationCommit],
+) -> Result<GitWorkspaceInspection, String> {
+    validate_git_oid(expected_target_head)?;
+    validate_git_oid(source_head)?;
+    if preparation_path.exists() {
+        run_git([
+            OsStr::new("--git-dir"),
+            repository_path.as_os_str(),
+            OsStr::new("worktree"),
+            OsStr::new("remove"),
+            OsStr::new("--force"),
+            preparation_path.as_os_str(),
+        ])?;
+    }
+    if let Some(parent) = preparation_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    run_git([
+        OsStr::new("--git-dir"),
+        repository_path.as_os_str(),
+        OsStr::new("worktree"),
+        OsStr::new("add"),
+        OsStr::new("--detach"),
+        preparation_path.as_os_str(),
+        OsStr::new(expected_target_head),
+    ])?;
+    let mut contribution_ids = BTreeSet::new();
+    for selected in selected_commits {
+        validate_git_oid(&selected.commit)?;
+        if !contribution_ids.insert(selected.contribution_id) {
+            return Err("选中代码 Contribution 重复".into());
+        }
+        let source_ancestry = run_git_exit(&[
+            OsString::from("--git-dir"),
+            repository_path.as_os_str().to_os_string(),
+            OsString::from("merge-base"),
+            OsString::from("--is-ancestor"),
+            OsString::from(&selected.commit),
+            OsString::from(source_head),
+        ])?;
+        if source_ancestry != 0 {
+            return Err(format!(
+                "Contribution {} 的 commit 不属于冻结源 HEAD",
+                selected.contribution_id
+            ));
+        }
+        let already_applied = run_git_exit(&[
+            OsString::from("-C"),
+            preparation_path.as_os_str().to_os_string(),
+            OsString::from("merge-base"),
+            OsString::from("--is-ancestor"),
+            OsString::from(&selected.commit),
+            OsString::from("HEAD"),
+        ])? == 0;
+        if already_applied {
+            continue;
+        }
+        let cherry_pick = run_git_authored(&[
+            OsString::from("-C"),
+            preparation_path.as_os_str().to_os_string(),
+            OsString::from("cherry-pick"),
+            OsString::from("--no-commit"),
+            OsString::from(&selected.commit),
+        ]);
+        if let Err(error) = cherry_pick {
+            let _ = run_git_owned(&[
+                OsString::from("-C"),
+                preparation_path.as_os_str().to_os_string(),
+                OsString::from("cherry-pick"),
+                OsString::from("--abort"),
+            ]);
+            return Err(format!(
+                "Contribution {} cherry-pick 冲突：{error}",
+                selected.contribution_id
+            ));
+        }
+        let staged = run_git_exit(&[
+            OsString::from("-C"),
+            preparation_path.as_os_str().to_os_string(),
+            OsString::from("diff"),
+            OsString::from("--cached"),
+            OsString::from("--quiet"),
+            OsString::from("--exit-code"),
+        ])?;
+        if staged == 0 {
+            run_git_owned(&[
+                OsString::from("-C"),
+                preparation_path.as_os_str().to_os_string(),
+                OsString::from("reset"),
+                OsString::from("--hard"),
+                OsString::from("HEAD"),
+            ])?;
+            continue;
+        }
+        if staged != 1 {
+            return Err("Git 无法判断选择性集成候选差异".into());
+        }
+        run_git_authored(&[
+            OsString::from("-C"),
+            preparation_path.as_os_str().to_os_string(),
+            OsString::from("commit"),
+            OsString::from("--no-gpg-sign"),
+            OsString::from("-m"),
+            OsString::from(format!(
+                "fudian: integrate contribution {}",
+                selected.contribution_id
+            )),
+            OsString::from("-m"),
+            OsString::from(format!(
+                "Fudian-Contribution: {}\nFudian-Runner-Job: {}\nFudian-Source-Commit: {}",
+                selected.contribution_id, selected.runner_job_id, selected.commit
+            )),
+        ])?;
+    }
+    let inspection = inspect_worktree(preparation_path)?;
+    if inspection.dirty {
+        return Err("隔离集成候选形成后仍为 dirty".into());
+    }
+    Ok(inspection)
+}
+
+async fn record_integration_problem(
+    pool: &PgPool,
+    project_id: Uuid,
+    integration_id: Uuid,
+    code: &str,
+    summary: &str,
+) -> AppResult<()> {
+    let mut transaction = pool.begin().await?;
+    let integration =
+        load_integration_for_update(&mut transaction, project_id, integration_id).await?;
+    if integration.git_integration_status == "applied" {
+        return Err(AppError::conflict(
+            "integration_already_applied",
+            "已发布 Integration 不能改写为冲突",
+        ));
+    }
+    if matches!(
+        integration.git_integration_status.as_str(),
+        "pending" | "preparing" | "validating" | "applying"
+    ) {
+        sqlx::query(
+            "UPDATE goal_integrations SET git_integration_status = 'conflicted', \
+             last_error_code = $1, last_error_summary = $2, updated_at = now() WHERE id = $3",
+        )
+        .bind(code)
+        .bind(summary)
+        .bind(integration.id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    if let Some(operation_id) = integration.operation_id {
+        sqlx::query(
+            "UPDATE workspace_operations SET status = 'failed', error_code = $1, \
+             error_summary = $2, updated_at = now(), completed_at = now() \
+             WHERE id = $3 AND status IN ('planned', 'applying')",
+        )
+        .bind(code)
+        .bind(summary)
+        .bind(operation_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    if let Some(target_workspace_id) = integration.target_workspace_id {
+        let target_status = if code == "integration_publish_conflict" {
+            "error"
+        } else {
+            "ready"
+        };
+        sqlx::query(
+            "UPDATE goal_workspaces SET status = $1, last_error_code = $2, \
+             last_error_summary = $3, updated_at = now() WHERE id = $4 AND status = 'applying'",
+        )
+        .bind(target_status)
+        .bind(code)
+        .bind(summary)
+        .bind(target_workspace_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    let session_id: Uuid =
+        sqlx::query_scalar("SELECT session_id FROM goal_review_gates WHERE id = $1")
+            .bind(integration.review_gate_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+    sqlx::query(
+        "INSERT INTO goal_attention_items \
+         (id, project_id, goal_branch_id, session_id, kind, status, dedupe_key, title, \
+          reason, safe_checkpoint, attempted, risk, user_action, recommendation) \
+         VALUES ($1, $2, $3, $4, 'integration_conflict', 'open', $5, \
+                 '父枝干集成已安全暂停', $6, \
+                 '父 Git ref 未被本次操作覆盖；源候选继续冻结', \
+                 '已在隔离 worktree 选择性应用并执行 Git CAS', \
+                 '继续自动重试可能覆盖尚未理解的父现场或重复冲突', \
+                 '查看冲突、父现场和选中 Contribution 后决定退回或重新规划', \
+                 '优先保留当前父安全点；不要手工绕过 CAS') \
+         ON CONFLICT (project_id, dedupe_key) WHERE status = 'open' DO NOTHING",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(integration.source_goal_branch_id)
+    .bind(session_id)
+    .bind(format!("integration:{}:conflict", integration.id))
+    .bind(summary)
+    .execute(&mut *transaction)
+    .await?;
+    insert_workspace_event(
+        &mut transaction,
+        project_id,
+        "integration",
+        integration.id,
+        "integration.conflicted",
+        Uuid::new_v4(),
+        json!({ "code": code, "summary": summary, "parentOverwritten": false }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn pause_integration_problem(
+    pool: &PgPool,
+    project_id: Uuid,
+    integration_id: Uuid,
+    action_run_id: Uuid,
+    credentials: crate::scheduler::ActionLeaseCredentials,
+    code: &str,
+    detail_summary: &str,
+    worker_summary: &str,
+) -> AppResult<()> {
+    record_integration_problem(pool, project_id, integration_id, code, detail_summary).await?;
+    let _ = scheduler_app::fail_action_run(
+        pool,
+        action_run_id,
+        FailActionRunRequest {
+            credentials,
+            failure_kind: "unsafe_state".into(),
+            summary: worker_summary.into(),
+            detail: json!({ "integrationId": integration_id, "reason": detail_summary }),
+        },
+    )
+    .await;
+    Ok(())
+}
+
 async fn load_runner_job(
     transaction: &mut WorkspaceTransaction<'_>,
     project_id: Uuid,
@@ -2427,10 +3756,10 @@ async fn verified_workspace_detail(
     .bind(workspace.id)
     .fetch_optional(pool)
     .await?;
-    if workspace.status != "ready" {
+    if !matches!(workspace.status.as_str(), "ready" | "frozen" | "retired") {
         return Err(AppError::conflict(
             "workspace_not_ready",
-            "GoalBranch worktree 尚未处于 ready 状态",
+            "GoalBranch worktree 尚未处于可检查状态",
         ));
     }
     let path = managed_path(&roots.worktrees, &workspace.worktree_key, false)?;
@@ -2463,7 +3792,7 @@ async fn verified_ready_workspace(
     goal_branch_id: Uuid,
 ) -> AppResult<WorkspaceDetail> {
     let detail = verified_workspace_detail(pool, roots, project_id, goal_branch_id).await?;
-    if !detail.matches_record || detail.observed.dirty {
+    if detail.workspace.status != "ready" || !detail.matches_record || detail.observed.dirty {
         return Err(AppError::conflict(
             "workspace_record_drifted",
             "worktree 的磁盘现场与已记录安全点不一致",

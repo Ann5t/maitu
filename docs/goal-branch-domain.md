@@ -121,7 +121,7 @@ Session 是枝干主图上的主要工作节点。它保存分配的一轮工作
 
 Gate 状态为 `pending_ai_review | pending_human_review | accepted | partially_accepted | rejected | abandoned | withdrawn`。每个决定写入不可变 `ReviewDecision`：角色为 `review_ai | human`，结论为 `recommend_accept | recommend_reject | accept | partial_accept | reject | abandon | withdraw`。
 
-独立审核 AI 只能给建议；用户决定才会产生 `GoalIntegration`。完整接受使子枝干为 `integrated`、根枝干为 `completed`。部分接受只回流用户选中的 Contribution，并把枝干置为 `stopped`，避免把未达成目标写成完成。
+独立审核 AI 只能给建议；真实候选的建议必须来自持有专用 ActionLease 的独立 Review Worker，普通表单不能代录。用户接受子枝干后只授权一个 `pending` GoalIntegration；完整接受或部分接受都要先在隔离父候选上选择性应用所选代码 commit、完成父契约回归并以 Git CAS 发布。物理发布和上下文均确认后，完整接受才使子枝干为 `integrated`，部分接受使其为 `stopped`。根枝干没有父 Integration，仍只有用户接受才能成为 `completed`。
 
 ### 2.7 Event、AttentionItem 与 CommandReceipt
 
@@ -174,21 +174,22 @@ Gate 状态为 `pending_ai_review | pending_human_review | accepted | partially_
 | `session.start_next` | 无 running Session → 新 `running` Session | 分配说明、上一 Session、当前契约/环境 | 枝干 `active`；上一 Session 为 `review_rejected` 或显式结束；无未决 Gate | 新的序号递增 Session | `session.started` | C |
 | `session.stop` | 非终态、非审核态 → `stopped` | 用户原因 | Actor 为用户，或已授权的安全停止 | 枝干 `stopped`；关闭/替换待处理项 | `session.stopped`、`goal_branch.stopped` | C |
 
-`waiting_branch_review` 只有在对应 Proposal 被取消后才能恢复；批准后转成 `waiting_dependency`。依赖子枝干被接受、部分接受、停止或取消后，父 Session 仍由显式 `session.resume` 恢复，系统不会悄悄启动 Agent。
+`waiting_branch_review` 只有在对应 Proposal 被取消后才能恢复；批准后转成 `waiting_dependency`。子枝干仅获用户接受时父 Session 仍等待；只有所选结果已经通过父契约回归并物理集成，且没有其他未决依赖时，系统才把同一个父 Session 恢复为 `running`。这表示调度可继续，不会生成新 Session，也不代表父目标自动完成。
 
 ## 7. 拟合并与审核转换
 
 | 命令 | 当前 → 新状态 | 关键输入 | 前置条件 | 原子输出 | 事件 | 幂等 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `merge.propose` | Session `running` → `awaiting_merge_review` | Contribution IDs、冻结 Git/环境/测试/风险快照 | Agent 声明整个目标达成；当前契约一致；无未决必需子目标；候选均属本 Session/枝干 | `pending_ai_review` Gate；枝干 `review_pending`；审核待处理项 | `merge.proposed` | C |
-| `review.ai_record` | `pending_ai_review` → `pending_human_review` | 结论、逐条契约检查、反例、复验结果 | reviewer 与工作 Agent 身份不同；候选哈希未变 | AI ReviewDecision；用户待处理项 | `review.ai_completed` | C |
-| `review.human_accept` | `pending_human_review` → `accepted` | 选中全部/指定 Contribution、说明 | Actor 为用户；AI 审核已记录；冻结哈希未变 | Session `accepted`；子枝干 `integrated` 或根枝干/项目 `completed`；Integration；仅此时更新父上下文 | `review.accepted`、`contributions.integrated`、枝干/项目终态事件 | C |
-| `review.human_partial` | `pending_human_review` → `partially_accepted` | 非空 Contribution 子集、未接受原因 | Actor 为用户；子集均在候选中 | Session `accepted`；枝干 `stopped`；选中项 Integration | `review.partially_accepted`、`goal_branch.stopped` | C |
+| Review Worker complete | `pending_ai_review` → `pending_human_review` | 冻结摘要/现场、逐条契约检查、反例、复验与隔离证明 | 专用 ActionLease；身份不同；摘要、HEAD/tree/snapshot/环境和 fencing 全匹配 | 不可变 AI ReviewDecision；用户待处理项 | `review.worker_completed` | Lease |
+| `review.human_accept` | `pending_human_review` → `accepted`（Gate） | 全部 Contribution、说明 | Actor 为用户；独立审核已记录；冻结摘要未变 | 根目标直接完成；子目标仅创建 `pending` Integration/ActionRun，Session/枝干继续等待物理确认 | `review.accepted`、`integration.queued` | C |
+| `review.human_partial` | `pending_human_review` → `partially_accepted`（Gate） | 非空 Contribution 真子集、未接受原因 | Actor 为用户；子集均在候选中 | 创建只含选中项的 `pending` Integration；Session/枝干继续等待物理确认 | `review.partially_accepted`、`integration.queued` | C |
+| Integration Worker prepare/finalize | `pending` → `preparing` → `validating` → `applying` → `applied` | 选中 commit、父基线、只读候选、父契约报告 | 源冻结；父安全点匹配；专用 Lease/fencing；Git CAS 成功 | 父 ref/worktree/snapshot/上下文一致；源枝干 `integrated` 或 `stopped`；父 Session 可继续但父目标未完成 | `integration.candidate_prepared`、`integration.applied` | Lease |
 | `review.human_reject` | `pending_human_review` → `rejected` | 退回理由、下一轮要求 | Actor 为用户 | Session `review_rejected`；枝干 `active` 但无 writer；创建继续待处理项；父枝干无变化 | `review.rejected` | C |
 | `review.human_abandon` | `pending_human_review` → `abandoned` | 放弃理由 | Actor 为用户 | Session/枝干 `stopped`；不产生 Integration | `review.abandoned`、`goal_branch.stopped` | C |
 | `merge.withdraw` | `pending_ai_review`/`pending_human_review` → `withdrawn` | 新发现问题与证据 | 工作 Agent 或审核 AI 发现候选不再可信 | Session `review_rejected`；枝干 `active`；新 Session 才能修改 | `merge.withdrawn` | C |
 
-接受时创建的 Integration 只记录被选择的 Contribution、源/目标枝干、源 Gate、目标继承版本和实际 Git 集成状态。v0.1 可以先做到“领域接受与上下文可见”，不能伪称尚未执行的 Git merge 已完成。
+Integration 冻结所选 Contribution 对应的 Runner commit、源候选摘要、源/父 workspace 安全点、ActionRun、候选 commit/tree/snapshot、父契约验证报告和实际 Git 状态。冲突、漂移、验证失败或跨存储状态不唯一时保留父安全点并产生 Attention/Notification；不能用 `not_attempted` 或仅有数据库结论冒充完成。
 
 ## 8. 契约修订、停止与归档
 

@@ -1325,7 +1325,8 @@ async fn sync_integrated_sources(
 ) -> AppResult<Vec<ContextEntryRecord>> {
     let source_branches: Vec<Uuid> = sqlx::query_scalar(
         "SELECT DISTINCT source_goal_branch_id FROM goal_integrations \
-         WHERE project_id = $1 AND target_goal_branch_id = $2 ORDER BY source_goal_branch_id",
+         WHERE project_id = $1 AND target_goal_branch_id = $2 \
+           AND git_integration_status = 'applied' ORDER BY source_goal_branch_id",
     )
     .bind(project_id)
     .bind(target_goal_branch_id)
@@ -1343,6 +1344,7 @@ async fn sync_integrated_sources(
           AND e.source_kind = 'contribution' \
           AND e.source_record_id = ic.contribution_id \
          WHERE i.project_id = $1 AND i.target_goal_branch_id = $2 \
+           AND i.git_integration_status = 'applied' \
          ORDER BY e.created_at, e.id",
     )
     .bind(project_id)
@@ -1367,6 +1369,7 @@ async fn sync_integrated_sources(
           AND decision.source_kind = 'review_decision' \
           AND decision.source_record_id = d.id \
          WHERE i.project_id = $1 AND i.target_goal_branch_id = $2 \
+           AND i.git_integration_status = 'applied' \
          ON CONFLICT DO NOTHING",
     )
     .bind(project_id)

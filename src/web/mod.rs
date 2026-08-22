@@ -149,6 +149,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::api_fail_action_run),
         )
         .route(
+            "/api/v1/scheduler/action-runs/{action_run_id}/integrations/{integration_id}/prepare",
+            post(handlers::api_prepare_integration),
+        )
+        .route(
+            "/api/v1/scheduler/action-runs/{action_run_id}/integrations/{integration_id}/finalize",
+            post(handlers::api_finalize_integration),
+        )
+        .route(
             "/api/v1/scheduler/action-runs/{action_run_id}/tool-lease/activate",
             post(handlers::api_activate_tool_lease),
         )
