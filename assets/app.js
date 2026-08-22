@@ -142,8 +142,22 @@
     const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
     return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
   };
+  const cookieValue = (name) => document.cookie
+    .split(";")
+    .map((part) => part.trim().split("="))
+    .find(([candidate]) => candidate === name)?.slice(1).join("=") || null;
   const jsonRequest = async (url, options) => {
-    const response = await fetch(url, options);
+    const requestOptions = { ...options };
+    const method = String(requestOptions.method || "GET").toUpperCase();
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+      const csrf = cookieValue("__Host-fudian_csrf");
+      if (csrf) {
+        const headers = new Headers(requestOptions.headers || {});
+        headers.set("x-csrf-token", csrf);
+        requestOptions.headers = headers;
+      }
+    }
+    const response = await fetch(url, requestOptions);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
     return payload;

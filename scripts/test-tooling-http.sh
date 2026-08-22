@@ -86,6 +86,7 @@ done
 docker run -d --name "$tooling_app" --network "$tooling_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@tooling-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   -e ARTIFACT_ROOT=/tmp/fudian-tooling-artifacts \
   -e RUST_LOG=fudian=info \

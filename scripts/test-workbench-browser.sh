@@ -42,6 +42,7 @@ done
 docker run -d --name "$browser_app" --network "$browser_network" \
   --network-alias browser-app \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@browser-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-browser-artifacts \
   -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$browser_worker_bootstrap" \
   -e RUST_LOG=fudian=info \

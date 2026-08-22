@@ -1,0 +1,8 @@
+{
+	admin off
+}
+
+https://{$FUDIAN_SITE_HOST}:{$FUDIAN_SITE_PORT} {
+	tls internal
+	reverse_proxy security-app:3000
+}

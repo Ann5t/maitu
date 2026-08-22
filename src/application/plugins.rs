@@ -1,7 +1,11 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool, types::Json};
 use uuid::Uuid;
 
@@ -9,13 +13,14 @@ use crate::{
     application::{context_memory, workspaces},
     config::Config,
     error::{AppError, AppResult},
-    goal_domain::{CommandReceiptIdentity, SessionStatus},
+    goal_domain::{CommandReceiptIdentity, SessionStatus, canonical_json_sha256},
     tooling::{
         EnvironmentManifest, MockToolBroker, PluginCatalogEntry, PluginInstallStatementRequest,
-        PluginManifest, PluginManifestDraft, PluginPublisherDraft, PluginSelector, PluginSelfTest,
-        ResolvedPluginRef, SignedPluginInstallRequest, ToolBroker, ToolCall, ToolResult,
-        normalize_publisher_id, reference_mock_plugin, validate_tool_input_schema,
-        verify_install_signature,
+        PluginManifest, PluginManifestDraft, PluginPublisherDraft, PluginResourceMetadata,
+        PluginSelector, PluginSelfTest, ResolvedPluginRef, SignedPluginInstallRequest, ToolBroker,
+        ToolCall, ToolResult, VerifiedPluginResource, expected_plugin_resource_media_type,
+        normalize_plugin_resource_path, normalize_publisher_id, reference_mock_plugin,
+        validate_tool_input_schema, verify_install_signature,
     },
     workspace::{
         FailRunnerJobRequest, FinalizeRunnerJobRequest, PrepareRunnerJobRequest,
@@ -85,6 +90,70 @@ pub struct PluginDetail {
     pub manifest: PluginManifest,
     pub installation: Option<PluginInstallationRecord>,
     pub publisher: Option<PluginPublisherRecord>,
+    pub resources: Vec<PluginResourceMetadata>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginResourceSelector {
+    pub plugin: ResolvedPluginRef,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadPluginContextRequest {
+    pub client_request_id: Uuid,
+    #[serde(default = "default_true")]
+    pub include_skills: bool,
+    #[serde(default)]
+    pub resources: Vec<PluginResourceSelector>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginResourceContent {
+    pub plugin: ResolvedPluginRef,
+    pub path: String,
+    pub media_type: String,
+    pub content_digest: String,
+    pub byte_length: u32,
+    pub encoding: &'static str,
+    pub content_base64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPluginContext {
+    pub plugin: ResolvedPluginRef,
+    pub display_name: String,
+    pub description: String,
+    pub capabilities: Vec<String>,
+    pub skill: Option<PluginResourceContent>,
+    pub resources: Vec<PluginResourceMetadata>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadPluginContextResponse {
+    pub schema_version: u32,
+    pub replayed: bool,
+    pub project_id: Uuid,
+    pub session_id: Uuid,
+    pub environment_fingerprint: String,
+    pub plugins: Vec<AgentPluginContext>,
+    pub requested_resources: Vec<PluginResourceContent>,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct PluginResourceRow {
+    plugin_package_id: Uuid,
+    path: String,
+    media_type: String,
+    content_digest: String,
+    content: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -306,6 +375,7 @@ pub async fn install_signed_plugin(
     request: SignedPluginInstallRequest,
 ) -> AppResult<PluginInstallationRecord> {
     let request = request.normalize()?;
+    let resources = request.verified_resources()?;
     if request.self_test.runner_digest != expected_runner_digest {
         return Err(AppError::conflict(
             "runner_digest_mismatch",
@@ -357,6 +427,12 @@ pub async fn install_signed_plugin(
         .fetch_one(&mut *transaction)
         .await?
     };
+    let locked_package_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM plugin_packages WHERE id = $1 FOR UPDATE")
+            .bind(package_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+    persist_and_verify_plugin_resources(&mut transaction, locked_package_id, &resources).await?;
     if let Some(existing) = sqlx::query_as::<_, PluginInstallationRecord>(
         "SELECT * FROM plugin_installations WHERE plugin_package_id = $1",
     )
@@ -498,6 +574,103 @@ async fn insert_manifest(pool: &PgPool, manifest: &PluginManifest) -> AppResult<
     .map_err(AppError::from)
 }
 
+async fn persist_and_verify_plugin_resources(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    package_id: Uuid,
+    resources: &[VerifiedPluginResource],
+) -> AppResult<()> {
+    for resource in resources {
+        sqlx::query(
+            "INSERT INTO plugin_package_resources \
+             (id, plugin_package_id, path, media_type, content_digest, content) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (plugin_package_id, path) DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(package_id)
+        .bind(&resource.path)
+        .bind(&resource.media_type)
+        .bind(&resource.content_digest)
+        .bind(&resource.content)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    let stored = sqlx::query_as::<_, PluginResourceRow>(
+        "SELECT plugin_package_id, path, media_type, content_digest, content \
+         FROM plugin_package_resources WHERE plugin_package_id = $1 ORDER BY path",
+    )
+    .bind(package_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    if stored.len() != resources.len()
+        || stored.iter().zip(resources).any(|(stored, expected)| {
+            stored.plugin_package_id != package_id
+                || stored.path != expected.path
+                || stored.media_type != expected.media_type
+                || stored.content_digest != expected.content_digest
+                || stored.content != expected.content
+        })
+    {
+        return Err(AppError::conflict(
+            "plugin_resource_conflict",
+            "同一不可变插件包已有不同或不完整的资源内容",
+        ));
+    }
+    Ok(())
+}
+
+async fn load_plugin_resources(
+    pool: &PgPool,
+    package_id: Uuid,
+    manifest: &PluginManifest,
+) -> AppResult<Vec<PluginResourceRow>> {
+    let rows = sqlx::query_as::<_, PluginResourceRow>(
+        "SELECT plugin_package_id, path, media_type, content_digest, content \
+         FROM plugin_package_resources WHERE plugin_package_id = $1 ORDER BY path",
+    )
+    .bind(package_id)
+    .fetch_all(pool)
+    .await?;
+    let declared = manifest
+        .assets
+        .iter()
+        .map(|asset| (asset.path.as_str(), asset.content_digest.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let observed = rows
+        .iter()
+        .map(|row| row.path.as_str())
+        .collect::<BTreeSet<_>>();
+    if declared.keys().copied().collect::<BTreeSet<_>>() != observed {
+        return Err(AppError::conflict(
+            "plugin_resource_incomplete",
+            "插件资源与不可变 Manifest 不完整对应",
+        ));
+    }
+    for row in &rows {
+        let actual = format!("sha256:{}", hex::encode(Sha256::digest(&row.content)));
+        if row.plugin_package_id != package_id
+            || row.content_digest != actual
+            || declared.get(row.path.as_str()).copied() != Some(actual.as_str())
+            || row.media_type != expected_plugin_resource_media_type(&row.path)
+        {
+            return Err(AppError::conflict(
+                "plugin_resource_corrupt",
+                format!("插件资源 {} 的内容或摘要不可信", row.path),
+            ));
+        }
+    }
+    Ok(rows)
+}
+
+fn plugin_resource_metadata(row: PluginResourceRow) -> PluginResourceMetadata {
+    PluginResourceMetadata {
+        path: row.path,
+        media_type: row.media_type,
+        content_digest: row.content_digest,
+        byte_length: row.content.len() as u32,
+    }
+}
+
 pub async fn list_catalog(pool: &PgPool) -> AppResult<Vec<PluginCatalogEntry>> {
     let rows: Vec<(Json<Value>, Option<String>)> = sqlx::query_as(
         "SELECT p.manifest, publisher.publisher_id \
@@ -562,10 +735,25 @@ pub async fn get_plugin_detail(
     } else {
         None
     };
+    let package_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM plugin_packages \
+         WHERE plugin_id = $1 AND version = $2 AND content_digest = $3",
+    )
+    .bind(&manifest.plugin_id)
+    .bind(&manifest.version)
+    .bind(&manifest.content_digest)
+    .fetch_one(pool)
+    .await?;
+    let resources = load_plugin_resources(pool, package_id, &manifest)
+        .await?
+        .into_iter()
+        .map(plugin_resource_metadata)
+        .collect();
     Ok(PluginDetail {
         manifest,
         installation,
         publisher,
+        resources,
     })
 }
 
@@ -841,6 +1029,280 @@ pub async fn bind_environment(
         environment_manifest_id: environment.id,
         environment_fingerprint: environment.fingerprint,
     })
+}
+
+pub async fn read_plugin_context(
+    pool: &PgPool,
+    expected_runner_digest: &str,
+    project_id: Uuid,
+    session_id: Uuid,
+    mut request: ReadPluginContextRequest,
+) -> AppResult<ReadPluginContextResponse> {
+    if request.resources.len() > 16 {
+        return Err(AppError::bad_request(
+            "too_many_plugin_resources",
+            "一次最多按需读取 16 个插件资源",
+        ));
+    }
+    for selector in &mut request.resources {
+        selector.plugin = selector.plugin.clone().validate()?;
+        selector.path = normalize_plugin_resource_path(std::mem::take(&mut selector.path))?;
+    }
+    request.resources.sort_by(|left, right| {
+        left.plugin
+            .cmp(&right.plugin)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if request.resources.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(AppError::bad_request(
+            "duplicate_plugin_resource",
+            "按需资源请求不能包含重复路径",
+        ));
+    }
+    let request_hash = canonical_json_sha256(&request)?;
+    let binding: Option<(String, Json<Value>)> = sqlx::query_as(
+        "SELECT b.environment_fingerprint, e.manifest \
+         FROM session_environment_bindings b \
+         JOIN environment_manifests e ON e.id = b.environment_manifest_id \
+         WHERE b.project_id = $1 AND b.session_id = $2",
+    )
+    .bind(project_id)
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((environment_fingerprint, environment_json)) = binding else {
+        let session_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM goal_sessions WHERE id = $1 AND project_id = $2)",
+        )
+        .bind(session_id)
+        .bind(project_id)
+        .fetch_one(pool)
+        .await?;
+        return if session_exists {
+            Err(AppError::conflict(
+                "environment_not_bound",
+                "Session 尚未固定 EnvironmentManifest",
+            ))
+        } else {
+            Err(AppError::not_found("Agent Session 不存在"))
+        };
+    };
+    let environment =
+        serde_json::from_value::<EnvironmentManifest>(environment_json.0)?.normalize()?;
+    if environment.fingerprint()? != environment_fingerprint {
+        return Err(AppError::conflict(
+            "environment_fingerprint_mismatch",
+            "Session 的 EnvironmentManifest 内容与指纹不一致",
+        ));
+    }
+
+    let mut bundles = BTreeMap::new();
+    for plugin in &environment.plugins {
+        let package: Option<(Uuid, Json<Value>)> = sqlx::query_as(
+            "SELECT id, manifest FROM plugin_packages \
+             WHERE plugin_id = $1 AND version = $2 AND content_digest = $3",
+        )
+        .bind(&plugin.plugin_id)
+        .bind(&plugin.version)
+        .bind(&plugin.content_digest)
+        .fetch_optional(pool)
+        .await?;
+        let Some((package_id, manifest_json)) = package else {
+            return Err(AppError::conflict(
+                "plugin_package_missing",
+                "Session 固定的插件包不存在",
+            ));
+        };
+        let manifest = serde_json::from_value::<PluginManifest>(manifest_json.0)?.verify_seal()?;
+        if manifest.resolved_ref() != *plugin {
+            return Err(AppError::conflict(
+                "plugin_package_corrupt",
+                "插件包内容与 EnvironmentManifest 固定引用不一致",
+            ));
+        }
+        if manifest.runtime.kind == "oci" {
+            load_active_installation(pool, package_id, &manifest, expected_runner_digest).await?;
+        }
+        let resources = load_plugin_resources(pool, package_id, &manifest).await?;
+        bundles.insert(plugin.clone(), (manifest, resources));
+    }
+
+    let mut plugins = Vec::with_capacity(environment.plugins.len());
+    for plugin in &environment.plugins {
+        let (manifest, resources) = bundles.get(plugin).ok_or_else(|| {
+            AppError::conflict("plugin_package_missing", "Session 插件上下文不完整")
+        })?;
+        let skill = if request.include_skills {
+            manifest
+                .skill
+                .as_ref()
+                .map(|skill| {
+                    let row = resources
+                        .iter()
+                        .find(|row| row.path == skill.entry)
+                        .ok_or_else(|| {
+                            AppError::conflict(
+                                "plugin_resource_incomplete",
+                                "插件 Skill 入口没有对应的不可变内容",
+                            )
+                        })?;
+                    let content = plugin_resource_content(plugin.clone(), row)?;
+                    if content.text.is_none() {
+                        return Err(AppError::conflict(
+                            "invalid_plugin_skill",
+                            "插件 Skill 不是可注入的 UTF-8 文本",
+                        ));
+                    }
+                    Ok(content)
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        plugins.push(AgentPluginContext {
+            plugin: plugin.clone(),
+            display_name: manifest.display_name.clone(),
+            description: manifest.description.clone(),
+            capabilities: manifest.capabilities.clone(),
+            skill,
+            resources: resources
+                .iter()
+                .cloned()
+                .map(plugin_resource_metadata)
+                .collect(),
+        });
+    }
+
+    let mut requested_resources = Vec::with_capacity(request.resources.len());
+    for selector in &request.resources {
+        let Some((_, resources)) = bundles.get(&selector.plugin) else {
+            return Err(AppError::forbidden(
+                "plugin_not_in_environment",
+                "只能读取当前 Session 固定环境中的插件资源",
+            ));
+        };
+        let row = resources
+            .iter()
+            .find(|row| row.path == selector.path)
+            .ok_or_else(|| AppError::not_found("插件资源不存在"))?;
+        requested_resources.push(plugin_resource_content(selector.plugin.clone(), row)?);
+    }
+
+    let disclosed_bytes = plugins
+        .iter()
+        .filter_map(|plugin| plugin.skill.as_ref())
+        .chain(requested_resources.iter())
+        .try_fold(0_u64, |total, resource| {
+            total
+                .checked_add(u64::from(resource.byte_length))
+                .ok_or_else(|| {
+                    AppError::bad_request("plugin_context_too_large", "插件上下文披露大小溢出")
+                })
+        })?;
+    if disclosed_bytes > 1024 * 1024 {
+        return Err(AppError::bad_request(
+            "plugin_context_too_large",
+            "单次插件上下文最多披露 1 MiB；请关闭自动 Skill 并按需选择",
+        ));
+    }
+
+    let served_resources = plugins
+        .iter()
+        .filter_map(|plugin| {
+            plugin.skill.as_ref().map(|skill| {
+                json!({
+                    "plugin": plugin.plugin,
+                    "path": skill.path,
+                    "contentDigest": skill.content_digest,
+                    "purpose": "skill_bootstrap",
+                })
+            })
+        })
+        .chain(requested_resources.iter().map(|resource| {
+            json!({
+                "plugin": resource.plugin,
+                "path": resource.path,
+                "contentDigest": resource.content_digest,
+                "purpose": "on_demand",
+            })
+        }))
+        .collect::<Vec<_>>();
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO plugin_resource_reads \
+         (id, project_id, session_id, client_request_id, request_hash, \
+          environment_fingerprint, requested_resources, served_resources) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         ON CONFLICT (project_id, client_request_id) DO NOTHING RETURNING id",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(session_id)
+    .bind(request.client_request_id)
+    .bind(&request_hash)
+    .bind(&environment_fingerprint)
+    .bind(Json(serde_json::to_value(&request.resources)?))
+    .bind(Json(serde_json::to_value(&served_resources)?))
+    .fetch_optional(pool)
+    .await?;
+    if inserted.is_none() {
+        let saved: (String, Uuid, String) = sqlx::query_as(
+            "SELECT request_hash, session_id, environment_fingerprint \
+             FROM plugin_resource_reads \
+             WHERE project_id = $1 AND client_request_id = $2",
+        )
+        .bind(project_id)
+        .bind(request.client_request_id)
+        .fetch_one(pool)
+        .await?;
+        if saved.0 != request_hash || saved.1 != session_id || saved.2 != environment_fingerprint {
+            return Err(AppError::conflict(
+                "idempotency_key_reused",
+                "clientRequestId 已用于不同的插件上下文读取",
+            ));
+        }
+    }
+    Ok(ReadPluginContextResponse {
+        schema_version: 1,
+        replayed: inserted.is_none(),
+        project_id,
+        session_id,
+        environment_fingerprint,
+        plugins,
+        requested_resources,
+    })
+}
+
+fn plugin_resource_content(
+    plugin: ResolvedPluginRef,
+    row: &PluginResourceRow,
+) -> AppResult<PluginResourceContent> {
+    let textual = row.media_type.starts_with("text/")
+        || row.media_type == "application/json"
+        || row.media_type.ends_with("+json");
+    let text = if textual {
+        Some(String::from_utf8(row.content.clone()).map_err(|_| {
+            AppError::conflict(
+                "plugin_resource_corrupt",
+                format!("文本插件资源 {} 不是 UTF-8", row.path),
+            )
+        })?)
+    } else {
+        None
+    };
+    Ok(PluginResourceContent {
+        plugin,
+        path: row.path.clone(),
+        media_type: row.media_type.clone(),
+        content_digest: row.content_digest.clone(),
+        byte_length: row.content.len() as u32,
+        encoding: "base64",
+        content_base64: STANDARD.encode(&row.content),
+        text,
+    })
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub async fn create_plugin_install_request(

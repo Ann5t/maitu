@@ -63,6 +63,7 @@ start_scheduler_app() {
   docker run -d --name "$scheduler_app" --network "$scheduler_network" \
     -p 127.0.0.1::3000 \
     -e DATABASE_URL=postgres://fudian_test:fudian_test_only@scheduler-db:5432/fudian_test \
+    -e FUDIAN_SECURITY_MODE=disabled \
     -e FUDIAN_BIND=0.0.0.0:3000 \
     -e ARTIFACT_ROOT=/data/artifacts \
     -e REPOSITORY_ROOT=/data/repositories \

@@ -55,6 +55,7 @@ docker run -d --name "$runtime_app" --network "$runtime_network" \
   --tmpfs /data/worktrees:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700 \
   --tmpfs /data/runner:rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=0700 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@runtime-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   -e ARTIFACT_ROOT=/data/artifacts \
   -e REPOSITORY_ROOT=/data/repositories \
@@ -105,7 +106,7 @@ runtime_migrations="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM schema_migrations')"
 runtime_projects="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM projects')"
-[[ "$runtime_migrations" == 12 ]]
+[[ "$runtime_migrations" == 14 ]]
 [[ "$runtime_projects" == 1 ]]
 
-echo "production image passed: non-root, read-only rootfs, 12 migrations and isolated write"
+echo "production image passed: non-root, read-only rootfs, 14 migrations and isolated write"

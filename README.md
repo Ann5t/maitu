@@ -19,10 +19,14 @@
 - 不可变目标契约修订、逐字段来源与人工接受/拒绝，以及有预算和收敛边界的探索型目标
 - 结构化 Evidence、候选冻结、撤回、停止和保留原结论的终态归档
 - 精确父 Session 上下文快照、不可折叠契约/权限信封、完整来源目录和审计式按需披露
+- 签名内容包、不可变 Skill/reference，以及只向固定 Session 环境披露的 Agent 插件上下文
 - 请求幂等、输入校验、产物路径防穿越和基础安全响应头
+- 单 owner 初始化、Argon2id 口令、一次性恢复码、轮换会话、CSRF/Origin、持久限速与安全审计
+- 经同源认证代理访问的持续 ToolLease，不向页面泄漏内部工具地址
+- 安全 Compose、HTTPS、文件型 secret、四类存储备份/空目标恢复和可逆孤儿调和
 - 明暗主题、响应式布局和移动端项目脉络列表
 
-尚未完成的功能边界见 [迁移状态](docs/migration-status.md)。目前没有身份认证，因此只应放在本机或受信任的反向代理之后。
+普通 `compose.yaml` 是显式关闭认证的本机兼容预览，不能公开。跨设备或服务器部署应使用 [安全私有部署说明](docs/private-deployment-v1.md) 的 `compose.secure.yaml`，由 Caddy 提供唯一 HTTPS 入口。
 
 ## 快速预览
 
@@ -62,25 +66,15 @@ make check
 ./scripts/quality-gate.sh
 ```
 
-它会构建固定 Rust 开发镜像，在一次性 PostgreSQL 中运行迁移及全部 HTTP 闭环，用固定 Playwright/Chromium 验证桌面和 390px 工作台，最后构建非 root、只读根文件系统的生产镜像并在随机本机端口验收。数据库和浏览器现场都是隔离的，不连接 Compose 中的真实数据卷；Cargo、npm 仅复用中央缓存卷。
+它会构建固定 Rust 开发镜像，在一次性 PostgreSQL 中运行迁移及全部 HTTP 闭环，用固定 Playwright/Chromium 验证桌面、平板和手机工作台，并验证非 root 发行镜像、HTTPS/认证、签名 Skill/资源渐进披露、受控 ToolLease、存储调和、安全 Compose、旧版备份到空目标恢复、12→14 升级和应用回退。数据库和浏览器现场都是隔离的，不连接 Compose 中的真实数据卷；Cargo、npm 仅复用中央缓存卷。
 
 仓库内的 `.github/workflows/ci.yml` 在 push、pull request 或手动触发时运行同一入口。它只有源码读取权限，不发布镜像、不部署，也不持久化 Git 凭据。
 
 ## 备份
 
-在切换正式服务前，先创建包含数据库、产物和当前源码的备份：
+安全部署使用 `scripts/backup-v2.sh`，必须显式指定 PostgreSQL 容器及 artifacts、repositories、worktrees、runner_outputs 四个源卷。它会先严格校验托管 Git，再生成数据库 dump、逐文件摘要、可构建源码、迁移摘要、脱敏镜像元数据和总 `SHA256SUMS`。对应的 `restore-v2.sh` 只允许写入带恢复专用标签的空库和空卷。
 
-```bash
-make backup
-```
-
-备份写入 `backups/<UTC 时间>/`，并生成 `SHA256SUMS`。也可以指定目录：
-
-```bash
-./scripts/backup.sh /path/to/backup-root
-```
-
-恢复和回退步骤见 [恢复与切换说明](docs/recovery.md)。
+完整命令、升级顺序与应用回退边界见 [安全私有部署说明](docs/private-deployment-v1.md)。旧 `make backup` / `scripts/backup.sh` 仅保留给尚未切换到目标枝干存储模型的本机兼容实例。
 
 ## 代码结构
 
@@ -141,6 +135,8 @@ assets/                      CSS、渐进增强脚本和图标
 | `POST` | `/projects/:id/actions` | 成果契约与产物动作 |
 | `POST` | `/projects/:id/graph` | 图谱动作 |
 | `GET` | `/api/health` | 数据库健康检查 |
+| `GET/POST` | `/auth/setup`、`/auth/login`、`/auth/recover` | 安全模式的 owner 初始化、登录和一次性恢复 |
+| `POST` | `/auth/logout`、`/auth/password` | 登出和已认证改密 |
 | `GET/POST` | `/api/projects` | 项目列表与创建 |
 | `GET` | `/api/projects/:id` | 完整项目快照 |
 | `POST` | `/api/projects/:id/actions` | JSON 项目动作 |
@@ -154,7 +150,9 @@ assets/                      CSS、渐进增强脚本和图标
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/context/rebuild` | 重建派生摘要与索引的新代 |
 | `GET/POST` | `/api/v1/plugins` | 渐进式插件目录与注册 |
 | `POST` | `/api/v1/environments` | 固定 EnvironmentManifest |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/plugin-context/read` | 注入固定环境 Skill，并审计式按需读取资源 |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/tool-calls` | 无状态工具调用 |
+| `GET/POST` | `/api/v1/tool-leases/:lease_id/proxy/:index/*path` | 活动持续工具的认证同源受控入口 |
 | `GET/POST` | `/api/v1/projects/:id/sessions/:session_id/inputs` | 列出/建立 Session 文件输入 |
 | `PUT` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/chunks` | 上传受限文件分段 |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/inputs/:input_id/finish` | 完整性与可信类型验证 |

@@ -1,10 +1,15 @@
-use std::{collections::BTreeMap, future::Future};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -67,6 +72,31 @@ pub struct PluginRuntime {
 pub struct PluginAsset {
     pub path: String,
     pub content_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginResourceUpload {
+    pub path: String,
+    pub media_type: String,
+    pub content_base64: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedPluginResource {
+    pub path: String,
+    pub media_type: String,
+    pub content_digest: String,
+    pub content: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginResourceMetadata {
+    pub path: String,
+    pub media_type: String,
+    pub content_digest: String,
+    pub byte_length: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -181,12 +211,26 @@ impl PluginManifestDraft {
             asset.content_digest =
                 validate_sha256_id("Asset 摘要", std::mem::take(&mut asset.content_digest))?;
         }
+        if self.assets.len() > MAX_PLUGIN_RESOURCES {
+            return Err(AppError::bad_request(
+                "too_many_plugin_resources",
+                format!("插件资源不能超过 {MAX_PLUGIN_RESOURCES} 个"),
+            ));
+        }
         self.assets
             .sort_by(|left, right| left.path.cmp(&right.path));
         reject_duplicate_keys(
             self.assets.iter().map(|asset| asset.path.as_str()),
             "插件 Asset",
         )?;
+        if let Some(skill) = &self.skill
+            && !self.assets.iter().any(|asset| asset.path == skill.entry)
+        {
+            return Err(AppError::bad_request(
+                "plugin_skill_asset_missing",
+                "Skill 入口必须是 Manifest 中带摘要的 Asset",
+            ));
+        }
         validate_resource_policy(&self.resource_hints)?;
 
         let content_digest = canonical_json_sha256(&self)?;
@@ -415,6 +459,8 @@ pub struct SignedPluginInstallRequest {
     pub publisher_id: String,
     pub signature: String,
     pub self_test: PluginSelfTest,
+    #[serde(default)]
+    pub resources: Vec<PluginResourceUpload>,
 }
 
 impl SignedPluginInstallRequest {
@@ -423,6 +469,7 @@ impl SignedPluginInstallRequest {
         self.publisher_id = normalize_publisher_id(self.publisher_id)?;
         self.signature = normalize_signature(self.signature)?;
         self.self_test = self.self_test.normalize()?;
+        normalize_plugin_resource_uploads(&self.manifest, &mut self.resources)?;
         if self.manifest.runtime.kind != "oci" {
             return Err(AppError::bad_request(
                 "invalid_plugin_runtime",
@@ -430,6 +477,10 @@ impl SignedPluginInstallRequest {
             ));
         }
         Ok(self)
+    }
+
+    pub fn verified_resources(&self) -> AppResult<Vec<VerifiedPluginResource>> {
+        verify_plugin_resource_uploads(&self.manifest, &self.resources)
     }
 
     pub fn statement(&self) -> AppResult<PluginInstallStatement> {
@@ -449,6 +500,177 @@ impl SignedPluginInstallRequest {
     pub fn statement_digest(&self) -> AppResult<String> {
         canonical_json_sha256(&self.statement()?)
     }
+}
+
+const MAX_PLUGIN_RESOURCES: usize = 64;
+const MAX_PLUGIN_RESOURCE_BYTES: usize = 512 * 1024;
+const MAX_PLUGIN_RESOURCE_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PLUGIN_SKILL_BYTES: usize = 128 * 1024;
+
+fn normalize_plugin_resource_uploads(
+    manifest: &PluginManifest,
+    resources: &mut [PluginResourceUpload],
+) -> AppResult<()> {
+    if resources.len() > MAX_PLUGIN_RESOURCES {
+        return Err(AppError::bad_request(
+            "too_many_plugin_resources",
+            format!("插件资源不能超过 {MAX_PLUGIN_RESOURCES} 个"),
+        ));
+    }
+    for resource in resources.iter_mut() {
+        resource.path = normalize_relative_path("插件资源", std::mem::take(&mut resource.path))?;
+        resource.media_type =
+            normalize_plugin_media_type(std::mem::take(&mut resource.media_type))?;
+        if resource.media_type != expected_plugin_resource_media_type(&resource.path) {
+            return Err(AppError::bad_request(
+                "plugin_resource_media_type_mismatch",
+                format!("插件资源 {} 的媒体类型与摘要绑定路径不一致", resource.path),
+            ));
+        }
+        let content = decode_plugin_resource(&resource.content_base64)?;
+        resource.content_base64 = STANDARD.encode(content);
+    }
+    resources.sort_by(|left, right| left.path.cmp(&right.path));
+    reject_duplicate_keys(
+        resources.iter().map(|resource| resource.path.as_str()),
+        "插件资源",
+    )?;
+    verify_plugin_resource_uploads(manifest, resources).map(|_| ())
+}
+
+fn verify_plugin_resource_uploads(
+    manifest: &PluginManifest,
+    resources: &[PluginResourceUpload],
+) -> AppResult<Vec<VerifiedPluginResource>> {
+    let declared = manifest
+        .assets
+        .iter()
+        .map(|asset| (asset.path.as_str(), asset.content_digest.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let supplied = resources
+        .iter()
+        .map(|resource| resource.path.as_str())
+        .collect::<BTreeSet<_>>();
+    if declared.keys().copied().collect::<BTreeSet<_>>() != supplied {
+        return Err(AppError::bad_request(
+            "plugin_resource_set_mismatch",
+            "安装内容必须与 Manifest 的 Asset 路径集合完全一致",
+        ));
+    }
+
+    let mut total_bytes = 0_usize;
+    let mut verified = Vec::with_capacity(resources.len());
+    for resource in resources {
+        let content = decode_plugin_resource(&resource.content_base64)?;
+        if content.len() > MAX_PLUGIN_RESOURCE_BYTES {
+            return Err(AppError::bad_request(
+                "plugin_resource_too_large",
+                format!("插件资源 {} 超过单文件上限", resource.path),
+            ));
+        }
+        total_bytes = total_bytes.checked_add(content.len()).ok_or_else(|| {
+            AppError::bad_request("plugin_resources_too_large", "插件资源总大小溢出")
+        })?;
+        if total_bytes > MAX_PLUGIN_RESOURCE_TOTAL_BYTES {
+            return Err(AppError::bad_request(
+                "plugin_resources_too_large",
+                "插件资源总大小超过 2 MiB 上限",
+            ));
+        }
+        let content_digest = format!("sha256:{}", hex::encode(Sha256::digest(&content)));
+        if declared.get(resource.path.as_str()).copied() != Some(content_digest.as_str())
+            || resource.media_type != expected_plugin_resource_media_type(&resource.path)
+        {
+            return Err(AppError::bad_request(
+                "plugin_resource_digest_mismatch",
+                format!(
+                    "插件资源 {} 与 Manifest 摘要或媒体类型不一致",
+                    resource.path
+                ),
+            ));
+        }
+        if manifest
+            .skill
+            .as_ref()
+            .is_some_and(|skill| skill.entry == resource.path)
+        {
+            if content.len() > MAX_PLUGIN_SKILL_BYTES {
+                return Err(AppError::bad_request(
+                    "plugin_skill_too_large",
+                    "Skill 正文超过 128 KiB 上限",
+                ));
+            }
+            if !matches!(
+                resource.media_type.as_str(),
+                "text/markdown"
+                    | "text/markdown; charset=utf-8"
+                    | "text/plain"
+                    | "text/plain; charset=utf-8"
+            ) || std::str::from_utf8(&content).is_err()
+            {
+                return Err(AppError::bad_request(
+                    "invalid_plugin_skill",
+                    "Skill 必须是 UTF-8 Markdown 或纯文本",
+                ));
+            }
+        }
+        verified.push(VerifiedPluginResource {
+            path: resource.path.clone(),
+            media_type: resource.media_type.clone(),
+            content_digest,
+            content,
+        });
+    }
+    Ok(verified)
+}
+
+fn decode_plugin_resource(value: &str) -> AppResult<Vec<u8>> {
+    if value.len() > (MAX_PLUGIN_RESOURCE_BYTES * 4 / 3) + 8 {
+        return Err(AppError::bad_request(
+            "plugin_resource_too_large",
+            "插件资源的 Base64 表示超过上限",
+        ));
+    }
+    STANDARD.decode(value).map_err(|_| {
+        AppError::bad_request(
+            "invalid_plugin_resource_encoding",
+            "插件资源必须使用规范 Base64 编码",
+        )
+    })
+}
+
+fn normalize_plugin_media_type(value: String) -> AppResult<String> {
+    let value = required_text("插件资源媒体类型", value, 160)?.to_ascii_lowercase();
+    let valid = value.is_ascii()
+        && value.contains('/')
+        && value
+            .bytes()
+            .all(|byte| byte >= 0x20 && byte != 0x7f && byte != b'\\' && byte != b'"');
+    if !valid {
+        return Err(AppError::bad_request(
+            "invalid_plugin_resource_media_type",
+            "插件资源媒体类型不合法",
+        ));
+    }
+    Ok(value)
+}
+
+pub fn expected_plugin_resource_media_type(path: &str) -> String {
+    let extension = path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("md" | "markdown") => "text/markdown; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("pdf") => "application/pdf",
+        _ => "application/octet-stream",
+    }
+    .to_owned()
 }
 
 pub fn verify_install_signature(
@@ -646,6 +868,12 @@ impl EnvironmentManifest {
         self.base_runtime.kind = required_text("基础 Runtime 类型", self.base_runtime.kind, 40)?;
         self.base_runtime.digest =
             validate_sha256_id("基础 Runtime 摘要", self.base_runtime.digest)?;
+        if self.plugins.len() > 32 {
+            return Err(AppError::bad_request(
+                "too_many_environment_plugins",
+                "单个 EnvironmentManifest 最多固定 32 个插件",
+            ));
+        }
         let mut normalized_plugins = Vec::with_capacity(self.plugins.len());
         for plugin in self.plugins {
             normalized_plugins.push(plugin.validate()?);
@@ -1230,6 +1458,10 @@ fn normalize_relative_path(label: &str, value: String) -> AppResult<String> {
     Ok(value)
 }
 
+pub fn normalize_plugin_resource_path(value: String) -> AppResult<String> {
+    normalize_relative_path("插件资源", value)
+}
+
 fn normalize_relative_pattern(label: &str, value: String) -> AppResult<String> {
     let value = required_text(label, value.replace('\\', "/"), 1_000)?;
     let invalid = value.starts_with('/')
@@ -1384,6 +1616,73 @@ mod tests {
     }
 
     #[test]
+    fn skill_requires_a_digest_bound_asset_and_exact_content() {
+        let skill = b"# Rust checks\n\nUse the broker.\n";
+        let skill_digest = format!("sha256:{}", hex::encode(Sha256::digest(skill)));
+        let reference = reference_mock_plugin("1.0.0").unwrap();
+        let make_draft = |assets: Vec<PluginAsset>| PluginManifestDraft {
+            schema_version: reference.schema_version,
+            plugin_id: "fudian.tools.resource-test".into(),
+            version: reference.version.clone(),
+            display_name: reference.display_name.clone(),
+            description: reference.description.clone(),
+            capabilities: reference.capabilities.clone(),
+            permissions: reference.permissions.clone(),
+            tools: reference.tools.clone(),
+            skill: Some(PluginSkill {
+                entry: "SKILL.md".into(),
+            }),
+            runtime: PluginRuntime {
+                kind: "oci".into(),
+                content_digest: format!("sha256:{}", "1".repeat(64)),
+                entrypoint: "/runtime/fudian-tool-runtime".into(),
+            },
+            assets,
+            resource_hints: reference.resource_hints.clone(),
+        };
+        assert_eq!(
+            make_draft(Vec::new()).seal().unwrap_err().code(),
+            "plugin_skill_asset_missing"
+        );
+        let manifest = make_draft(vec![PluginAsset {
+            path: "SKILL.md".into(),
+            content_digest: skill_digest,
+        }])
+        .seal()
+        .unwrap();
+        let make_request = |content: &[u8]| SignedPluginInstallRequest {
+            manifest: manifest.clone(),
+            publisher_id: "fudian.test".into(),
+            signature: "0".repeat(128),
+            self_test: PluginSelfTest {
+                schema_version: 1,
+                status: "passed".into(),
+                runner_digest: format!("sha256:{}", "2".repeat(64)),
+                runtime_entry_digest: format!("sha256:{}", "3".repeat(64)),
+                checks: json!({}),
+            },
+            resources: vec![PluginResourceUpload {
+                path: "SKILL.md".into(),
+                media_type: "text/markdown; charset=utf-8".into(),
+                content_base64: STANDARD.encode(content),
+            }],
+        };
+        let request = make_request(skill).normalize().unwrap();
+        let resources = request.verified_resources().unwrap();
+        assert_eq!(resources[0].content, skill);
+        assert_eq!(
+            make_request(b"tampered").normalize().unwrap_err().code(),
+            "plugin_resource_digest_mismatch"
+        );
+        let mut wrong_media = make_request(skill);
+        wrong_media.resources[0].media_type = "text/plain; charset=utf-8".into();
+        assert_eq!(
+            wrong_media.normalize().unwrap_err().code(),
+            "plugin_resource_media_type_mismatch"
+        );
+    }
+
+    #[test]
     fn environment_fingerprint_is_stable_but_lock_sensitive() {
         let plugin = reference_mock_plugin("1.0.0").unwrap().resolved_ref();
         let first = environment(plugin.clone(), &"a".repeat(64))
@@ -1402,6 +1701,14 @@ mod tests {
         .normalize()
         .unwrap();
         assert_ne!(first.fingerprint().unwrap(), changed.fingerprint().unwrap());
+
+        let plugin = reference_mock_plugin("1.0.0").unwrap().resolved_ref();
+        let mut oversized = environment(plugin.clone(), &"a".repeat(64));
+        oversized.plugins = vec![plugin; 33];
+        assert_eq!(
+            oversized.normalize().unwrap_err().code(),
+            "too_many_environment_plugins"
+        );
     }
 
     #[tokio::test]

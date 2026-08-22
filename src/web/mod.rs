@@ -7,6 +7,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     http::{HeaderName, HeaderValue},
+    middleware,
     routing::{get, post, put},
 };
 use sqlx::PgPool;
@@ -18,17 +19,55 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use crate::config::Config;
+use crate::{config::Config, security};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub pool: PgPool,
     pub config: Config,
+    pub tool_proxy_client: reqwest::Client,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
+    let security_state = state.clone();
     Router::new()
+        .route(
+            "/auth/setup",
+            get(security::setup_page).post(security::setup_submit),
+        )
+        .route(
+            "/auth/login",
+            get(security::login_page).post(security::login_submit),
+        )
+        .route(
+            "/auth/recover",
+            get(security::recovery_page).post(security::recovery_submit),
+        )
+        .route("/auth/logout", post(security::logout))
+        .route("/auth/status", get(security::auth_status))
+        .route(
+            "/account/password",
+            get(security::password_page).post(security::password_submit),
+        )
+        .route(
+            "/api/v1/tool-leases/{tool_lease_id}/proxy/{endpoint_index}",
+            get(security::tool_proxy_root)
+                .head(security::tool_proxy_root)
+                .post(security::tool_proxy_root)
+                .put(security::tool_proxy_root)
+                .patch(security::tool_proxy_root)
+                .delete(security::tool_proxy_root),
+        )
+        .route(
+            "/api/v1/tool-leases/{tool_lease_id}/proxy/{endpoint_index}/{*path}",
+            get(security::tool_proxy_path)
+                .head(security::tool_proxy_path)
+                .post(security::tool_proxy_path)
+                .put(security::tool_proxy_path)
+                .patch(security::tool_proxy_path)
+                .delete(security::tool_proxy_path),
+        )
         .route("/", get(handlers::dashboard))
         .route("/ideas", get(handlers::ideas_page))
         .route("/ideas/new", get(handlers::new_idea_page))
@@ -262,6 +301,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::api_bind_environment),
         )
         .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/plugin-context/read",
+            post(handlers::api_read_plugin_context),
+        )
+        .route(
             "/api/v1/projects/{project_id}/sessions/{session_id}/tool-calls",
             post(handlers::api_execute_tool),
         )
@@ -302,6 +345,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handlers::artifact_download),
         )
         .nest_service("/assets", ServeDir::new("assets"))
+        .layer(middleware::from_fn_with_state(
+            security_state.clone(),
+            security::require_authenticated_session,
+        ))
+        .layer(middleware::from_fn_with_state(
+            security_state,
+            security::security_response_headers,
+        ))
         .layer(SetResponseHeaderLayer::if_not_present(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),

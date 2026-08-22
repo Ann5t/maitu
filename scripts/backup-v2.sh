@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+backup_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+backup_parent="${1:-$backup_repo_root/backups}"
+backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_database_container="${FUDIAN_BACKUP_DATABASE_CONTAINER:?set FUDIAN_BACKUP_DATABASE_CONTAINER explicitly}"
+backup_database_user="${FUDIAN_BACKUP_POSTGRES_USER:-fudian}"
+backup_database_name="${FUDIAN_BACKUP_POSTGRES_DB:-fudian}"
+backup_app_container="${FUDIAN_BACKUP_APP_CONTAINER:-}"
+backup_artifact_volume="${FUDIAN_BACKUP_ARTIFACT_VOLUME:?set FUDIAN_BACKUP_ARTIFACT_VOLUME explicitly}"
+backup_repository_volume="${FUDIAN_BACKUP_REPOSITORY_VOLUME:?set FUDIAN_BACKUP_REPOSITORY_VOLUME explicitly}"
+backup_worktree_volume="${FUDIAN_BACKUP_WORKTREE_VOLUME:?set FUDIAN_BACKUP_WORKTREE_VOLUME explicitly}"
+backup_runner_volume="${FUDIAN_BACKUP_RUNNER_VOLUME:?set FUDIAN_BACKUP_RUNNER_VOLUME explicitly}"
+backup_archive_image="postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
+
+validate_docker_name() {
+  local label="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "$label 不是明确的 Docker 名称：$value" >&2
+    exit 1
+  fi
+}
+
+validate_docker_name "数据库容器" "$backup_database_container"
+validate_docker_name "Artifact 卷" "$backup_artifact_volume"
+validate_docker_name "repository 卷" "$backup_repository_volume"
+validate_docker_name "worktree 卷" "$backup_worktree_volume"
+validate_docker_name "Runner 卷" "$backup_runner_volume"
+if [[ -n "$backup_app_container" ]]; then
+  validate_docker_name "应用容器" "$backup_app_container"
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$backup_app_container" 2>/dev/null)" != true ]]; then
+    echo "指定应用容器未运行：$backup_app_container" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$(docker inspect -f '{{.State.Running}}' "$backup_database_container" 2>/dev/null)" != true ]]; then
+  echo "指定 PostgreSQL 容器未运行：$backup_database_container" >&2
+  exit 1
+fi
+for backup_volume in \
+  "$backup_artifact_volume" "$backup_repository_volume" \
+  "$backup_worktree_volume" "$backup_runner_volume"; do
+  docker volume inspect "$backup_volume" >/dev/null
+done
+
+if [[ -n "$backup_app_container" ]]; then
+  echo "备份前严格校验托管 Git 对象"
+  docker exec "$backup_app_container" sh -ec '
+    repository_root="${REPOSITORY_ROOT:-/data/repositories}"
+    found=0
+    for repository in "$repository_root"/projects/*.git; do
+      [ -d "$repository" ] || continue
+      found=1
+      git --git-dir "$repository" fsck --strict
+    done
+    [ "$found" -eq 1 ] || [ -z "$(find "$repository_root" -mindepth 1 -print -quit)" ]
+  '
+fi
+
+mkdir -p "$backup_parent"
+backup_parent="$(cd "$backup_parent" && pwd)"
+backup_partial="$backup_parent/.partial-$backup_timestamp-$$"
+backup_final="$backup_parent/$backup_timestamp"
+if [[ -e "$backup_partial" || -e "$backup_final" ]]; then
+  echo "备份目标已经存在，拒绝覆盖：$backup_final" >&2
+  exit 1
+fi
+mkdir "$backup_partial"
+
+archive_volume() {
+  local volume="$1"
+  local archive_name="$2"
+  local manifest_name="$3"
+  docker run --rm \
+    --network none \
+    --read-only \
+    --mount "type=volume,src=$volume,dst=/source,readonly" \
+    --mount "type=bind,src=$backup_partial,dst=/backup" \
+    "$backup_archive_image" \
+    sh -ec "cd /source && find . -type f -print0 | sort -z | xargs -0 -r sha256sum >'/backup/$manifest_name' && tar -czf '/backup/$archive_name' ."
+}
+
+echo "备份 PostgreSQL：$backup_database_container"
+docker exec "$backup_database_container" \
+  pg_dump --username="$backup_database_user" --dbname="$backup_database_name" \
+  --format=custom --no-owner --no-privileges >"$backup_partial/database.dump"
+
+docker exec "$backup_database_container" \
+  psql --username="$backup_database_user" --dbname="$backup_database_name" \
+  --no-align --tuples-only --set=ON_ERROR_STOP=1 \
+  --command="SELECT json_build_object(
+    'schemaMigrationCount', (SELECT count(*) FROM schema_migrations),
+    'schemaMigrations', (SELECT json_agg(filename ORDER BY filename) FROM schema_migrations),
+    'projects', (SELECT count(*) FROM projects),
+    'goalBranches', (SELECT count(*) FROM goal_branches),
+    'goalSessions', (SELECT count(*) FROM goal_sessions),
+    'artifacts', (SELECT count(*) FROM artifacts),
+    'gitRepositories', (SELECT count(*) FROM project_git_repositories),
+    'inputArtifacts', (SELECT count(*) FROM input_artifacts)
+  );" >"$backup_partial/database-metadata.json"
+
+echo "备份内容卷（全程只读挂载源卷）"
+archive_volume "$backup_artifact_volume" artifacts.tar.gz artifacts.files.sha256
+archive_volume "$backup_repository_volume" repositories.tar.gz repositories.files.sha256
+archive_volume "$backup_worktree_volume" worktrees.tar.gz worktrees.files.sha256
+archive_volume "$backup_runner_volume" runner-outputs.tar.gz runner-outputs.files.sha256
+
+echo "备份当前可构建源码（排除 .env、secret、数据与 Git 凭据）"
+tar -czf "$backup_partial/source.tar.gz" -C "$backup_repo_root" \
+  Cargo.toml Cargo.lock Dockerfile compose.yaml compose.secure.yaml compose.secure-public.yaml \
+  Makefile .env.example .env.secure.example README.md \
+  src migrations assets deploy docs scripts recovery .github
+
+(
+  cd "$backup_repo_root"
+  sha256sum migrations/*.sql
+) >"$backup_partial/migration-directory.sha256"
+
+backup_git_commit="$(git -C "$backup_repo_root" rev-parse HEAD 2>/dev/null || printf unknown)"
+if [[ -z "$(git -C "$backup_repo_root" status --porcelain --untracked-files=normal 2>/dev/null)" ]]; then
+  backup_git_dirty=false
+else
+  backup_git_dirty=true
+fi
+backup_database_id="$(docker inspect -f '{{.Id}}' "$backup_database_container")"
+backup_database_image="$(docker inspect -f '{{.Image}}' "$backup_database_container")"
+if [[ -n "$backup_app_container" ]]; then
+  backup_app_id="$(docker inspect -f '{{.Id}}' "$backup_app_container")"
+  backup_app_image="$(docker inspect -f '{{.Image}}' "$backup_app_container")"
+else
+  backup_app_id="not-recorded"
+  backup_app_image="not-recorded"
+fi
+printf '%s\n' \
+  '{' \
+  '  "schemaVersion": 2,' \
+  "  \"createdAt\": \"$backup_timestamp\"," \
+  "  \"sourceCommit\": \"$backup_git_commit\"," \
+  "  \"sourceDirty\": $backup_git_dirty," \
+  "  \"databaseContainerId\": \"$backup_database_id\"," \
+  "  \"databaseImageId\": \"$backup_database_image\"," \
+  "  \"appContainerId\": \"$backup_app_id\"," \
+  "  \"appImageId\": \"$backup_app_image\"," \
+  '  "secretValuesIncluded": false,' \
+  '  "storageClasses": ["artifacts", "repositories", "worktrees", "runner_outputs"]' \
+  '}' >"$backup_partial/deployment-metadata.json"
+
+(
+  cd "$backup_partial"
+  find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' \
+    | LC_ALL=C sort \
+    | xargs -r sha256sum >SHA256SUMS
+  sha256sum --check --strict SHA256SUMS >/dev/null
+)
+mv "$backup_partial" "$backup_final"
+echo "备份完成并通过校验：$backup_final"

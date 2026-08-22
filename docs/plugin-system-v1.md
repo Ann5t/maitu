@@ -30,7 +30,7 @@
 ## 验收表
 
 - [x] 发布者公钥、签名安装、自检、供应链冲突、撤销和追加升级均有数据库约束与 HTTP/CLI 测试。
-- [x] 渐进式目录只返回摘要，按需详情返回准确 Manifest、工具 schema、Skill、权限、Runtime 和安装证明。
+- [x] 渐进式目录只返回摘要；按需详情返回准确 Manifest、工具 schema、权限、Runtime、安装证明和资源元数据；仅固定了该插件的 Session Worker 才取得 Skill 正文，其他资源按准确选择器读取。
 - [x] EnvironmentManifest 固定准确插件与镜像；同名多版本及 Python 冲突库可在不同 Session 同时执行，`latest` 漂移不改变旧环境。
 - [x] Rust、Python、C/C++、Playwright 四类真实 OCI Worker 在断网、只读输入、无能力、资源受限环境运行并经真实 Git CAS 回写。
 - [x] 每次真实 ToolCall 绑定 RunnerJob、base/head/tree/snapshot、插件/镜像/环境和输出摘要；重放不重复执行或提交。
@@ -46,3 +46,9 @@
 - 联网插件的域名代理和账号注入仍未知。本阶段四个代表插件全部断网运行，不用默认容器网络冒充授权。
 - BP-08 已提供按需插件目录、安装/撤销状态、Runtime/权限披露和 Session 安装请求；发布审批、认证 endpoint proxy 与真实授权软件接入仍归 BP-09/后续插件包。
 - PPTMaster 的许可证、可执行入口、参数 schema 与文件兼容性需要用户提供真实产品边界后另立插件版本；本阶段只有不执行的兼容夹具。
+
+## BP-10：签名资源与 Session 披露
+
+`0014_plugin_resources.sql` 把 Manifest 中的 Asset 从“只有路径和摘要”推进为真实内容包：签名安装必须原子提交完全相同的路径集合，服务端重新计算每项 SHA-256，内容与读取审计均只增不改。Skill 必须是摘要绑定的 UTF-8 Markdown/纯文本；篡改、遗漏、额外路径、超限和非文本 Skill 都在安装前拒绝。
+
+`POST /api/v1/projects/:project_id/sessions/:session_id/plugin-context/read` 是 Agent Worker 的渐进披露边界：它只从该 Session 的不可变 EnvironmentManifest 解析插件，复核活动安装证明，把所选插件 Skill 作为可注入系统提示词的正文返回，同时仅给出其他资源元数据。reference/asset 只有带准确插件三元组和路径的显式请求才返回正文；请求 ID、环境指纹、请求哈希和实际披露摘要写入不可变审计。真实插件测试覆盖五个签名安装包、10 项内容、篡改拒绝、Skill 引导、reference 按需读取、重放冲突和撤销。

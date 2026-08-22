@@ -1,6 +1,8 @@
 name: fudian-nextgen
 
 x-app-environment: &app-environment
+  # 该文件仅用于 loopback 开发/旧数据预览；远程部署必须使用 compose.secure.yaml。
+  FUDIAN_SECURITY_MODE: ${FUDIAN_SECURITY_MODE:-disabled}
   DATABASE_URL: ${DATABASE_URL:-postgres://fudian_nextgen:fudian_nextgen_dev@postgres:5432/fudian_nextgen}
   ARTIFACT_ROOT: /data/artifacts
   REPOSITORY_ROOT: /data/repositories

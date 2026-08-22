@@ -44,6 +44,7 @@ docker run -d --name "$large_app" --network "$large_network" \
   --network-alias large-app \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@large-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-large-artifacts \
   -e FUDIAN_WORKER_BOOTSTRAP_TOKEN=large_worker_bootstrap_0123456789abcdef \
   -e RUST_LOG=fudian=info \

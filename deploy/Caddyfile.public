@@ -1,0 +1,11 @@
+{
+	admin off
+}
+
+{$FUDIAN_SITE_HOST} {
+	encode zstd gzip
+	header {
+		-Server
+	}
+	reverse_proxy app:3000
+}

@@ -5,7 +5,7 @@
 - 总验收矩阵：[`design-12-aspects.md`](design-12-aspects.md)
 - 产品基线：[`product-design.md`](product-design.md)
 - Git 枝干：`feat/goal-branch-core-v0.1`
-- 状态：执行中
+- 状态：12 项候选的工程机器门全部完成；Goal 保持 active，已提出拟合并并等待用户对 5 个主观/真实部署判断点审查
 
 ## 启动基线
 
@@ -28,12 +28,12 @@
 | 4 | 执行循环 | 完成 | BP-07 已补齐冻结候选、独立审核、选择性父整合、CAS、冲突暂停与崩溃恢复 |
 | 5 | 上下文与记忆 | 完成 | BP-03 精确快照、来源目录与按需披露已通过完整质量门 |
 | 6 | worktree 与隔离 | 完成 | BP-04 全部机器门和既定用户权限语义通过 |
-| 7 | 中央插件 | 部分实现 | 一次性/持续 OCI 与按需插件/运行现场 UI 完成；BP-09 补认证 endpoint proxy 和保留策略 |
-| 8 | 数据与恢复 | 部分实现 | Git CAS/操作日志完成；BP-09 补 reconcile 与完整恢复演练 |
+| 7 | 中央插件 | 待用户判断 | 签名 Skill/reference、Session 渐进披露、一次性/持续 OCI、冲突版本、保留输出、按需 UI 和认证同源 endpoint proxy 定向门完成 |
+| 8 | 数据与恢复 | 待用户判断 | reconcile/quarantine、v2 备份、空目标恢复、12→14 升级和旧应用回退完成；等待复制/引用体验判断 |
 | 9 | 后台执行 | 完成 | BP-06 队列、Lease/fencing、恢复、取消、暂停和通知矩阵已通过 |
 | 10 | 证据与审核 | 完成 | BP-07 已验证准确 commit/环境绑定、独立只读复验、父契约复验及用户唯一终审权 |
 | 11 | 多设备工作台 | 待用户判断 | BP-08 机器门完成；等待用户实际体验 `goal-worksite-v2` |
-| 12 | 私有部署 | 部分实现 | BP-09 待开始 |
+| 12 | 私有部署 | 待用户判断 | 单 owner、安全浏览器边界、HTTPS、安全 Compose 和恢复运维机器门完成；等待真实访问方案/维护授权 |
 
 ## 运行日志
 
@@ -163,3 +163,28 @@
 - 真实生产库只读复核仍为 `3:8:23:2`，`schema_migrations` 仍只有原 4 条；两个 Artifact 的数据库摘要 `f6bc647…` / `2038951…` 与卷内文件实际 SHA-256 逐项一致；
 - 生产应用 `bebb50d…`、数据库 `482ccdee…` 的完整容器 ID、启动时间与端口不变；运行中只有原生产与隔离 review 两组容器，无一次性测试容器或网络残留；
 - BP-08 机器验收闭环完成，但第 11 项仍保持“待用户判断”，不用测试数字替代人的真实体验。
+
+### 2026-08-22 22:22 +08:00 — BP-09 与 12 项总门
+
+- 新增安全模式：受 setup token 保护且数据库单例约束的唯一 owner、Argon2id + pepper、只显示一次的恢复码、随机摘要 Session、轮换/闲置/绝对到期、登出/恢复全撤销，以及不保存原始凭据的不可变安全审计；
+- 所有浏览器写路由统一经过会话、精确 HTTPS Origin、CSRF token 与 Fetch Metadata，登录/恢复/普通/高成本写入使用 PostgreSQL 持久 IP/账户/Session 桶；Web 重启后限制仍生效，伪造转发头不能改变身份；
+- 活动 ToolLease 只通过认证同源代理访问。页面不显示内部 URL；服务端重新验证 Lease、期限、目的 CIDR、方法/头与请求/响应字节上限，不跟随重定向、不使用宿主代理，并剔除 Cookie/Authorization/hop-by-hop；
+- `compose.secure.yaml`/公网叠加模板使用固定镜像、文件型 secret、非 root/只读根、资源/PID/日志上限和健康依赖。Docker 对 internal-only 网络不建立宿主端口，因此加入只有 Caddy 使用的 ingress；应用、数据库和工具仍在 internal edge/data/tools，私有模板唯一发布 `127.0.0.1` HTTPS；
+- `fudian-maintenance` 以数据库引用扫描 artifacts/repositories/worktrees/runner outputs，稳定区分 referenced/missing/digest mismatch/orphan；超过默认 7 天的孤儿也只进入 run 专属 quarantine，测试完成四类对象的哈希一致恢复；
+- v2 备份/恢复记录数据库、四类卷、可构建源码、迁移和脱敏容器/镜像元数据；源卷只读、发布前逐文件/总校验、恢复只接受带专用标签的空库/空卷并运行 Git `fsck`；
+- 恢复演练发现 BP-08 初始化空 Git 仓库时只计算空树哈希而未写对象。当前初始化增加 `hash-object -w` 和严格 fsck 回归测试，备份把 fsck 前移；历史 BP-08 演练现场经明确单对象修复后完成 12 迁移备份、空目标恢复、12→13 升级、Artifact 哈希保持与 BP-08 应用回退；
+- 隔离 HTTPS 测试完成并发 setup、登录/登出/轮换/到期、一次性恢复、CSRF/Origin/限速、可信代理、ToolLease SSRF/头/大小边界，以及 Chromium 1440/820/390；三张安全现场截图已更新；
+- 第一次总门仅因新 Git 回归测试模块位于文件中段触发 Clippy `items_after_test_module`，移动到文件末尾后从起点完整重跑通过：rustfmt、Clippy `-D warnings`、56 个 Rust 测试、13 条迁移、所有领域/HTTP/Git/Runner/调度/签名 OCI/审核集成、三尺寸和 100/300 大图、非 root 发行镜像、存储调和、HTTPS 安全、跨版本恢复和安全 Compose；
+- 最终只读复核：真实库仍为 `3:8:23:2` 和原 4 条迁移；两个 Artifact 的数据库摘要 `f6bc647…` / `2038951…` 与物理文件逐项一致；生产应用 `bebb50d…`、数据库 `482ccdee…` 的完整 ID、启动时间和端口未变，没有 BP-09 测试容器、网络或卷残留；
+- 现有 PostgreSQL 的 `0.0.0.0:55432` 风险保持原样。处理它需要用户确认 v2 异地备份和维护窗口；本 Goal 未越权重建真实容器。
+
+### 2026-08-22 — BP-10 签名 Skill/资源收尾
+
+- 总门通过后的逐条反向审计发现第 7 项仍有真实缺口：Manifest 能声明 `skill.entry` 和 Asset 摘要，但数据库没有内容，Session 也无法真正取得可注入正文。没有用“接口以后再做”掩盖，新增 BP-10 后继续保持 Goal active；
+- `0014_plugin_resources.sql` 添加不可变插件资源和 Session 披露审计。签名 OCI 安装现在必须原子提交与 Manifest Asset 路径集合完全相同的内容；服务端规范 Base64、从签名路径确定媒体类型、重算 SHA-256，并拒绝缺失、额外、重复、篡改、路径逃逸、超限或非 UTF-8 Skill；
+- `plugin-context/read` 只解析当前 Session 的不可变 EnvironmentManifest，复核活动签名安装，返回所选插件的目录摘要、资源元数据和 Skill 正文；reference/asset 只有显式准确选择器才披露。请求 ID、环境指纹、请求哈希和实际摘要不可变记录，正文不写入读取审计；
+- 加入 32 插件/环境、16 个按需资源、单次 1 MiB 披露和单包 64 项/2 MiB 边界；MCP 传输继续诚实保留为适配层未知，不阻塞稳定的内容、ToolCall 和权限语义；
+- Rustfmt、Clippy、57 个 Rust 测试、空库/旧库/重放迁移及真实签名 OCI HTTP 流程先定向通过。真实流程覆盖 5 个安装包、10 项 Skill/reference、篡改拒绝、4 个固定 Skill 引导、reference 按需读取、幂等冲突、撤销、Git CAS、Chromium 与 ToolLease；
+- BP-10 后首次总门仅在入口发现一处 rustfmt 折行差异；格式化后第二次从起点完整通过：14 条迁移、全部领域/HTTP/Git/Runner/调度/签名资源/审核集成、三尺寸 Chromium、100/300 大图、发行镜像、存储调和、HTTPS、12→14 恢复和真实安全 Compose。大图 TTFB 中位 `86.227ms`、DOMContentLoaded `241.9ms`、筛选 `18.3ms`；
+- 最终只读审计仍得到生产容器完整 ID `bebb50d…` / `482ccdee…`、启动时间和端口不变，业务计数 `3:8:23:2`、原 4 条迁移不变，两项正式 Artifact 的数据库/物理 SHA-256 逐项一致；无总门一次性容器、网络或卷残留。旧数据库 `0.0.0.0:55432` 风险继续等待备份与维护授权；
+- 至此 12 项都已有设计结论、可运行候选、机器证据、风险与恢复边界。第 1/7/8/11/12 项仍需要人的主观或真实部署选择，因此工作 Agent 只提出拟合并，不自行合并或把 Goal 标为 complete。

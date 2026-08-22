@@ -62,6 +62,7 @@ done
 docker run -d --name "$workbench_app" --network "$workbench_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@workbench-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-workbench-artifacts \
   -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$workbench_worker_bootstrap" \
   -e RUST_LOG=fudian=info \

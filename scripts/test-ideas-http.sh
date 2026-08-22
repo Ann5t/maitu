@@ -94,6 +94,7 @@ done
 docker run -d --name "$idea_http_app" --network "$idea_http_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@idea-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e ARTIFACT_ROOT=/tmp/fudian-test-artifacts \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   --mount "type=bind,src=$idea_http_repo_root,dst=/app" \

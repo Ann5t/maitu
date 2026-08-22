@@ -30,12 +30,12 @@
 | 4 | 执行、暂停、拆分、拟合并与回流 | 完成 | 完整状态机、持久 ActionRun、冻结候选、独立复验、选择性父整合、Git CAS、冲突暂停与崩溃恢复均已验证 | 无领域闭环缺口；暂停和集成的视觉表达归第 11 项，不反向改变领域事实 | 用户已接受“未达成就继续或拆分，只有达成后才拟合并；一枝干单写”的语义 |
 | 5 | 上下文、记忆与渐进式披露 | 完成 | 精确父快照、不可折叠契约/权限信封、完整来源目录、来源边、三层按需读取审计与可重建派生索引均已验证 | 无本阶段必要缺口；Git commit 来源由 BP-04 以既定 Artifact/来源边协议补入 | 用户已接受按需/渐进式披露原则；具体视觉密度仍归第 11 项判断 |
 | 6 | 单写者、worktree、权限与 Runner 隔离 | 完成 | 真实 bare repo/branch/worktree、不可变权限和 Lease、fencing、断网无能力 Worker、资源上限、输出/删除清单及 Git CAS 均已通过攻击/竞态测试 | 联网与外部副作用适配器属于第 7 项；不存在适配器时明确拒绝，不降级放权 | 用户已接受 Session 内固定权限免逐次审核；高风险能力继续按插件适配器细化 |
-| 7 | 中央插件、Tool Broker 与版本环境 | 部分实现 | 签名安装/撤销、冲突环境、四类 OCI Worker、Git CAS、PPTMaster 请求、物理 ToolLease，以及按需插件/运行现场 UI 均已验证 | 认证后的 endpoint proxy、日志/Trace 保留策略和真实专业插件授权归 BP-09/后续插件包 | 用户尚未接受插件发现与运行现场手感 |
-| 8 | PostgreSQL、Git、文件、产物、证据、备份恢复 | 部分实现 | 内容寻址输入/Artifact/Evidence；BP-04 已实现 Git 候选—ref CAS—数据库操作日志、快照与冲突封存 | 跨存储 reconcile、孤儿回收、完整恢复/回退演练和保留策略 | 文件默认复制还是引用的体验 |
+| 7 | 中央插件、Tool Broker 与版本环境 | 待用户判断 | 签名安装/撤销、摘要绑定 Skill/reference、Session 渐进披露、冲突环境、四类 OCI Worker、Git CAS、PPTMaster 请求、物理 ToolLease、保留输出/审计、同源 endpoint proxy 及按需 UI 均已验证 | 无机器必要缺口；真实付费/授权插件仍须按具体插件单独授权 | 插件发现与运行现场手感 |
+| 8 | PostgreSQL、Git、文件、产物、证据、备份恢复 | 待用户判断 | 内容寻址输入/Artifact/Evidence、Git CAS/操作日志、稳定 reconcile、可逆 quarantine、v2 全量备份、空目标恢复、12→14 升级和旧应用回退均已验证 | 无机器必要缺口；真实异地备份位置和恢复频率属于部署选择 | 文件默认复制还是引用的体验 |
 | 9 | 持久调度、ActionRun、心跳、恢复与通知 | 完成 | PostgreSQL 队列、Worker/Action Lease、心跳/fencing、安全重排、人工暂停、取消、通知/outbox 及真实 ToolLease 恢复矩阵已验证 | 无本阶段必要缺口；具体站外适配器由私有部署配置，不存在时明确 suppressed | 用户已要求“暂停后让我知道”；所有需人工介入的恢复均生成站内待处理与通知 |
 | 10 | 测试、证据、独立 AI 审核与用户验收 | 完成 | 一键质量门覆盖单元/SQL/HTTP/浏览器/Git/OCI/调度恢复；Contribution、候选、审核与集成均绑定准确 commit/环境；独立只读 Worker 和父契约复验已验证 | 部署备份/回退演练归第 8、12 项；审核信息密度归第 11 项，不降低本项事实与权限门 | 用户仍可在第 11 项调整审核摘要的展示密度；AI 只能建议、用户最终决定的语义已接受 |
 | 11 | Git 图 + 工作现场式多设备前端 | 待用户判断 | `goal-worksite-v2` 已覆盖真实 Git/文件/行动/工具/插件/审核现场，三尺寸、键盘、无障碍与 100/300 大图预算均已验证 | 机器缺口已关闭；用户尚未在真实任务中接受整体层级、密度和暂停/拟合并表达 | 布局、字号、密度、暂停/合并视觉 |
-| 12 | 私有部署、认证与安全运维 | 部分实现 | Compose、非 root runtime、只读根文件系统、回环应用端口 | 无认证/授权/CSRF/限速/HTTPS；当前旧 DB 容器仍公开映射 55432 | 登录方式和真实访问范围 |
+| 12 | 私有部署、认证与安全运维 | 待用户判断 | 单 owner/恢复码/会话、CSRF/Origin、持久限速、可信代理、ToolLease 代理、HTTPS、安全 Compose、v2 恢复和应用回退均已验证 | 无候选实现缺口；真实域名/私人网络、CA、防火墙、异地备份及旧 DB `55432` 维护需用户授权 | 私人网络或公网域名，以及真实维护窗口 |
 
 ## 1. 产品定位与两级空间
 
@@ -144,6 +144,13 @@
 - CPU、内存、磁盘、进程数和时间均有限额，超限形成可恢复暂停；
 - 路径逃逸、符号链接、并发写、资源耗尽和恶意插件测试通过。
 
+完成记录（`0009_workspace_runner.sql`、[`workspace-runner-v1.md`](workspace-runner-v1.md)）：
+
+- 每个目标枝干拥有确定性 Git branch/worktree；数据库的 HEAD/tree/snapshot 与磁盘实测互相核对，初始化的空仓库也通过严格 `git fsck`；
+- 不可变 CapabilityPolicy、单写 Lease 和单调 fencing 把 Session 写权固定在唯一现场，迟到 Worker 和旁路修改都不能发布；
+- 一次性 Runner 使用断网、只读输入/根文件系统、独立输出、无 capability、无 Docker Socket/宿主 home 及 CPU/内存/磁盘/PID/时间/日志上限；
+- 输出/删除清单、大小写碰撞、符号链接和路径逃逸攻击以及 Git compare-and-swap 竞态均已实测，因此本项标为完成。
+
 ## 7. 中央插件与工具环境
 
 必须同时满足：
@@ -156,6 +163,14 @@
 - 至少用真实 Rust、Python、C/C++ 与 Playwright 插件证明统一协议；
 - PPTMaster 等未安装能力通过同一插件 SDK、兼容夹具和中央安装请求接入，不能假装本机已有授权软件。
 
+BP-05/06/08/09/10 技术候选记录（`0010_signed_real_plugins.sql`、`0011_action_scheduler.sql`、`0014_plugin_resources.sql`、[`tooling-api-v1.md`](tooling-api-v1.md)）：
+
+- Ed25519 安装证明把规范 Manifest、OCI 镜像 ID、入口、Runner 与自检摘要固定为不可替换版本；撤销、冲突版本和 `latest` 解析均在运行前复核；
+- Rust、双冲突 Python、C/C++ 和 Playwright/Chromium 通过同一无状态 ToolCall/Runner 协议，Session 只保留源文件与产物；PPTMaster 只生成中央安装请求，不伪造可用性；
+- 持续 ToolLease 具有到期、续期、心跳、fencing、清理和明确保留输出；权威日志摘要/事件保留在数据库，原始输出受限并随 Runner 卷备份，孤儿只经保留期和可逆 quarantine；
+- Manifest 的 Skill/reference 路径与 SHA-256 进入签名边界，安装时必须提交逐字节匹配的完整不可变资源集合；Session Worker 只取得固定环境的 Skill，其他内容按准确插件三元组和路径读取，披露进入不可变审计；
+- BP-09 不再把内部 endpoint 交给浏览器，而是提供已认证、同源、目的 CIDR/头/大小受限的代理。技术必要条件已关闭；插件发现和运行现场的主观手感仍待用户判断。
+
 ## 8. 数据、Git、文件与恢复
 
 必须同时满足：
@@ -167,6 +182,13 @@
 - 全量备份包含数据库、Git、对象、环境清单和配置元数据；
 - 在一次性环境完成从备份恢复、校验、升级和回退演练；
 - 真实数据迁移前后计数、约束和内容指纹可比较。
+
+BP-03/04/09 技术候选记录（`0013_private_security_recovery.sql`、`fudian-maintenance`、`backup-v2.sh`、`restore-v2.sh`）：
+
+- PostgreSQL 权威关系、Git 文本、内容寻址对象、InputArtifact、Evidence、EnvironmentManifest 和 Runner 输出均有明确所有权、摘要与来源；跨存储 Git 操作使用阶段日志和 CAS；
+- 调和扫描从权威引用出发区分 referenced、missing、digest mismatch 与 orphan。连续扫描结果稳定，四类孤儿经过默认保留期后也只移入 run 专属 quarantine，并可哈希一致地恢复；
+- v2 备份只读归档数据库、四类卷、可构建源码、迁移摘要和脱敏部署/镜像元数据，发布前验证逐文件与总校验和；恢复脚本只接受有专用标签的空库和空卷；
+- 隔离演练已完成 BP-08 的 12 迁移数据备份、空目标恢复、Git `fsck`、对象哈希、12→14 升级及 BP-08 应用回退。真实生产现场仍只做前后只读指纹核对；默认复制/引用体验待用户判断。
 
 ## 9. 后台执行与恢复
 
@@ -244,6 +266,14 @@ BP-08 候选（[`workbench-v2.md`](workbench-v2.md)）：
 - 电脑、手机和平板通过 HTTPS 完成登录和关键流程；
 - 未经用户提供域名/账号并显式授权，不执行真实公开部署。
 
+BP-09 技术候选记录（[`private-deployment-v1.md`](private-deployment-v1.md)、`0013_private_security_recovery.sql`）：
+
+- setup token 单例初始化、Argon2id + pepper、一次性恢复码、随机摘要会话、轮换/到期/撤销、登出和安全审计已经由并发与恢复场景验证；
+- 浏览器写请求统一经过认证、精确 HTTPS Origin、CSRF 与 Fetch Metadata；登录/恢复/普通及高成本写使用持久多维速率桶，应用重启后仍生效；
+- 只有固定 Caddy 地址可提供转发身份；HSTS/CSP/no-store 等响应头、Secure/HttpOnly/Strict Cookie，以及不泄漏原始凭据的审计均由 HTTPS 测试验证；
+- 安全 Compose 实启验证文件型 secret、非 root/只读根、资源/PID/日志上限、持久卷、健康依赖、内部 edge/data/tools、只有 Caddy 加入 ingress，以及私有模式唯一 `127.0.0.1` HTTPS 端口；
+- Chromium 1440/820/390 的 setup、登录和关键项目现场，以及备份—空目标恢复—升级—旧应用回退均已专项通过。真实域名/私人网络选择、系统 CA、防火墙、异地备份和遗留 `55432` 维护仍须用户授权与验收。
+
 ## 子目标实施顺序
 
 | BranchProposal | 覆盖方面 | 依赖 | 合并前证据 |
@@ -257,6 +287,6 @@ BP-08 候选（[`workbench-v2.md`](workbench-v2.md)）：
 | BP-06 持久调度恢复（逻辑闭环完成） | 2、4、7、9、10 | BP-04、BP-05 | kill/recreate/timeout/cancel/重复投递、通知及物理 ToolLease 测试全部通过 |
 | BP-07 证据与审核闭环（逻辑闭环完成） | 4、10 | BP-03–06 | 冻结 commit/环境、独立只读复验、完整/部分父整合、冲突/CAS/崩溃恢复及根目标人工终结均已验证 |
 | BP-08 完整多设备工作台（机器门完成，待用户判断） | 11 | BP-01–07 | 100/300 大图、键盘、三尺寸、性能均通过；用户判断未替代 |
-| BP-09 私有部署安全 | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS/恢复演练 |
+| BP-09 私有部署安全（机器门完成） | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS、调和、安全 Compose、恢复/升级/回退及总质量门均通过 |
 
 每个 BP 未达成时继续当前 Session；需要并行或独立目标时才创建子枝干。每次拟合并都必须记录冻结候选和独立复验；用户未接受前只保留候选，不自行合入 `main`。

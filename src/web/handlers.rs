@@ -1745,6 +1745,22 @@ pub async fn api_environment_detail(
     Ok(Json(serde_json::to_value(environment)?))
 }
 
+pub async fn api_read_plugin_context(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<plugins::ReadPluginContextRequest>,
+) -> AppResult<Json<Value>> {
+    let response = plugins::read_plugin_context(
+        &state.pool,
+        &state.config.runner_runtime_digest,
+        project_id,
+        session_id,
+        request,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
 pub async fn api_bind_environment(
     State(state): State<Arc<AppState>>,
     Path((project_id, session_id)): Path<(Uuid, Uuid)>,

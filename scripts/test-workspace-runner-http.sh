@@ -219,6 +219,7 @@ workspace_runtime_digest="$(docker run --rm --entrypoint /usr/local/bin/fudian-r
 docker run -d --name "$workspace_app" --network "$workspace_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@workspace-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   -e ARTIFACT_ROOT=/data/artifacts \
   -e REPOSITORY_ROOT=/data/repositories \

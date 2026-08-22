@@ -4011,6 +4011,7 @@ fn ensure_bare_repository(path: &Path) -> Result<InitializedRepository, String> 
                     OsStr::new("--git-dir"),
                     path.as_os_str(),
                     OsStr::new("hash-object"),
+                    OsStr::new("-w"),
                     OsStr::new("-t"),
                     OsStr::new("tree"),
                     OsStr::new("--stdin"),
@@ -4420,4 +4421,39 @@ async fn insert_exception_attention(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod repository_initialization_tests {
+    use std::{ffi::OsStr, fs, path::PathBuf};
+
+    use uuid::Uuid;
+
+    use super::{ensure_bare_repository, run_git};
+
+    struct TestRepository(PathBuf);
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn initialized_empty_repository_passes_strict_fsck() {
+        let repository = TestRepository(
+            std::env::temp_dir().join(format!("fudian-empty-repository-{}.git", Uuid::new_v4())),
+        );
+        let initialized = ensure_bare_repository(&repository.0)
+            .expect("empty managed repository should initialize");
+
+        assert!(!initialized.head_commit.is_empty());
+        run_git([
+            OsStr::new("--git-dir"),
+            repository.0.as_os_str(),
+            OsStr::new("fsck"),
+            OsStr::new("--strict"),
+        ])
+        .expect("new managed repository should contain its empty tree object");
+    }
 }

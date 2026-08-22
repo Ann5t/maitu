@@ -1914,8 +1914,14 @@ fn session_worksite(
                             p { (&lease.plugin_id) "@" (&lease.plugin_version) " · " (lease.cleanup_status.as_str()) }
                             @if !lease.endpoint_refs.0.is_empty() {
                                 div class="endpoint-list" {
-                                    @for endpoint in &lease.endpoint_refs.0 {
-                                        code { (endpoint) }
+                                    @if lease.status == "active" {
+                                        @for (index, _) in lease.endpoint_refs.0.iter().enumerate() {
+                                            a href=(format!("/api/v1/tool-leases/{}/proxy/{index}", lease.id)) target="_blank" rel="noopener" {
+                                                "打开受控现场 " (index + 1)
+                                            }
+                                        }
+                                    } @else {
+                                        small { (lease.endpoint_refs.0.len()) " 个入口已关闭" }
                                     }
                                 }
                             }

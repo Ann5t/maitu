@@ -98,14 +98,24 @@ fn serve_static(relative_source: &str) -> anyhow::Result<()> {
             .next()
             .unwrap_or_default()
             .to_owned();
-        let (status, content_type, response_body): (&str, &str, &[u8]) =
-            if first_line.starts_with("GET /health ") {
-                ("200 OK", "text/plain; charset=utf-8", b"ok")
-            } else if first_line.starts_with("GET / ") {
-                ("200 OK", "text/html; charset=utf-8", &body)
-            } else {
-                ("404 Not Found", "text/plain; charset=utf-8", b"not found")
-            };
+        let request_headers = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+        let (status, content_type, response_body): (&str, &str, &[u8]) = if request_headers
+            .contains("\r\ncookie:")
+            || request_headers.contains("\r\nauthorization:")
+            || request_headers.contains("\r\nproxy-authorization:")
+        {
+            (
+                "400 Bad Request",
+                "text/plain; charset=utf-8",
+                b"credential header leaked",
+            )
+        } else if first_line.starts_with("GET /health ") {
+            ("200 OK", "text/plain; charset=utf-8", b"ok")
+        } else if first_line.starts_with("GET / ") {
+            ("200 OK", "text/html; charset=utf-8", &body)
+        } else {
+            ("404 Not Found", "text/plain; charset=utf-8", b"not found")
+        };
         write!(
             stream,
             "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",

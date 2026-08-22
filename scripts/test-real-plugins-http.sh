@@ -62,6 +62,7 @@ start_real_app() {
   docker run -d --name "$real_app" --network "$real_network" \
     -p 127.0.0.1::3000 \
     -e DATABASE_URL=postgres://fudian_test:fudian_test_only@real-plugins-db:5432/fudian_test \
+    -e FUDIAN_SECURITY_MODE=disabled \
     -e FUDIAN_BIND=0.0.0.0:3000 \
     -e ARTIFACT_ROOT=/data/artifacts \
     -e REPOSITORY_ROOT=/data/repositories \
@@ -290,6 +291,7 @@ entry_digest() {
 
 plugin_draft() {
   python3 - "$@" <<'PY'
+import hashlib
 import json
 import sys
 
@@ -355,6 +357,17 @@ if plugin_id == "fudian.tools.playwright":
         },
     })
 
+skill_content = (
+    f"# {display_name}\n\n"
+    f"Plugin: `{plugin_id}`\nVersion: `{version}`\nPrimary tool: `{tool_name}`\n"
+    "Use only through the Fudian Tool Broker and keep outputs inside declared paths.\n"
+)
+reference_content = json.dumps(
+    {"pluginId": plugin_id, "tools": [tool["name"] for tool in tools], "version": version},
+    sort_keys=True,
+    separators=(",", ":"),
+)
+
 print(json.dumps({
     "schemaVersion": 1,
     "pluginId": plugin_id,
@@ -375,9 +388,38 @@ print(json.dumps({
         "contentDigest": runtime_digest,
         "entrypoint": "/runtime/fudian-tool-runtime",
     },
-    "assets": [],
+    "assets": [
+        {"path": "SKILL.md", "contentDigest": "sha256:" + hashlib.sha256(skill_content.encode()).hexdigest()},
+        {"path": "references/tool.json", "contentDigest": "sha256:" + hashlib.sha256(reference_content.encode()).hexdigest()},
+    ],
     "resourceHints": resource,
 }, separators=(",", ":")))
+PY
+}
+
+plugin_resources() {
+  python3 - "$1" <<'PY'
+import base64
+import json
+import sys
+
+manifest = json.loads(sys.argv[1])
+primary_tool = manifest["tools"][0]["name"]
+skill_content = (
+    f"# {manifest['displayName']}\n\n"
+    f"Plugin: `{manifest['pluginId']}`\nVersion: `{manifest['version']}`\nPrimary tool: `{primary_tool}`\n"
+    "Use only through the Fudian Tool Broker and keep outputs inside declared paths.\n"
+)
+reference_content = json.dumps(
+    {"pluginId": manifest["pluginId"], "tools": [tool["name"] for tool in manifest["tools"]], "version": manifest["version"]},
+    sort_keys=True,
+    separators=(",", ":"),
+)
+resources = [
+    {"path": "SKILL.md", "mediaType": "text/markdown; charset=utf-8", "contentBase64": base64.b64encode(skill_content.encode()).decode()},
+    {"path": "references/tool.json", "mediaType": "application/json", "contentBase64": base64.b64encode(reference_content.encode()).decode()},
+]
+print(json.dumps(resources, separators=(",", ":")))
 PY
 }
 
@@ -397,6 +439,7 @@ install_manifest() {
   local install_payload
   local installation
   local replay
+  local resources
   self_test="$(python3 -c 'import json,sys
 print(json.dumps({"schemaVersion":1,"status":"passed","runnerDigest":sys.argv[1],
  "runtimeEntryDigest":sys.argv[2],"checks":{"directSmoke":True,"label":sys.argv[3]}}))' \
@@ -411,10 +454,11 @@ print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local
   openssl pkeyutl -sign -rawin -inkey "$real_tmp/publisher-private.pem" \
     -in "$real_tmp/$label-statement.txt" -out "$real_tmp/$label-signature.bin"
   signature="$(od -An -v -tx1 "$real_tmp/$label-signature.bin" | tr -d ' \n')"
+  resources="$(plugin_resources "$manifest")"
   install_payload="$(python3 -c 'import json,sys
 print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local",
- "signature":sys.argv[2],"selfTest":json.loads(sys.argv[3])}))' \
-    "$manifest" "$signature" "$self_test")"
+ "signature":sys.argv[2],"selfTest":json.loads(sys.argv[3]),"resources":json.loads(sys.argv[4])}))' \
+    "$manifest" "$signature" "$self_test" "$resources")"
   installation="$(curl -fsS -H 'content-type: application/json' -d "$install_payload" \
     "$real_base/api/v1/plugins/install")"
   replay="$(curl -fsS -H 'content-type: application/json' -d "$install_payload" \
@@ -628,6 +672,7 @@ real_cxx_manifest="$(seal_draft "$(plugin_draft fudian.tools.cxx 1.0.0 'C and C+
 real_python_1_manifest="$(seal_draft "$(plugin_draft fudian.tools.python 1.0.0 'Python legacy runtime' "$(image_id "$real_python_1_image")" run)")"
 real_python_2_manifest="$(seal_draft "$(plugin_draft fudian.tools.python 2.0.0 'Python modern runtime' "$(image_id "$real_python_2_image")" run)")"
 real_playwright_manifest="$(seal_draft "$(plugin_draft fudian.tools.playwright 1.0.0 'Playwright Chromium' "$(image_id "$real_playwright_image")" inspect)")"
+real_rust_resources="$(plugin_resources "$real_rust_manifest")"
 
 real_rust_self_test="$(python3 -c 'import json,sys
 print(json.dumps({"schemaVersion":1,"status":"passed","runnerDigest":sys.argv[1],"runtimeEntryDigest":sys.argv[2],"checks":{"directSmoke":True}}))' \
@@ -636,8 +681,8 @@ real_bad_runner_self_test="$(python3 -c 'import json,sys
 print(json.dumps({"schemaVersion":1,"status":"passed","runnerDigest":"sha256:"+"0"*64,"runtimeEntryDigest":sys.argv[1],"checks":{}}))' \
   "$(entry_digest "$real_rust_image")")"
 real_bad_runner_payload="$(python3 -c 'import json,sys
-print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local","signature":"0"*128,"selfTest":json.loads(sys.argv[2])}))' \
-  "$real_rust_manifest" "$real_bad_runner_self_test")"
+print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local","signature":"0"*128,"selfTest":json.loads(sys.argv[2]),"resources":json.loads(sys.argv[3])}))' \
+  "$real_rust_manifest" "$real_bad_runner_self_test" "$real_rust_resources")"
 real_bad_runner_status="$(curl -sS -o "$real_tmp/bad-runner.json" -w '%{http_code}' \
   -H 'content-type: application/json' -d "$real_bad_runner_payload" \
   "$real_base/api/v1/plugins/install")"
@@ -645,13 +690,22 @@ real_bad_runner_status="$(curl -sS -o "$real_tmp/bad-runner.json" -w '%{http_cod
 [[ "$(json_field "$(<"$real_tmp/bad-runner.json")" code)" == runner_digest_mismatch ]]
 
 real_bad_signature_payload="$(python3 -c 'import json,sys
-print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local","signature":"0"*128,"selfTest":json.loads(sys.argv[2])}))' \
-  "$real_rust_manifest" "$real_rust_self_test")"
+print(json.dumps({"manifest":json.loads(sys.argv[1]),"publisherId":"fudian.local","signature":"0"*128,"selfTest":json.loads(sys.argv[2]),"resources":json.loads(sys.argv[3])}))' \
+  "$real_rust_manifest" "$real_rust_self_test" "$real_rust_resources")"
 real_bad_signature_status="$(curl -sS -o "$real_tmp/bad-signature.json" -w '%{http_code}' \
   -H 'content-type: application/json' -d "$real_bad_signature_payload" \
   "$real_base/api/v1/plugins/install")"
 [[ "$real_bad_signature_status" == 403 ]]
 [[ "$(json_field "$(<"$real_tmp/bad-signature.json")" code)" == invalid_plugin_signature ]]
+
+real_tampered_resource_payload="$(python3 -c 'import base64,json,sys
+p=json.loads(sys.argv[1]); p["resources"][0]["contentBase64"]=base64.b64encode(b"tampered skill").decode(); print(json.dumps(p))' \
+  "$real_bad_signature_payload")"
+real_tampered_resource_status="$(curl -sS -o "$real_tmp/tampered-resource.json" -w '%{http_code}' \
+  -H 'content-type: application/json' -d "$real_tampered_resource_payload" \
+  "$real_base/api/v1/plugins/install")"
+[[ "$real_tampered_resource_status" == 422 ]]
+[[ "$(json_field "$(<"$real_tmp/tampered-resource.json")" code)" == plugin_resource_digest_mismatch ]]
 
 real_rust_install="$(install_manifest "$real_rust_manifest" "$(entry_digest "$real_rust_image")" rust)"
 real_cxx_install="$(install_manifest "$real_cxx_manifest" "$(entry_digest "$real_cxx_image")" cxx)"
@@ -663,6 +717,8 @@ real_playwright_install="$(install_manifest "$real_playwright_manifest" "$(entry
 real_rust_proof="$(curl -fsS "$real_base/api/v1/plugins/fudian.tools.rust/1.0.0/install-proof")"
 [[ "$(json_field "$real_rust_proof" installation.id)" == "$(json_field "$real_rust_install" id)" ]]
 [[ "$(json_field "$real_rust_proof" publisher.status)" == active ]]
+[[ "$(json_field "$real_rust_proof" resources.0.path)" == SKILL.md ]]
+[[ "$(json_field "$real_rust_proof" resources.1.path)" == references/tool.json ]]
 real_catalog="$(curl -fsS "$real_base/api/v1/plugins")"
 python3 -c 'import json,sys
 entries=json.loads(sys.argv[1])["plugins"]
@@ -709,6 +765,34 @@ print(json.dumps([json.loads(value) for value in sys.argv[1:]]))' \
 real_environment_1="$(create_environment "$real_plugins_1" \
   '{"rust":"1.97.1","gcc":"15","python":"3.13.15","playwright":"1.62.0"}')"
 bind_environment "$real_project_1" "$real_session_1" "$(json_field "$real_environment_1" id)" >/dev/null
+
+real_context_request_id="$(new_uuid)"
+real_context_payload="$(python3 -c 'import json,sys
+m=json.loads(sys.argv[2]); print(json.dumps({"clientRequestId":sys.argv[1],"includeSkills":True,
+ "resources":[{"plugin":{"pluginId":m["pluginId"],"version":m["version"],"contentDigest":m["contentDigest"]},"path":"references/tool.json"}]}))' \
+  "$real_context_request_id" "$real_rust_manifest")"
+real_context="$(curl -fsS -H 'content-type: application/json' -d "$real_context_payload" \
+  "$real_base/api/v1/projects/$real_project_1/sessions/$real_session_1/plugin-context/read")"
+python3 -c 'import base64,json,sys
+c=json.loads(sys.argv[1]); assert not c["replayed"] and len(c["plugins"])==4
+for plugin in c["plugins"]:
+    assert plugin["skill"]["path"]=="SKILL.md"
+    assert plugin["plugin"]["pluginId"] in plugin["skill"]["text"]
+    assert len(plugin["resources"])==2
+    assert all("contentBase64" not in item and "text" not in item for item in plugin["resources"])
+r=c["requestedResources"][0]
+decoded=base64.b64decode(r["contentBase64"]).decode()
+assert r["path"]=="references/tool.json" and json.loads(decoded)["pluginId"]=="fudian.tools.rust"
+assert r["text"]==decoded' "$real_context"
+real_context_replay="$(curl -fsS -H 'content-type: application/json' -d "$real_context_payload" \
+  "$real_base/api/v1/projects/$real_project_1/sessions/$real_session_1/plugin-context/read")"
+[[ "$(json_field "$real_context_replay" replayed)" == true ]]
+real_context_conflict_status="$(curl -sS -o "$real_tmp/context-conflict.json" -w '%{http_code}' \
+  -H 'content-type: application/json' \
+  -d "{\"clientRequestId\":\"$real_context_request_id\",\"includeSkills\":false}" \
+  "$real_base/api/v1/projects/$real_project_1/sessions/$real_session_1/plugin-context/read")"
+[[ "$real_context_conflict_status" == 409 ]]
+[[ "$(json_field "$(<"$real_tmp/context-conflict.json")" code)" == idempotency_key_reused ]]
 
 real_schema_payload="$(python3 -c 'import json,sys
 m=json.loads(sys.argv[2]); print(json.dumps({"clientRequestId":sys.argv[1],
@@ -1010,6 +1094,8 @@ DO \$\$
 BEGIN
   IF (SELECT count(*) FROM plugin_publishers) <> 1
      OR (SELECT count(*) FROM plugin_installations) <> 5
+     OR (SELECT count(*) FROM plugin_package_resources) <> 10
+     OR (SELECT count(*) FROM plugin_resource_reads) <> 1
      OR (SELECT count(*) FROM tool_execution_requests) <> 5
      OR (SELECT count(*) FROM tool_calls WHERE runner_job_id IS NOT NULL) <> 5
      OR (SELECT count(*) FROM plugin_install_requests) <> 1

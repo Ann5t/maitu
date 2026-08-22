@@ -81,6 +81,7 @@ done
 docker run -d --name "$context_app" --network "$context_network" \
   -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_context:fudian_context_only@context-db:5432/fudian_context \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 \
   -e ARTIFACT_ROOT=/tmp/fudian-context-http-artifacts \
   -e RUST_LOG=fudian=info \

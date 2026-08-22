@@ -45,6 +45,12 @@ SKIP_PLUGIN_IMAGE_SMOKE=1 ./scripts/test-real-plugins-http.sh
 SCREENSHOT_DIR="$quality_tmp/screenshots" ./scripts/test-workbench-browser.sh
 SCREENSHOT_DIR="$quality_tmp/screenshots" ./scripts/test-workbench-large.sh
 ./scripts/test-production-image.sh
+./scripts/test-storage-reconciliation.sh
+SCREENSHOT_DIR="$quality_tmp/security-screenshots" ./scripts/test-security-https.sh
+FUDIAN_RECOVERY_CURRENT_IMAGE=fudian-nextgen-runtime:test \
+  ./scripts/test-backup-recovery.sh
+FUDIAN_SECURE_COMPOSE_IMAGE=fudian-nextgen-runtime:test \
+  ./scripts/test-secure-compose.sh
 
 git diff --check
 echo "complete quality gate passed"

@@ -10,7 +10,7 @@
 
 中央共享的是不可变包、镜像和内容寻址缓存，不是一个所有 Session 共同修改的 Python/Rust/系统依赖环境。实际执行发生在受限 Worker 中；worktree 本身不是安全边界。
 
-协议最初以 Mock 插件验证注册表、确定性环境指纹和 Broker trait；BP-05 加入 Ed25519 签名安装、固定 OCI 镜像/入口、真实一次性 Worker 和 Git CAS 回写，BP-06 又以持久 ActionRun/Worker Lease/fencing 完成真实 ToolLease 启停与崩溃恢复。MCP 传输、完整插件市场和用户运行现场仍是后续目标，详见 [`plugin-system-v1.md`](plugin-system-v1.md)、[`action-scheduler-v1.md`](action-scheduler-v1.md) 与 [`tooling-api-v1.md`](tooling-api-v1.md)。
+协议最初以 Mock 插件验证注册表、确定性环境指纹和 Broker trait；BP-05 加入 Ed25519 签名安装、固定 OCI 镜像/入口、真实一次性 Worker 和 Git CAS 回写，BP-06 又以持久 ActionRun/Worker Lease/fencing 完成真实 ToolLease 启停与崩溃恢复。BP-10 补齐签名内容包、不可变 Skill/reference 存储、Session 级提示词引导和按需读取审计。MCP 最终采用 stdio、HTTP 还是进程内适配仍保持未知，但不再阻塞稳定内容/能力语义，详见 [`plugin-system-v1.md`](plugin-system-v1.md)、[`action-scheduler-v1.md`](action-scheduler-v1.md) 与 [`tooling-api-v1.md`](tooling-api-v1.md)。
 
 ## 2. 标识、版本与摘要
 
@@ -54,7 +54,10 @@
     "contentDigest": "sha256:…",
     "entrypoint": "inspect"
   },
-  "assets": [],
+  "assets": [
+    { "path": "SKILL.md", "contentDigest": "sha256:…" },
+    { "path": "references/usage.json", "contentDigest": "sha256:…" }
+  ],
   "resourceHints": { "cpuMillis": 1000, "memoryMiB": 64, "timeoutSeconds": 30 }
 }
 ```
@@ -67,6 +70,7 @@
 4. `externalWrites: true`、私人网络、凭据或宿主设备访问不能靠插件自我声明获得，必须有系统级能力授予。
 5. Skill、工具 schema 和 references 按需披露；Session 默认只看到 ID、固定版本、摘要、简介与能力目录。
 6. Runtime 必须用内容摘要固定。容器引用使用镜像 digest，不接受只含可漂移 tag 的运行环境。
+7. Skill 入口必须对应一个 Asset。签名安装必须提交与 Assets 路径集合完全相同且逐项摘要匹配的内容；目录和详情只给元数据，绑定 Session 的 Worker 才取得 Skill 正文，其他资源必须显式按需读取。
 
 ## 4. EnvironmentManifest 与确定性指纹
 

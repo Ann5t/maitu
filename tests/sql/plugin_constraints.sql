@@ -42,6 +42,53 @@ VALUES (
   'sha256:' || repeat('8', 64)
 );
 
+INSERT INTO plugin_package_resources (
+  id, plugin_package_id, path, media_type, content_digest, content
+)
+VALUES (
+  '10000000-0000-0000-0000-000000000003',
+  '10000000-0000-0000-0000-000000000001',
+  'SKILL.md',
+  'text/markdown; charset=utf-8',
+  'sha256:' || repeat('9', 64),
+  convert_to('# test skill', 'UTF8')
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO plugin_package_resources (
+      id, plugin_package_id, path, media_type, content_digest, content
+    ) VALUES (
+      '10000000-0000-0000-0000-000000000004',
+      '10000000-0000-0000-0000-000000000001',
+      '../escape',
+      'text/plain',
+      'sha256:' || repeat('a', 64),
+      convert_to('bad', 'UTF8')
+    );
+    RAISE EXCEPTION 'unsafe plugin resource path was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE plugin_package_resources
+    SET content = convert_to('changed', 'UTF8')
+    WHERE id = '10000000-0000-0000-0000-000000000003';
+    RAISE EXCEPTION 'plugin resource mutation was accepted';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+  BEGIN
+    DELETE FROM plugin_package_resources
+    WHERE id = '10000000-0000-0000-0000-000000000003';
+    RAISE EXCEPTION 'plugin resource deletion was accepted';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
 DO $$
 BEGIN
   BEGIN

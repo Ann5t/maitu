@@ -1,0 +1,12 @@
+{
+	admin off
+}
+
+https://{$FUDIAN_SITE_HOST} {
+	tls internal
+	encode zstd gzip
+	header {
+		-Server
+	}
+	reverse_proxy app:3000
+}

@@ -279,6 +279,7 @@ review_runner_digest="$(docker run --rm --entrypoint /usr/local/bin/fudian-runne
   fudian-nextgen-runner:latest digest)"
 docker run -d --name "$review_app" --network "$review_network" -p 127.0.0.1::3000 \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@review-db:5432/fudian_test \
+  -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/data/artifacts \
   -e REPOSITORY_ROOT=/data/repositories -e WORKTREE_ROOT=/data/worktrees \
   -e RUNNER_OUTPUT_ROOT=/data/runner -e RUNNER_RUNTIME_DIGEST="$review_runner_digest" \
