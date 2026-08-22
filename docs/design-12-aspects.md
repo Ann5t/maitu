@@ -269,7 +269,7 @@ BP-08 候选（[`workbench-v2.md`](workbench-v2.md)）：
 - 工作现场直接显示真实 Git workspace、输入/Runner 文件、ActionRun payload/result 与事件、ToolCall/ToolLease endpoint、Evidence、Contribution、通知和物理 Integration 阶段；
 - 插件目录按需披露准确版本、能力、工具、权限、Runtime、签名发布者与撤销状态；安装表单只创建幂等请求，不提供未签名安装捷径；
 - 1440/820/390 Chromium、最小字号/对比度、44px 核心触控、Tab/方向键/Enter、减少动画和无页面横向溢出已自动验证；
-- 隔离 `100 GoalBranch / 300 Session / 20 Proposal` 大图在最新完整质量门中实测 TTFB 中位数 `86.227ms`、DOMContentLoaded `241.9ms`、筛选 `18.3ms`，均在契约预算内；
+- 隔离 `100 GoalBranch / 300 Session / 20 Proposal` 大图在 BP-10 收尾完整质量门中实测 TTFB 中位数 `86.227ms`、DOMContentLoaded `241.9ms`、筛选 `18.3ms`，均在契约预算内；
 - Session 01 的 `6–10px` 反例继续保留为退回记录。机器必要条件已经满足，但用户尚未实际接受候选，所以状态仍是“待用户判断”。
 
 ## 12. 私有部署与安全运维
