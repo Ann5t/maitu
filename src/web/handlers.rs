@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     application::{
-        context_memory, goal_branches, graph, ideas, inputs, plugins, projects, workbench,
-        workspaces,
+        context_memory, goal_branches, graph, ideas, inputs, plugins, projects,
+        scheduler as scheduler_app, workbench, workspaces,
     },
     artifacts::ArtifactStore,
     domain::{
@@ -28,6 +28,13 @@ use crate::{
     error::{AppError, AppResult},
     idea_domain::{AttachIdeaSourceQuery, IdeaCommandRequest},
     input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
+    scheduler::{
+        AcknowledgeToolCleanupRequest, ActivateToolLeaseRequest, CancelActionRunRequest,
+        ClaimActionRunRequest, CompleteActionRunRequest, CreateToolLeaseRequest,
+        EnqueueActionRunRequest, FailActionRunRequest, FinishToolLeaseRequest,
+        HeartbeatActionRunRequest, MarkNotificationReadRequest, ReconcileActionRunsRequest,
+        RegisterWorkerRequest, RequestToolLeaseStopRequest, ResumeActionRunRequest,
+    },
     tooling::{
         EnvironmentManifest, PluginInstallStatementRequest, PluginManifestDraft,
         PluginPublisherDraft, PluginSelector, SignedPluginInstallRequest,
@@ -1189,6 +1196,211 @@ pub async fn api_fail_runner_job(
     let outcome =
         workspaces::fail_runner_job(&state.pool, project_id, session_id, job_id, request).await?;
     Ok(Json(serde_json::to_value(outcome)?))
+}
+
+pub async fn api_register_scheduler_worker(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<RegisterWorkerRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let bootstrap = headers
+        .get("x-fudian-worker-bootstrap")
+        .and_then(|value| value.to_str().ok());
+    let response =
+        scheduler_app::register_worker(&state.pool, &state.config, bootstrap, request).await?;
+    let status = if response.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((status, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_enqueue_action_run(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<EnqueueActionRunRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let (replayed, action) =
+        scheduler_app::enqueue_action_run(&state.pool, project_id, session_id, request).await?;
+    let status = if replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((
+        status,
+        Json(json!({ "replayed": replayed, "action": action })),
+    ))
+}
+
+pub async fn api_list_action_runs(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let actions = scheduler_app::list_action_runs(&state.pool, project_id, session_id).await?;
+    Ok(Json(json!({ "actions": actions })))
+}
+
+pub async fn api_get_action_run(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, action_run_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let action = scheduler_app::get_action_run(&state.pool, project_id, action_run_id).await?;
+    Ok(Json(serde_json::to_value(action)?))
+}
+
+pub async fn api_cancel_action_run(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, action_run_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<CancelActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let (replayed, action) =
+        scheduler_app::cancel_action_run(&state.pool, project_id, action_run_id, request).await?;
+    Ok(Json(json!({ "replayed": replayed, "action": action })))
+}
+
+pub async fn api_resume_action_run(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, action_run_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<ResumeActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let (replayed, action) =
+        scheduler_app::resume_action_run(&state.pool, project_id, action_run_id, request).await?;
+    Ok(Json(json!({ "replayed": replayed, "action": action })))
+}
+
+pub async fn api_claim_action_run(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ClaimActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let response = scheduler_app::claim_action_run(&state.pool, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_heartbeat_action_run(
+    State(state): State<Arc<AppState>>,
+    Path(action_run_id): Path<Uuid>,
+    Json(request): Json<HeartbeatActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let response = scheduler_app::heartbeat_action_run(&state.pool, action_run_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_complete_action_run(
+    State(state): State<Arc<AppState>>,
+    Path(action_run_id): Path<Uuid>,
+    Json(request): Json<CompleteActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let action = scheduler_app::complete_action_run(&state.pool, action_run_id, request).await?;
+    Ok(Json(serde_json::to_value(action)?))
+}
+
+pub async fn api_fail_action_run(
+    State(state): State<Arc<AppState>>,
+    Path(action_run_id): Path<Uuid>,
+    Json(request): Json<FailActionRunRequest>,
+) -> AppResult<Json<Value>> {
+    let action = scheduler_app::fail_action_run(&state.pool, action_run_id, request).await?;
+    Ok(Json(serde_json::to_value(action)?))
+}
+
+pub async fn api_reconcile_action_runs(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReconcileActionRunsRequest>,
+) -> AppResult<Json<Value>> {
+    let response = scheduler_app::reconcile_action_runs(&state.pool, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_list_notifications(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let notifications = scheduler_app::list_notifications(&state.pool, project_id).await?;
+    Ok(Json(json!({ "notifications": notifications })))
+}
+
+pub async fn api_mark_notification_read(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, notification_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<MarkNotificationReadRequest>,
+) -> AppResult<Json<Value>> {
+    let (replayed, notification) =
+        scheduler_app::mark_notification_read(&state.pool, project_id, notification_id, request)
+            .await?;
+    Ok(Json(json!({
+        "replayed": replayed,
+        "notification": notification,
+    })))
+}
+
+pub async fn api_create_tool_lease(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<CreateToolLeaseRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let response = scheduler_app::create_tool_lease(
+        &state.pool,
+        &state.config,
+        project_id,
+        session_id,
+        request,
+    )
+    .await?;
+    let status = if response.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((status, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_get_tool_lease(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, tool_lease_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let lease = scheduler_app::get_tool_lease(&state.pool, project_id, tool_lease_id).await?;
+    Ok(Json(serde_json::to_value(lease)?))
+}
+
+pub async fn api_activate_tool_lease(
+    State(state): State<Arc<AppState>>,
+    Path(action_run_id): Path<Uuid>,
+    Json(request): Json<ActivateToolLeaseRequest>,
+) -> AppResult<Json<Value>> {
+    let lease = scheduler_app::activate_tool_lease(&state.pool, action_run_id, request).await?;
+    Ok(Json(serde_json::to_value(lease)?))
+}
+
+pub async fn api_finish_tool_lease(
+    State(state): State<Arc<AppState>>,
+    Path(action_run_id): Path<Uuid>,
+    Json(request): Json<FinishToolLeaseRequest>,
+) -> AppResult<Json<Value>> {
+    let response = scheduler_app::finish_tool_lease(&state.pool, action_run_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_request_tool_lease_stop(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, tool_lease_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<RequestToolLeaseStopRequest>,
+) -> AppResult<Json<Value>> {
+    let (replayed, response) =
+        scheduler_app::request_tool_lease_stop(&state.pool, project_id, tool_lease_id, request)
+            .await?;
+    Ok(Json(json!({ "replayed": replayed, "result": response })))
+}
+
+pub async fn api_acknowledge_tool_cleanup(
+    State(state): State<Arc<AppState>>,
+    Path(tool_lease_id): Path<Uuid>,
+    Json(request): Json<AcknowledgeToolCleanupRequest>,
+) -> AppResult<Json<Value>> {
+    let lease =
+        scheduler_app::acknowledge_tool_cleanup(&state.pool, tool_lease_id, request).await?;
+    Ok(Json(serde_json::to_value(lease)?))
 }
 
 async fn run_goal_command_with_workspace(

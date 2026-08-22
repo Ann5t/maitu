@@ -80,7 +80,21 @@ Broker 验证 Session 为 running、环境 binding/指纹一致、插件准确�
 
 ## ToolLease
 
-Rust 领域层与数据库已经定义 `requested → active → released/expired/cancelled` 状态、心跳、软/硬到期、资源策略、端点引用和保留输出。普通真实调用复用 Workspace Lease 并在单次请求后退出；持续浏览器、开发服务器等持久 ToolLease 的物理调度、崩溃恢复和端口代理由 BP-06 接管，BP-05 不暗中保留进程。
+持续浏览器、开发服务器等操作通过唯一 `tool_leases` 记录和关联 `goal_action_runs` 调度；普通 ToolCall 仍在单次 Worker 后退出，不能借此留下进程。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `POST /api/v1/projects/:project_id/sessions/:session_id/tool-leases` | 固定签名安装、环境、快照、资源/时限并排队 `tool.lease` ActionRun |
+| `GET /api/v1/projects/:project_id/tool-leases/:lease_id` | 读取状态、受控 endpoint、到期和清理状态；不返回 token 摘要 |
+| `POST /api/v1/projects/:project_id/tool-leases/:lease_id/stop` | 持 renewal token 请求 release/cancel；运行中转为 cancellation requested |
+| `POST /api/v1/scheduler/action-runs/:action_id/tool-lease/activate` | Worker 用 ActionLease/fencing 登记已启动 endpoint |
+| `POST /api/v1/scheduler/action-runs/:action_id/heartbeat` | 同一心跳续 ActionLease 与关联 ToolLease，并取得取消信号 |
+| `POST /api/v1/scheduler/action-runs/:action_id/tool-lease/finish` | launcher 确认进程/端点已终止后完成释放或取消 |
+| `POST /api/v1/scheduler/tool-leases/:lease_id/cleanup` | `tool.cleanup` Worker 确认失联进程的外部清理结果 |
+
+创建只允许 Manifest 中带 `persistent` 描述的签名 OCI 工具，且固定准确镜像、入口、Runner、EnvironmentManifest 和干净 workspace snapshot。当前内置适配器只接受断网静态预览等隔离控制面；联网、私人账号和外部写在没有专用适配器时拒绝。
+
+应用不挂载 Docker Socket。受信 launcher 以返回的准确镜像 ID、只读 worktree、只读根、固定 UID、无 capability、`no-new-privileges` 和资源上限启动进程。Web 容器被杀并重建后，未到期 Worker 可用原 ActionLease/fencing 继续；Worker 丢失时持续进程不会盲目重启，而是令 ToolLease 过期、Session 暂停并要求清理确认。测试实现的内部 endpoint 不等于最终用户代理；运行现场 UI、日志/Trace 保留和认证后的 endpoint proxy 归 BP-08/BP-09。
 
 ## 当前权限边界
 

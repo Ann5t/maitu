@@ -34,6 +34,18 @@ pub struct PluginToolDescriptor {
     #[serde(default = "empty_object")]
     pub output_schema: Value,
     pub idempotency: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistent: Option<PersistentToolDescriptor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentToolDescriptor {
+    pub adapter_kind: String,
+    #[serde(default)]
+    pub endpoint_kinds: Vec<String>,
+    pub startup_retry_safety: String,
+    pub max_duration_seconds: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -923,6 +935,7 @@ pub fn reference_mock_plugin(version: &str) -> AppResult<PluginManifest> {
                 input_schema: json!({ "type": "object" }),
                 output_schema: json!({ "type": "object" }),
                 idempotency: "pure".into(),
+                persistent: None,
             },
             PluginToolDescriptor {
                 name: "inspect".into(),
@@ -930,6 +943,7 @@ pub fn reference_mock_plugin(version: &str) -> AppResult<PluginManifest> {
                 input_schema: json!({}),
                 output_schema: json!({ "type": "object" }),
                 idempotency: "pure".into(),
+                persistent: None,
             },
         ],
         skill: None,
@@ -1044,6 +1058,51 @@ fn normalize_tools(tools: &mut [PluginToolDescriptor]) -> AppResult<()> {
                 "invalid_tool_idempotency",
                 "工具幂等类型必须是 pure、safe 或 unsafe",
             ));
+        }
+        if let Some(persistent) = &mut tool.persistent {
+            persistent.adapter_kind = required_text(
+                "持续工具适配器",
+                std::mem::take(&mut persistent.adapter_kind),
+                120,
+            )?;
+            if !matches!(
+                persistent.adapter_kind.as_str(),
+                "http_static_preview" | "interactive_browser" | "development_server"
+            ) {
+                return Err(AppError::bad_request(
+                    "invalid_persistent_tool",
+                    "持续工具适配器类型不受支持",
+                ));
+            }
+            normalize_string_list(
+                "持续工具 endpoint 类型",
+                &mut persistent.endpoint_kinds,
+                16,
+                80,
+            )?;
+            if persistent.endpoint_kinds.is_empty() {
+                return Err(AppError::bad_request(
+                    "invalid_persistent_tool",
+                    "持续工具必须声明至少一种 endpoint 类型",
+                ));
+            }
+            persistent.startup_retry_safety = required_text(
+                "持续工具启动重试安全性",
+                std::mem::take(&mut persistent.startup_retry_safety),
+                40,
+            )?;
+            if !matches!(persistent.startup_retry_safety.as_str(), "safe" | "unsafe") {
+                return Err(AppError::bad_request(
+                    "invalid_persistent_tool",
+                    "持续工具启动重试安全性必须是 safe 或 unsafe",
+                ));
+            }
+            if !(5..=86_400).contains(&persistent.max_duration_seconds) {
+                return Err(AppError::bad_request(
+                    "invalid_persistent_tool",
+                    "持续工具最大时长必须在 5 秒到 24 小时之间",
+                ));
+            }
         }
     }
     tools.sort_by(|left, right| left.name.cmp(&right.name));

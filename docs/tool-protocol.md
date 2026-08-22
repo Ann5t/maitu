@@ -10,7 +10,7 @@
 
 中央共享的是不可变包、镜像和内容寻址缓存，不是一个所有 Session 共同修改的 Python/Rust/系统依赖环境。实际执行发生在受限 Worker 中；worktree 本身不是安全边界。
 
-协议最初以 Mock 插件验证注册表、确定性环境指纹和 Broker trait；BP-05 已在不改变这些语义的前提下加入 Ed25519 签名安装、固定 OCI 镜像/入口、真实一次性 Worker 和 Git CAS 回写。持久 ToolLease 调度、MCP 传输和完整插件市场仍是后续目标，详见 [`plugin-system-v1.md`](plugin-system-v1.md) 与 [`tooling-api-v1.md`](tooling-api-v1.md)。
+协议最初以 Mock 插件验证注册表、确定性环境指纹和 Broker trait；BP-05 加入 Ed25519 签名安装、固定 OCI 镜像/入口、真实一次性 Worker 和 Git CAS 回写，BP-06 又以持久 ActionRun/Worker Lease/fencing 完成真实 ToolLease 启停与崩溃恢复。MCP 传输、完整插件市场和用户运行现场仍是后续目标，详见 [`plugin-system-v1.md`](plugin-system-v1.md)、[`action-scheduler-v1.md`](action-scheduler-v1.md) 与 [`tooling-api-v1.md`](tooling-api-v1.md)。
 
 ## 2. 标识、版本与摘要
 
@@ -200,7 +200,7 @@ release_lease(lease_id, token, retained_outputs) -> ToolLeaseResult
 | `lease.expire` | `active` → `expired` | 系统时间超过到期；仅系统 Actor | 强制终止、`tool_lease.expired`、必要时异常暂停 Session |
 | `lease.cancel` | `requested`/`active` → `cancelled` | 用户或授权系统动作 | 清理资源 + `tool_lease.cancelled` |
 
-服务重启后只能依据持久 Lease 和 Runner 实际状态恢复；不能假设旧 PID 仍对应原进程。
+服务重启后只能依据持久 Lease、ActionLease fencing 和 launcher 实际状态恢复；不能假设旧 PID 仍对应原进程。BP-06 的物理验收已证明服务容器可被杀死并重建而持续 endpoint 保持，launcher 丢失则转为 `expired`、暂停 Session 并要求 `tool.cleanup` 明确确认，不能原地复活未知进程。
 
 ## 7. InputArtifact 协议
 

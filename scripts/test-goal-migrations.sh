@@ -60,6 +60,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0011_action_scheduler.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -91,6 +94,9 @@ docker exec -i "$migration_container" \
   < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0011_action_scheduler.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
@@ -98,6 +104,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/plugin_constraints.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/tests/sql/scheduler_constraints.sql" >/dev/null
 
 docker exec "$migration_container" createdb -U fudian_test legacy
 docker exec -i "$migration_container" \
@@ -141,6 +150,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0011_action_scheduler.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -183,13 +195,20 @@ migration_workspace_table_count="$(docker exec "$migration_container" \
      'workspace_operations', 'workspace_snapshots', 'workspace_write_leases',
      'runner_jobs', 'runner_job_files'
    )")"
+migration_scheduler_table_count="$(docker exec "$migration_container" \
+  psql -U fudian_test -d legacy -Atc \
+  "SELECT count(*) FROM information_schema.tables
+   WHERE table_schema = 'public' AND table_name IN (
+     'scheduler_workers', 'goal_action_runs', 'action_run_leases',
+     'goal_action_events', 'goal_notifications', 'notification_outbox'
+   )")"
 
 if [[ "$migration_counts_before" != "$migration_counts_after" ]]; then
   echo "legacy counts changed: $migration_counts_before -> $migration_counts_after" >&2
   exit 1
 fi
-if [[ "$migration_goal_table_count" != 28 ]]; then
-  echo "expected 28 goal tables, found $migration_goal_table_count" >&2
+if [[ "$migration_goal_table_count" != 31 ]]; then
+  echo "expected 31 goal tables, found $migration_goal_table_count" >&2
   exit 1
 fi
 if [[ "$migration_tooling_table_count" != 9 ]]; then
@@ -206,6 +225,10 @@ if [[ "$migration_idea_table_count" != 12 ]]; then
 fi
 if [[ "$migration_workspace_table_count" != 8 ]]; then
   echo "expected 8 workspace/Runner tables, found $migration_workspace_table_count" >&2
+  exit 1
+fi
+if [[ "$migration_scheduler_table_count" != 6 ]]; then
+  echo "expected 6 scheduler/notification tables, found $migration_scheduler_table_count" >&2
   exit 1
 fi
 

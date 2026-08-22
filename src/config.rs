@@ -1,6 +1,7 @@
 use std::{env, path::PathBuf};
 
 use anyhow::{Context, bail};
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -12,6 +13,7 @@ pub struct Config {
     pub worktree_root: PathBuf,
     pub runner_output_root: PathBuf,
     pub runner_runtime_digest: String,
+    pub worker_bootstrap_token_digest: Option<String>,
     pub input_max_bytes: u64,
     pub input_chunk_max_bytes: usize,
     pub input_inbox_copy_max_bytes: u64,
@@ -48,6 +50,20 @@ impl Config {
         {
             bail!("RUNNER_RUNTIME_DIGEST 必须是规范 sha256 摘要");
         }
+        let worker_bootstrap_token_digest = match env::var("FUDIAN_WORKER_BOOTSTRAP_TOKEN") {
+            Ok(token) => {
+                if !(32..=256).contains(&token.len())
+                    || !token.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+                    })
+                {
+                    bail!("FUDIAN_WORKER_BOOTSTRAP_TOKEN 必须是 32–256 位安全 ASCII token");
+                }
+                Some(format!("sha256:{:x}", Sha256::digest(token.as_bytes())))
+            }
+            Err(env::VarError::NotPresent) => None,
+            Err(error) => return Err(error).context("读取 FUDIAN_WORKER_BOOTSTRAP_TOKEN 失败"),
+        };
         let database_max_connections = env::var("DATABASE_MAX_CONNECTIONS")
             .unwrap_or_else(|_| "10".to_owned())
             .parse::<u32>()
@@ -74,6 +90,7 @@ impl Config {
             worktree_root,
             runner_output_root,
             runner_runtime_digest,
+            worker_bootstrap_token_digest,
             input_max_bytes,
             input_chunk_max_bytes,
             input_inbox_copy_max_bytes,

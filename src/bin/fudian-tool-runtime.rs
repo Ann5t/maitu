@@ -1,5 +1,7 @@
 use std::{
     env, fs,
+    io::{Read, Write},
+    net::TcpListener,
     path::{Component, Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -12,6 +14,12 @@ const MAX_CAPTURE_BYTES: usize = 64 * 1024;
 
 fn main() -> anyhow::Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("serve-static") {
+        if args.len() != 3 || args[2] != "4173" {
+            bail!("usage: fudian-tool-runtime serve-static <source-path> 4173");
+        }
+        return serve_static(&args[1]);
+    }
     if args.len() != 5 || args[0] != "execute" {
         bail!(
             "usage: fudian-tool-runtime execute <plugin-id> <plugin-version> <tool-name> <input-json>"
@@ -63,6 +71,50 @@ fn main() -> anyhow::Result<()> {
     )?;
     if !execution.status.success() {
         bail!("tool process exited unsuccessfully");
+    }
+    Ok(())
+}
+
+fn serve_static(relative_source: &str) -> anyhow::Result<()> {
+    let input_root = fixed_root("FUDIAN_INPUT", "/workspace/input", false)?;
+    let source = safe_input_file(&input_root, relative_source)?;
+    let metadata = fs::metadata(&source).context("inspect static preview input")?;
+    if metadata.len() > 8 * 1024 * 1024 {
+        bail!("static preview input exceeds 8 MiB");
+    }
+    let body = fs::read(&source).context("read static preview input")?;
+    let listener = TcpListener::bind("0.0.0.0:4173").context("bind static preview endpoint")?;
+    println!("fudian static preview ready on 0.0.0.0:4173");
+    std::io::stdout().flush().context("flush readiness log")?;
+    for stream in listener.incoming() {
+        let mut stream = stream.context("accept static preview connection")?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .context("set preview read timeout")?;
+        let mut request = [0_u8; 8 * 1024];
+        let read = stream.read(&mut request).context("read preview request")?;
+        let first_line = String::from_utf8_lossy(&request[..read])
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let (status, content_type, response_body): (&str, &str, &[u8]) =
+            if first_line.starts_with("GET /health ") {
+                ("200 OK", "text/plain; charset=utf-8", b"ok")
+            } else if first_line.starts_with("GET / ") {
+                ("200 OK", "text/html; charset=utf-8", &body)
+            } else {
+                ("404 Not Found", "text/plain; charset=utf-8", b"not found")
+            };
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+            response_body.len()
+        )
+        .context("write preview headers")?;
+        stream
+            .write_all(response_body)
+            .context("write preview body")?;
     }
     Ok(())
 }

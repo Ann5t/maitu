@@ -105,7 +105,7 @@ runtime_migrations="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM schema_migrations')"
 runtime_projects="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM projects')"
-[[ "$runtime_migrations" == 10 ]]
+[[ "$runtime_migrations" == 11 ]]
 [[ "$runtime_projects" == 1 ]]
 
-echo "production image passed: non-root, read-only rootfs, 10 migrations and isolated write"
+echo "production image passed: non-root, read-only rootfs, 11 migrations and isolated write"

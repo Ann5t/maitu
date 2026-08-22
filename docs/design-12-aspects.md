@@ -25,15 +25,15 @@
 | # | 方面 | 当前状态 | 已有基础 | 阻止完成的主要缺口 | 用户判断点 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 产品定位与“想法 / 项目”两级空间 | 待用户判断 | 想法版本/关系、文件/图片/语音、多来源 ProjectProposal、精确来源、原子立项及两种投影均已验证 | 旧直建兼容入口的最终迁移时机；用户尚未选择默认投影并接受手感 | 想法空间的组织方式与手感 |
-| 2 | 核心领域模型 | 部分实现 | v2 已补齐契约修订/来源、Evidence、撤回/停止/归档；BP-04 已把 GoalBranch/Session 绑定真实 Git branch、worktree、快照和单写 Lease | Worker/服务崩溃自动恢复仍待 BP-06 | 主要图语义保持“一目标一枝干、Session 为主节点” |
+| 2 | 核心领域模型 | 完成 | 稳定聚合/状态约束、真实 Git/worktree、单写 Lease，以及同一 Session 内 ActionRun/Worker 崩溃恢复均已验证 | 无本阶段必要缺口；旧 DAG/旧 ActionRun 保持兼容且不被重解释 | 用户已明确接受“一目标一枝干、Session 为枝干节点”的语义 |
 | 3 | 目标契约与探索型目标 | 完成 | 最少表单、按需细节、不可变版本/差异/来源、人工决定、安全暂停，以及带预算/候选/收敛条件的探索/混合模式均已验证 | 无本阶段必要缺口；后续只能通过新契约版本演化，不能静默降低标准 | 用户已接受“未知可诚实保留、按需披露、灵感持续演化契约”的语义 |
-| 4 | 执行、暂停、拆分、拟合并与回流 | 部分实现 | 逻辑状态机及枝干内真实 Git 提交/CAS 已验证，异常均形成持久暂停 | 跨枝干选择性整合、父目标复验、ActionRun 恢复与完整通知 | 暂停和合并在图中的最终表达 |
+| 4 | 执行、暂停、拆分、拟合并与回流 | 部分实现 | 逻辑状态机、枝干内真实 Git/CAS、ActionRun 恢复，以及异常暂停/通知已验证 | 跨枝干选择性整合、冲突处理和父目标复验待 BP-07 | 暂停和合并在图中的最终表达 |
 | 5 | 上下文、记忆与渐进式披露 | 完成 | 精确父快照、不可折叠契约/权限信封、完整来源目录、来源边、三层按需读取审计与可重建派生索引均已验证 | 无本阶段必要缺口；Git commit 来源由 BP-04 以既定 Artifact/来源边协议补入 | 用户已接受按需/渐进式披露原则；具体视觉密度仍归第 11 项判断 |
 | 6 | 单写者、worktree、权限与 Runner 隔离 | 完成 | 真实 bare repo/branch/worktree、不可变权限和 Lease、fencing、断网无能力 Worker、资源上限、输出/删除清单及 Git CAS 均已通过攻击/竞态测试 | 联网与外部副作用适配器属于第 7 项；不存在适配器时明确拒绝，不降级放权 | 用户已接受 Session 内固定权限免逐次审核；高风险能力继续按插件适配器细化 |
-| 7 | 中央插件、Tool Broker 与版本环境 | 部分实现 | Ed25519 发布/安装/撤销、不可变 EnvironmentManifest、入口摘要证明、Rust/Python 双版本/C++/Playwright OCI Worker、真实 Git CAS ToolResult、PPTMaster 安装请求均已验证 | 持续浏览器/开发服务器的物理 ToolLease 调度、心跳/重启接管和最终插件安装 UI 待 BP-06/BP-08 | 插件发现与安装交互 |
+| 7 | 中央插件、Tool Broker 与版本环境 | 部分实现 | 签名安装/撤销、冲突环境、四类 OCI Worker、Git CAS、PPTMaster 安装请求及物理 ToolLease 启停/恢复均已验证 | 插件安装与运行现场 UI、持久日志/Trace 和 endpoint proxy 待 BP-08/BP-09 | 插件发现、安装与运行现场交互 |
 | 8 | PostgreSQL、Git、文件、产物、证据、备份恢复 | 部分实现 | 内容寻址输入/Artifact/Evidence；BP-04 已实现 Git 候选—ref CAS—数据库操作日志、快照与冲突封存 | 跨存储 reconcile、孤儿回收、完整恢复/回退演练和保留策略 | 文件默认复制还是引用的体验 |
-| 9 | 持久调度、ActionRun、心跳、恢复与通知 | 未开始 | 旧模型 ActionRun 只覆盖同步动作；协议已有原则 | 没有队列、Worker 租约、心跳、重启恢复、取消和通知适配器 | 什么情况值得站外打扰用户 |
-| 10 | 测试、证据、独立 AI 审核与用户验收 | 部分实现 | 完整质量门；每个成功 RunnerJob 自动形成绑定真实 base/head/tree/snapshot、runtime/spec 和输出/删除清单的 Contribution | 独立审核仍是记录接口；跨枝干整合复验和完整故障/恢复矩阵待 BP-07/BP-09 | 审核摘要的信息量与信任感 |
+| 9 | 持久调度、ActionRun、心跳、恢复与通知 | 完成 | PostgreSQL 队列、Worker/Action Lease、心跳/fencing、安全重排、人工暂停、取消、通知/outbox 及真实 ToolLease 恢复矩阵已验证 | 无本阶段必要缺口；具体站外适配器由私有部署配置，不存在时明确 suppressed | 用户已要求“暂停后让我知道”；所有需人工介入的恢复均生成站内待处理与通知 |
+| 10 | 测试、证据、独立 AI 审核与用户验收 | 部分实现 | 一键质量门覆盖单元/SQL/HTTP/浏览器/Git/OCI/调度恢复；Runner Contribution 绑定真实 commit/环境 | 独立审核 Worker、跨枝干整合复验和备份恢复证据待 BP-07/BP-09 | 审核摘要的信息量与信任感 |
 | 11 | Git 图 + 工作现场式多设备前端 | 待用户判断 | 可替换投影和全流程 UI；Session 02 已提高字号/对比度 | 用户尚未接受；平板、键盘、无障碍及真实大图数据未验收 | 布局、字号、密度、暂停/合并视觉 |
 | 12 | 私有部署、认证与安全运维 | 部分实现 | Compose、非 root runtime、只读根文件系统、回环应用端口 | 无认证/授权/CSRF/限速/HTTPS；当前旧 DB 容器仍公开映射 55432 | 登录方式和真实访问范围 |
 
@@ -68,6 +68,13 @@
 - 旧 DAG 数据继续可读，增量迁移不自动篡改旧语义；
 - 并发、幂等、非法状态和数据库约束均有自动测试；
 - 真实 Git/worktree 身份与领域记录一致，而不是只保存占位字段。
+
+完成记录（`0002_goal_branch_core.sql`、`0007_goal_domain_v2.sql`、`0009_workspace_runner.sql`、`0011_action_scheduler.sql`）：
+
+- Project/GoalBranch/Session/Proposal/Contract/Contribution/Artifact/Evidence/Review/Event 均具稳定身份、聚合范围和数据库状态约束；
+- Proposal 批准前没有正式可写现场；批准后真实 branch/worktree、Session head 和单写 Lease 一一对应；
+- Worker 或 Web 服务崩溃只改变同一 Session 内的 ActionRun/Lease，不生成伪造的新主节点；只有审核退回或明确重新分配才建立下一 Session；
+- 空库、旧 DAG fixture、迁移重放、并发、幂等、非法转换、真实 Git 与服务重建恢复均已自动验证；用户已明确接受核心图语义，因此本项标为完成。
 
 ## 3. 目标契约与探索型目标
 
@@ -165,6 +172,15 @@
 - 站内待处理始终存在，站外通知使用可替换适配器；
 - 通过杀 Worker、重启服务、超时、重复投递和取消竞态测试。
 
+完成记录（`0011_action_scheduler.sql`、[`action-scheduler-v1.md`](action-scheduler-v1.md)）：
+
+- 新 Goal 执行使用持久 `goal_action_runs`，不重解释旧 `action_runs`；Action request、attempt、fencing、Lease 与不可变 Event 都有数据库约束；
+- `FOR UPDATE SKIP LOCKED` 并发认领只产生一个 active Lease；服务被杀并重建后原 Worker 可续接，过期 fencing 不能迟到写回；
+- 只有 `safe` 任务自动重排，`unsafe/unknown` 和持续工具失联进入 waiting/exception pause，人工明确 retry/fail/cancel 才恢复；
+- 取消先到时 Worker 只能确认取消，不能提交成功；截止时间、最大尝试、空队列退避和通知去重均通过真实 HTTP/SQL；
+- 所有人工介入场景同事务形成完整 Attention 和站内通知。站外走 outbox；没有配置适配器时保存 `suppressed`，不冒充已发送；
+- 签名 Playwright ToolLease 已在只读 OCI 中真实启动，Web 服务重建后保持 endpoint；launcher 消失则过期、暂停并经清理 Worker 确认。用户已明确要求暂停后得到通知，因此本项标为完成。
+
 ## 10. 测试、证据与审核
 
 必须同时满足：
@@ -215,7 +231,7 @@
 | BP-03 上下文与来源（逻辑闭环完成） | 5、8 | BP-02 | 长上下文、来源追溯和重建测试已通过；Git 来源继续由 BP-04 接入 |
 | BP-04 worktree Runner（逻辑闭环完成） | 6、8 | BP-02 | Git 竞态、隔离、资源、删除与逃逸测试全部通过 |
 | BP-05 中央真实插件（逻辑闭环完成） | 7 | BP-04 | 签名 OCI、四类真实插件、冲突环境、Git CAS、撤销和既有 ToolLease 接管契约均已验证；物理持续 Lease 归 BP-06 |
-| BP-06 持久调度恢复 | 9 | BP-04、BP-05 | kill/restart/timeout/cancel/重复投递测试 |
+| BP-06 持久调度恢复（逻辑闭环完成） | 2、4、7、9、10 | BP-04、BP-05 | kill/recreate/timeout/cancel/重复投递、通知及物理 ToolLease 测试全部通过 |
 | BP-07 证据与审核闭环 | 10 | BP-03–06 | commit/环境绑定、独立复验、父整合 |
 | BP-08 完整多设备工作台 | 11 | BP-01–07 | 大图、键盘、三尺寸、性能 + 用户判断 |
 | BP-09 私有部署安全 | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS/恢复演练 |

@@ -6,13 +6,20 @@ real_suffix="$$"
 real_network="fudian-real-plugins-test-$real_suffix"
 real_db="fudian-real-plugins-db-$real_suffix"
 real_app="fudian-real-plugins-app-$real_suffix"
+real_tool_live="fudian-real-tool-live-$real_suffix"
+real_tool_crash="fudian-real-tool-crash-$real_suffix"
 real_tmp="$(mktemp -d)"
+real_worker_bootstrap="real_plugin_worker_bootstrap_0123456789abcdef"
 
 cleanup_real_plugins() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$real_app" >/dev/null 2>&1; then
     docker logs "$real_app" >&2 || true
   fi
+  [[ "$real_tool_live" == fudian-real-tool-live-* ]] \
+    && docker rm -f "$real_tool_live" >/dev/null 2>&1 || true
+  [[ "$real_tool_crash" == fudian-real-tool-crash-* ]] \
+    && docker rm -f "$real_tool_crash" >/dev/null 2>&1 || true
   [[ "$real_app" == fudian-real-plugins-app-* ]] \
     && docker rm -f "$real_app" >/dev/null 2>&1 || true
   [[ "$real_db" == fudian-real-plugins-db-* ]] \
@@ -35,6 +42,135 @@ for key in sys.argv[2].split("."):
     value=value[int(key)] if isinstance(value,list) else value[key]
 print("null" if value is None else str(value).lower() if isinstance(value,bool) else value)' \
     "$1" "$2"
+}
+
+wait_for_real_app() {
+  for real_attempt in $(seq 1 60); do
+    if curl -fsS --connect-timeout 1 --max-time 2 \
+      "$real_base/api/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ "$real_attempt" == 60 ]]; then
+      docker logs "$real_app"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+start_real_app() {
+  docker run -d --name "$real_app" --network "$real_network" \
+    -p 127.0.0.1::3000 \
+    -e DATABASE_URL=postgres://fudian_test:fudian_test_only@real-plugins-db:5432/fudian_test \
+    -e FUDIAN_BIND=0.0.0.0:3000 \
+    -e ARTIFACT_ROOT=/data/artifacts \
+    -e REPOSITORY_ROOT=/data/repositories \
+    -e WORKTREE_ROOT=/data/worktrees \
+    -e RUNNER_OUTPUT_ROOT=/data/runner \
+    -e RUNNER_RUNTIME_DIGEST="$real_runner_digest" \
+    -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$real_worker_bootstrap" \
+    -e RUST_LOG=fudian=info \
+    --mount "type=bind,src=$real_repo_root,dst=/app" \
+    --mount "type=bind,src=$real_tmp/artifacts,dst=/data/artifacts" \
+    --mount "type=bind,src=$real_tmp/repositories,dst=/data/repositories" \
+    --mount "type=bind,src=$real_tmp/worktrees,dst=/data/worktrees" \
+    --mount "type=bind,src=$real_tmp/runner,dst=/data/runner" \
+    --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
+    --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
+    --mount type=volume,src=fudian_rust_target,dst=/app/target \
+    fudian-nextgen-app:latest cargo run --locked >/dev/null
+  real_port="$(docker port "$real_app" 3000/tcp | sed -n 's/.*://p')"
+  real_base="http://127.0.0.1:$real_port"
+  wait_for_real_app
+}
+
+register_real_worker() {
+  local worker_id="$1"
+  local worker_token="$2"
+  local capabilities="$3"
+  local payload
+  payload="$(python3 -c 'import json,sys,uuid
+print(json.dumps({"clientRequestId":str(uuid.uuid4()),"workerId":sys.argv[1],
+ "workerToken":sys.argv[2],"displayName":"real plugin launcher",
+ "capabilities":json.loads(sys.argv[3])}))' "$worker_id" "$worker_token" "$capabilities")"
+  curl -fsS -H 'content-type: application/json' \
+    -H "x-fudian-worker-bootstrap: $real_worker_bootstrap" \
+    -d "$payload" "$real_base/api/v1/scheduler/workers"
+}
+
+claim_real_action() {
+  local worker_id="$1"
+  local worker_token="$2"
+  local lease_token="$3"
+  local soft_ttl="$4"
+  curl -fsS -H 'content-type: application/json' \
+    -d "{\"workerId\":\"$worker_id\",\"workerToken\":\"$worker_token\",\"clientRequestId\":\"$(new_uuid)\",\"leaseToken\":\"$lease_token\",\"softTtlSeconds\":$soft_ttl,\"hardTtlSeconds\":60}" \
+    "$real_base/api/v1/scheduler/claim"
+}
+
+real_lease_credentials() {
+  local claim="$1"
+  local worker_id="$2"
+  local worker_token="$3"
+  local lease_token="$4"
+  python3 -c 'import json,sys
+c=json.loads(sys.argv[1]); print(json.dumps({"workerId":sys.argv[2],"workerToken":sys.argv[3],
+ "leaseId":c["lease"]["id"],"leaseToken":sys.argv[4],"fencingToken":c["lease"]["fencingToken"]}))' \
+    "$claim" "$worker_id" "$worker_token" "$lease_token"
+}
+
+launch_real_persistent_tool() {
+  local container_name="$1"
+  local claim="$2"
+  local worktree_key="$3"
+  local image_digest
+  local entrypoint
+  local source_path
+  local cpu_millis
+  local memory_mib
+  local pids
+  local cpus
+  image_digest="$(json_field "$claim" action.payload.runtime.imageDigest)"
+  entrypoint="$(json_field "$claim" action.payload.runtime.entrypoint)"
+  source_path="$(json_field "$claim" action.payload.input.sourcePath)"
+  cpu_millis="$(json_field "$claim" action.payload.resourcePolicy.cpuMillis)"
+  memory_mib="$(json_field "$claim" action.payload.resourcePolicy.memoryMiB)"
+  pids="$(json_field "$claim" action.payload.resourcePolicy.pids)"
+  cpus="$(python3 -c 'import sys; print(int(sys.argv[1])/1000)' "$cpu_millis")"
+  [[ "$image_digest" == "$(image_id "$real_playwright_image")" ]]
+  [[ "$entrypoint" == /runtime/fudian-tool-runtime ]]
+  docker run -d --name "$container_name" --network "$real_network" \
+    --network-alias "$container_name" \
+    -p 127.0.0.1::4173 \
+    --read-only \
+    --user 1000:1000 \
+    --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --pids-limit "$pids" \
+    --memory "${memory_mib}m" \
+    --cpus "$cpus" \
+    --tmpfs /tmp:rw,nosuid,nodev,size=33554432,mode=1777 \
+    -e FUDIAN_INPUT=/workspace/input \
+    --mount "type=bind,src=$real_tmp/worktrees/$worktree_key,dst=/workspace/input,readonly" \
+    --entrypoint "$entrypoint" \
+    "$image_digest" serve-static "$source_path" 4173 >/dev/null
+}
+
+wait_for_real_tool() {
+  local container_name="$1"
+  local port
+  port="$(docker port "$container_name" 4173/tcp | sed -n 's/.*://p')"
+  for real_tool_attempt in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
+      printf '%s' "$port"
+      return 0
+    fi
+    if [[ "$real_tool_attempt" == 30 ]]; then
+      docker logs "$container_name"
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 post_goal_for() {
@@ -187,6 +323,38 @@ elif plugin_id == "fudian.tools.pptmaster":
     properties = {"sourcePath": common_string, "outputPath": common_string}
     required = ["sourcePath", "outputPath"]
 
+tools = [{
+    "name": tool_name,
+    "description": f"Execute {display_name}",
+    "inputSchema": {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    },
+    "outputSchema": {"type": "object"},
+    "idempotency": "safe",
+}]
+if plugin_id == "fudian.tools.playwright":
+    tools.append({
+        "name": "serve",
+        "description": "Serve an immutable local HTML preview for a bounded ToolLease",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"sourcePath": common_string},
+            "required": ["sourcePath"],
+            "additionalProperties": False,
+        },
+        "outputSchema": {"type": "object"},
+        "idempotency": "safe",
+        "persistent": {
+            "adapterKind": "http_static_preview",
+            "endpointKinds": ["http_preview"],
+            "startupRetrySafety": "safe",
+            "maxDurationSeconds": 600,
+        },
+    })
+
 print(json.dumps({
     "schemaVersion": 1,
     "pluginId": plugin_id,
@@ -200,18 +368,7 @@ print(json.dumps({
         "workspaceWrite": ["reports/**"],
         "externalWrites": False,
     },
-    "tools": [{
-        "name": tool_name,
-        "description": f"Execute {display_name}",
-        "inputSchema": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": False,
-        },
-        "outputSchema": {"type": "object"},
-        "idempotency": "safe",
-    }],
+    "tools": tools,
     "skill": {"entry": "SKILL.md"},
     "runtime": {
         "kind": "oci",
@@ -444,35 +601,7 @@ done
 real_runner_digest="$(docker run --rm --entrypoint /usr/local/bin/fudian-runner \
   fudian-nextgen-runner:latest digest)"
 
-docker run -d --name "$real_app" --network "$real_network" \
-  -p 127.0.0.1::3000 \
-  -e DATABASE_URL=postgres://fudian_test:fudian_test_only@real-plugins-db:5432/fudian_test \
-  -e FUDIAN_BIND=0.0.0.0:3000 \
-  -e ARTIFACT_ROOT=/data/artifacts \
-  -e REPOSITORY_ROOT=/data/repositories \
-  -e WORKTREE_ROOT=/data/worktrees \
-  -e RUNNER_OUTPUT_ROOT=/data/runner \
-  -e RUNNER_RUNTIME_DIGEST="$real_runner_digest" \
-  -e RUST_LOG=fudian=info \
-  --mount "type=bind,src=$real_repo_root,dst=/app" \
-  --mount "type=bind,src=$real_tmp/artifacts,dst=/data/artifacts" \
-  --mount "type=bind,src=$real_tmp/repositories,dst=/data/repositories" \
-  --mount "type=bind,src=$real_tmp/worktrees,dst=/data/worktrees" \
-  --mount "type=bind,src=$real_tmp/runner,dst=/data/runner" \
-  --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
-  --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
-  --mount type=volume,src=fudian_rust_target,dst=/app/target \
-  fudian-nextgen-app:latest cargo run --locked >/dev/null
-
-real_port="$(docker port "$real_app" 3000/tcp | sed -n 's/.*://p')"
-real_base="http://127.0.0.1:$real_port"
-for real_attempt in $(seq 1 60); do
-  if curl -fsS "$real_base/api/health" >/dev/null 2>&1; then
-    break
-  fi
-  [[ "$real_attempt" == 60 ]] && docker logs "$real_app" && exit 1
-  sleep 1
-done
+start_real_app
 
 openssl genpkey -algorithm Ed25519 -out "$real_tmp/publisher-private.pem" >/dev/null 2>&1
 openssl pkey -in "$real_tmp/publisher-private.pem" -pubout -outform DER \
@@ -654,6 +783,159 @@ PY
 [[ -z "$(docker exec "$real_app" git -C "/data/worktrees/$real_worktree_2" status --porcelain)" ]]
 [[ "$(json_field "$real_environment_1" fingerprint)" != "$(json_field "$real_environment_2" fingerprint)" ]]
 
+real_tool_worker="$(new_uuid)"
+real_tool_worker_token="real_tool_worker_token_0123456789abcdef"
+real_reconcile_worker="$(new_uuid)"
+real_reconcile_worker_token="real_reconcile_worker_token_0123456789abcdef"
+register_real_worker "$real_tool_worker" "$real_tool_worker_token" '["tool.lease"]' >/dev/null
+register_real_worker "$real_reconcile_worker" "$real_reconcile_worker_token" \
+  '["scheduler.reconcile","tool.cleanup"]' >/dev/null
+
+real_live_request_id="$(new_uuid)"
+real_live_payload="$(python3 -c 'import json,sys
+m=json.loads(sys.argv[2]); print(json.dumps({"clientRequestId":sys.argv[1],
+ "plugin":{"pluginId":m["pluginId"],"version":m["version"],"contentDigest":m["contentDigest"]},
+ "toolName":"serve","input":{"sourcePath":"web/page.html"},
+ "baseWorkspaceSnapshot":sys.argv[3],"softTtlSeconds":10,"durationSeconds":60}))' \
+  "$real_live_request_id" "$real_playwright_manifest" "$real_snapshot_1")"
+real_live_lease="$(curl -fsS -H 'content-type: application/json' -d "$real_live_payload" \
+  "$real_base/api/v1/projects/$real_project_1/sessions/$real_session_1/tool-leases")"
+real_live_lease_id="$(json_field "$real_live_lease" lease.id)"
+real_live_action_id="$(json_field "$real_live_lease" action.id)"
+real_live_renewal_token="$(json_field "$real_live_lease" renewalToken)"
+[[ "$(json_field "$real_live_lease" lease.status)" == requested ]]
+[[ "$(json_field "$real_live_lease" action.payload.runtime.imageDigest)" \
+    == "$(image_id "$real_playwright_image")" ]]
+real_live_replay="$(curl -fsS -H 'content-type: application/json' -d "$real_live_payload" \
+  "$real_base/api/v1/projects/$real_project_1/sessions/$real_session_1/tool-leases")"
+[[ "$(json_field "$real_live_replay" replayed)" == true ]]
+[[ "$(json_field "$real_live_replay" renewalToken)" == null ]]
+[[ "$(json_field "$real_live_replay" lease.id)" == "$real_live_lease_id" ]]
+
+real_live_action_token="real_live_action_token_0123456789abcdef"
+real_live_claim="$(claim_real_action "$real_tool_worker" "$real_tool_worker_token" \
+  "$real_live_action_token" 30)"
+[[ "$(json_field "$real_live_claim" action.id)" == "$real_live_action_id" ]]
+real_live_credentials="$(real_lease_credentials "$real_live_claim" "$real_tool_worker" \
+  "$real_tool_worker_token" "$real_live_action_token")"
+launch_real_persistent_tool "$real_tool_live" "$real_live_claim" "$real_worktree_1"
+real_tool_live_port="$(wait_for_real_tool "$real_tool_live")"
+real_live_endpoint="http://$real_tool_live:4173"
+real_live_activate="$(python3 -c 'import json,sys
+p=json.loads(sys.argv[1]); p["endpointRefs"]=[sys.argv[2]]; print(json.dumps(p))' \
+  "$real_live_credentials" "$real_live_endpoint")"
+real_live_active="$(curl -fsS -H 'content-type: application/json' -d "$real_live_activate" \
+  "$real_base/api/v1/scheduler/action-runs/$real_live_action_id/tool-lease/activate")"
+[[ "$(json_field "$real_live_active" status)" == active ]]
+[[ "$(curl -fsS "http://127.0.0.1:$real_tool_live_port/")" == *"真实 Playwright Worker"* ]]
+[[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$real_tool_live")" == true ]]
+docker exec "$real_tool_live" sh -c 'test ! -e /var/run/docker.sock'
+if docker exec "$real_tool_live" sh -c 'printf unsafe > /workspace/input/forbidden.txt' \
+  >/dev/null 2>&1; then
+  echo "persistent tool unexpectedly modified its read-only input" >&2
+  exit 1
+fi
+
+docker kill "$real_app" >/dev/null
+docker rm "$real_app" >/dev/null
+start_real_app
+[[ "$(curl -fsS "http://127.0.0.1:$real_tool_live_port/health")" == ok ]]
+real_live_heartbeat="$(python3 -c 'import json,sys
+p=json.loads(sys.argv[1]); p["extendSeconds"]=30; print(json.dumps(p))' "$real_live_credentials")"
+real_live_after_restart="$(curl -fsS -H 'content-type: application/json' \
+  -d "$real_live_heartbeat" \
+  "$real_base/api/v1/scheduler/action-runs/$real_live_action_id/heartbeat")"
+[[ "$(json_field "$real_live_after_restart" toolLeaseStatus)" == active ]]
+[[ "$(json_field "$real_live_after_restart" endpointRefs.0)" == "$real_live_endpoint" ]]
+
+real_live_stop_request="$(new_uuid)"
+real_live_stop_payload="$(python3 -c 'import json,sys
+print(json.dumps({"clientRequestId":sys.argv[1],"renewalToken":sys.argv[2],
+ "mode":"release","reason":"用户完成预览"},ensure_ascii=False))' \
+  "$real_live_stop_request" "$real_live_renewal_token")"
+real_live_stop="$(curl -fsS -H 'content-type: application/json' -d "$real_live_stop_payload" \
+  "$real_base/api/v1/projects/$real_project_1/tool-leases/$real_live_lease_id/stop")"
+[[ "$(json_field "$real_live_stop" result.action.status)" == cancellation_requested ]]
+real_live_cancel_signal="$(curl -fsS -H 'content-type: application/json' \
+  -d "$real_live_heartbeat" \
+  "$real_base/api/v1/scheduler/action-runs/$real_live_action_id/heartbeat")"
+[[ "$(json_field "$real_live_cancel_signal" cancellationRequested)" == true ]]
+docker rm -f "$real_tool_live" >/dev/null
+real_live_finish="$(python3 -c 'import json,sys
+p=json.loads(sys.argv[1]); p.update({"retainedOutputs":[],
+ "result":{"processExited":True,"endpointClosed":True}}); print(json.dumps(p))' \
+  "$real_live_credentials")"
+real_live_terminal="$(curl -fsS -H 'content-type: application/json' -d "$real_live_finish" \
+  "$real_base/api/v1/scheduler/action-runs/$real_live_action_id/tool-lease/finish")"
+[[ "$(json_field "$real_live_terminal" action.status)" == succeeded ]]
+[[ "$(json_field "$real_live_terminal" lease.status)" == released ]]
+[[ "$(json_field "$real_live_terminal" lease.cleanupStatus)" == succeeded ]]
+real_live_stop_replay="$(curl -fsS -H 'content-type: application/json' -d "$real_live_stop_payload" \
+  "$real_base/api/v1/projects/$real_project_1/tool-leases/$real_live_lease_id/stop")"
+[[ "$(json_field "$real_live_stop_replay" replayed)" == true ]]
+if curl -fsS --max-time 1 "http://127.0.0.1:$real_tool_live_port/health" >/dev/null 2>&1; then
+  echo "released ToolLease endpoint remained reachable" >&2
+  exit 1
+fi
+
+IFS='|' read -r real_project_3 real_branch_3 real_session_3 real_worktree_3 real_snapshot_3 \
+  <<< "$(create_project_session '验证持续工具 launcher 崩溃清理' plugin-agent-3)"
+real_snapshot_3="$(seed_file "$real_project_3" "$real_session_3" "$real_worktree_3" \
+  "$real_snapshot_3" web/page.html "$(<"$real_repo_root/tests/fixtures/plugins/page.html")" seed-crash-page)"
+bind_environment "$real_project_3" "$real_session_3" \
+  "$(json_field "$real_environment_1" id)" >/dev/null
+real_crash_payload="$(python3 -c 'import json,sys,uuid
+m=json.loads(sys.argv[1]); print(json.dumps({"clientRequestId":str(uuid.uuid4()),
+ "plugin":{"pluginId":m["pluginId"],"version":m["version"],"contentDigest":m["contentDigest"]},
+ "toolName":"serve","input":{"sourcePath":"web/page.html"},
+ "baseWorkspaceSnapshot":sys.argv[2],"softTtlSeconds":10,"durationSeconds":60}))' \
+  "$real_playwright_manifest" "$real_snapshot_3")"
+real_crash_lease="$(curl -fsS -H 'content-type: application/json' -d "$real_crash_payload" \
+  "$real_base/api/v1/projects/$real_project_3/sessions/$real_session_3/tool-leases")"
+real_crash_lease_id="$(json_field "$real_crash_lease" lease.id)"
+real_crash_action_id="$(json_field "$real_crash_lease" action.id)"
+real_crash_action_token="real_crash_action_token_0123456789abcdef"
+real_crash_claim="$(claim_real_action "$real_tool_worker" "$real_tool_worker_token" \
+  "$real_crash_action_token" 5)"
+[[ "$(json_field "$real_crash_claim" action.id)" == "$real_crash_action_id" ]]
+real_crash_credentials="$(real_lease_credentials "$real_crash_claim" "$real_tool_worker" \
+  "$real_tool_worker_token" "$real_crash_action_token")"
+launch_real_persistent_tool "$real_tool_crash" "$real_crash_claim" "$real_worktree_3"
+real_tool_crash_port="$(wait_for_real_tool "$real_tool_crash")"
+real_crash_endpoint="http://$real_tool_crash:4173"
+real_crash_activate="$(python3 -c 'import json,sys
+p=json.loads(sys.argv[1]); p["endpointRefs"]=[sys.argv[2]]; print(json.dumps(p))' \
+  "$real_crash_credentials" "$real_crash_endpoint")"
+curl -fsS -H 'content-type: application/json' -d "$real_crash_activate" \
+  "$real_base/api/v1/scheduler/action-runs/$real_crash_action_id/tool-lease/activate" >/dev/null
+docker rm -f "$real_tool_crash" >/dev/null
+sleep 6
+real_crash_reconcile="$(curl -fsS -H 'content-type: application/json' \
+  -d "{\"workerId\":\"$real_reconcile_worker\",\"workerToken\":\"$real_reconcile_worker_token\",\"limit\":100}" \
+  "$real_base/api/v1/scheduler/reconcile")"
+[[ "$(json_field "$real_crash_reconcile" waitingActions)" == 1 ]]
+real_crash_expired="$(curl -fsS \
+  "$real_base/api/v1/projects/$real_project_3/tool-leases/$real_crash_lease_id")"
+[[ "$(json_field "$real_crash_expired" status)" == expired ]]
+[[ "$(json_field "$real_crash_expired" cleanupStatus)" == pending ]]
+real_cleanup_payload="$(python3 -c 'import json,sys
+print(json.dumps({"workerId":sys.argv[1],"workerToken":sys.argv[2],
+ "status":"succeeded","summary":"launcher confirmed exact container is absent"}))' \
+  "$real_reconcile_worker" "$real_reconcile_worker_token")"
+real_crash_clean="$(curl -fsS -H 'content-type: application/json' -d "$real_cleanup_payload" \
+  "$real_base/api/v1/scheduler/tool-leases/$real_crash_lease_id/cleanup")"
+[[ "$(json_field "$real_crash_clean" cleanupStatus)" == succeeded ]]
+real_crash_notifications="$(curl -fsS \
+  "$real_base/api/v1/projects/$real_project_3/notifications")"
+python3 -c 'import json,sys
+n=json.loads(sys.argv[1])["notifications"]
+assert len(n)==1 and n[0]["kind"]=="tool_lease_expired" and n[0]["status"]=="unread", n' \
+  "$real_crash_notifications"
+if curl -fsS --max-time 1 "http://127.0.0.1:$real_tool_crash_port/health" >/dev/null 2>&1; then
+  echo "crashed ToolLease endpoint remained reachable" >&2
+  exit 1
+fi
+
 real_ppt_draft="$(plugin_draft fudian.tools.pptmaster 1.0.0 'PPTMaster compatibility' \
   "sha256:$(printf 'a%.0s' {1..64})" build)"
 real_ppt_manifest="$(curl -fsS -H 'content-type: application/json' -d "$real_ppt_draft" \
@@ -731,8 +1013,15 @@ BEGIN
      OR (SELECT count(*) FROM tool_execution_requests) <> 5
      OR (SELECT count(*) FROM tool_calls WHERE runner_job_id IS NOT NULL) <> 5
      OR (SELECT count(*) FROM plugin_install_requests) <> 1
-     OR (SELECT count(*) FROM runner_jobs WHERE status = 'succeeded') <> 10
-     OR (SELECT count(*) FROM goal_contributions WHERE runner_job_id IS NOT NULL) <> 10
+     OR (SELECT count(*) FROM runner_jobs WHERE status = 'succeeded') <> 11
+     OR (SELECT count(*) FROM goal_contributions WHERE runner_job_id IS NOT NULL) <> 11
+     OR (SELECT count(*) FROM tool_leases) <> 2
+     OR (SELECT count(*) FROM tool_leases WHERE cleanup_status = 'succeeded') <> 2
+     OR (SELECT status FROM tool_leases WHERE id = '$real_live_lease_id') <> 'released'
+     OR (SELECT status FROM tool_leases WHERE id = '$real_crash_lease_id') <> 'expired'
+     OR EXISTS (SELECT 1 FROM action_run_leases WHERE status = 'active')
+     OR (SELECT status FROM goal_sessions WHERE id = '$real_session_3') <> 'exception_paused'
+     OR (SELECT count(*) FROM goal_notifications WHERE project_id = '$real_project_3') <> 1
      OR EXISTS (SELECT 1 FROM workspace_write_leases WHERE status = 'active')
      OR EXISTS (
        SELECT 1 FROM tool_execution_requests execution
@@ -750,4 +1039,4 @@ END;
 \$\$;
 SQL
 
-echo "real plugin HTTP flow passed: signed OCI, exact images, Git CAS, Python conflicts, Chromium and revocation"
+echo "real plugin HTTP flow passed: signed OCI, exact images, Git CAS, persistent ToolLease, Chromium and revocation"

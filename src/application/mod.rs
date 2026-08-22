@@ -5,5 +5,6 @@ pub mod ideas;
 pub mod inputs;
 pub mod plugins;
 pub mod projects;
+pub mod scheduler;
 pub mod workbench;
 pub mod workspaces;

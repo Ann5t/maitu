@@ -11,6 +11,7 @@ pub mod idea_models;
 pub mod input_artifacts;
 mod migrations;
 mod models;
+pub mod scheduler;
 pub mod tooling;
 mod web;
 pub mod workspace;

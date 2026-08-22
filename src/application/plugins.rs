@@ -1586,7 +1586,7 @@ async fn load_active_installation(
     Ok(installation)
 }
 
-async fn load_installation_by_id(
+pub(crate) async fn load_installation_by_id(
     pool: &PgPool,
     installation_id: Uuid,
     expected_runner_digest: &str,
