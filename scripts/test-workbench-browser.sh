@@ -63,10 +63,14 @@ docker run --rm --init --ipc=host --network "$browser_network" \
   "$browser_image" sh -c '
     npm install --prefix /tmp/pw --no-audit --no-fund @playwright/test@1.62.0 >/dev/null &&
     cp /work/tests/browser/workbench.spec.js /tmp/pw/workbench.spec.js &&
+    cp /work/tests/browser/ideas.spec.js /tmp/pw/ideas.spec.js &&
     cd /tmp/pw &&
-    ./node_modules/.bin/playwright test workbench.spec.js --reporter=line --workers=1
+    ./node_modules/.bin/playwright test workbench.spec.js ideas.spec.js --reporter=line --workers=1
   '
 
 test -s "$browser_screenshot_dir/goal-workbench-desktop.png"
 test -s "$browser_screenshot_dir/goal-workbench-mobile.png"
-echo "workbench Chromium test passed: desktop 1440px, mobile 390px, file upload and full review flow"
+test -s "$browser_screenshot_dir/ideas-map-desktop.png"
+test -s "$browser_screenshot_dir/ideas-map-tablet.png"
+test -s "$browser_screenshot_dir/idea-detail-mobile.png"
+echo "Chromium passed: Goal workbench plus Idea/ProjectProposal flow at desktop, tablet and mobile sizes"

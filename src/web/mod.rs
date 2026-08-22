@@ -30,6 +30,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     let request_id = HeaderName::from_static("x-request-id");
     Router::new()
         .route("/", get(handlers::dashboard))
+        .route("/ideas", get(handlers::ideas_page))
+        .route("/ideas/new", get(handlers::new_idea_page))
+        .route("/ideas/{idea_id}", get(handlers::idea_page))
+        .route("/ideas/commands", post(handlers::idea_command_form))
         .route("/new", get(handlers::new_project_page))
         .route("/projects", post(handlers::create_project_form))
         .route("/projects/{project_id}", get(handlers::project_page))
@@ -50,6 +54,19 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/projects",
             get(handlers::api_list_projects).post(handlers::api_create_project),
+        )
+        .route(
+            "/api/v1/ideas",
+            get(handlers::api_list_ideas).post(handlers::api_create_idea),
+        )
+        .route("/api/v1/ideas/{idea_id}", get(handlers::api_idea_snapshot))
+        .route(
+            "/api/v1/ideas/{idea_id}/commands",
+            post(handlers::api_idea_command),
+        )
+        .route(
+            "/api/v1/project-proposals/{proposal_id}/commands",
+            post(handlers::api_project_proposal_command),
         )
         .route(
             "/api/projects/{project_id}",

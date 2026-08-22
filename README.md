@@ -9,6 +9,7 @@
 ## 已实现
 
 - 项目列表、项目创建和原始意图修订
+- 独立“想法”一级空间、不可变版本/关系，以及人工批准的 ProjectProposal 立项来源
 - 成果契约确认，以及可核验的完成标准
 - 项目启动说明的生成、哈希存储、审阅和批准
 - 项目 DAG：开分支、记录带类型的贡献、暂停、选择性合流
@@ -82,7 +83,9 @@ make backup
 
 ```text
 src/domain.rs                纯领域规则与输入校验
+src/idea_domain.rs           想法与 ProjectProposal 的纯领域规则
 src/application/projects.rs  项目、契约、产物用例
+src/application/ideas.rs     想法版本、关联和原子立项事务
 src/application/graph.rs     项目 DAG 与选择性合流
 src/application/goal_branches.rs  目标枝干事务与审核闭环
 src/application/plugins.rs   插件目录、环境绑定与 Tool Broker
@@ -103,6 +106,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 当前覆盖全产品第一阶段的 12 个方面、每项完成定义、缺口与实施顺序，以 [12 方面总验收矩阵](docs/design-12-aspects.md) 为唯一准绳；执行状态见 [12 方面总 Goal 进度](docs/goal-12-progress.md)。
 
+想法版本、关系、ProjectProposal、精确来源和原子立项协议见 [想法空间与 ProjectProposal v1](docs/idea-project-domain-v1.md)。
+
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 
 新目标枝干纵向接口及幂等/错误语义见 [目标枝干 HTTP API v1](docs/api-goal-branch-v1.md)。
@@ -118,6 +123,11 @@ assets/                      CSS、渐进增强脚本和图标
 | 方法 | 路由 | 用途 |
 | --- | --- | --- |
 | `GET` | `/` | 项目总览 |
+| `GET` | `/ideas` | 想法时间流或关系投影 |
+| `GET` | `/ideas/:id` | 想法版本、关系与立项工作区 |
+| `GET/POST` | `/api/v1/ideas` | 想法摘要与幂等创建 |
+| `POST` | `/api/v1/ideas/:id/commands` | 想法修订、关联及建立 ProjectProposal |
+| `POST` | `/api/v1/project-proposals/:id/commands` | 立项提案修订与人工决定 |
 | `GET` | `/projects/:id` | 项目工作区 |
 | `POST` | `/projects/:id/actions` | 成果契约与产物动作 |
 | `POST` | `/projects/:id/graph` | 图谱动作 |

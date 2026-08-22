@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{goal_branches, graph, inputs, plugins, projects, workbench},
+    application::{goal_branches, graph, ideas, inputs, plugins, projects, workbench},
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -22,6 +22,7 @@ use crate::{
         contribution_kind_label,
     },
     error::{AppError, AppResult},
+    idea_domain::IdeaCommandRequest,
     input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
     tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
 };
@@ -40,6 +41,50 @@ pub struct ProjectPageQuery {
 #[derive(Debug, Default, Deserialize)]
 pub struct DashboardQuery {
     pub view: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct IdeaPageQuery {
+    pub view: Option<String>,
+    pub notice: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct IdeaCommandForm {
+    pub client_request_id: Option<Uuid>,
+    pub subject_id: Option<Uuid>,
+    pub return_idea_id: Option<Uuid>,
+    pub action: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub source_kind: Option<String>,
+    pub source_ref: Option<String>,
+    pub revision_reason: Option<String>,
+    pub expected_revision: Option<i32>,
+    pub target_idea_id: Option<Uuid>,
+    pub target_idea_ref: Option<String>,
+    pub target_revision: Option<i32>,
+    pub relation: Option<String>,
+    pub rationale: Option<String>,
+    pub project_intent: Option<String>,
+    pub why_now: Option<String>,
+    pub desired_outcome: Option<String>,
+    pub hard_constraints: Option<String>,
+    pub subjective_preferences: Option<String>,
+    pub unknowns: Option<String>,
+    pub non_goals: Option<String>,
+    pub validation_plan: Option<String>,
+    pub judgment_triggers: Option<String>,
+    pub stop_conditions: Option<String>,
+    pub expected_contributions: Option<String>,
+    pub exploration_plan: Option<String>,
+    pub tool_requirements: Option<String>,
+    pub inferences: Option<String>,
+    pub retained_notes: Option<String>,
+    pub omitted_notes: Option<String>,
+    pub source_idea_id: Option<Uuid>,
+    pub source_idea_revision: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +171,207 @@ pub async fn dashboard(
 ) -> AppResult<Markup> {
     let projects = projects::list_projects(&state.pool).await?;
     Ok(views::dashboard(&projects, query.view.as_deref()))
+}
+
+pub async fn ideas_page(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<IdeaPageQuery>,
+) -> AppResult<Markup> {
+    let (ideas, links) = tokio::try_join!(
+        ideas::list_ideas(&state.pool),
+        ideas::list_links(&state.pool),
+    )?;
+    Ok(views::ideas(&ideas, &links, &query))
+}
+
+pub async fn new_idea_page(Query(query): Query<IdeaPageQuery>) -> Markup {
+    views::new_idea(query.error.as_deref())
+}
+
+pub async fn idea_page(
+    State(state): State<Arc<AppState>>,
+    Path(idea_id): Path<Uuid>,
+    Query(query): Query<IdeaPageQuery>,
+) -> AppResult<Markup> {
+    let (snapshot, all_ideas) = tokio::try_join!(
+        ideas::get_snapshot(&state.pool, idea_id),
+        ideas::list_ideas(&state.pool),
+    )?;
+    Ok(views::idea(&snapshot, &all_ideas, &query))
+}
+
+pub async fn idea_command_form(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<IdeaCommandForm>,
+) -> Response {
+    let request_id = form.client_request_id.unwrap_or_else(Uuid::new_v4);
+    let subject_id = form.subject_id;
+    let return_idea_id = form.return_idea_id.or_else(|| {
+        if form.action.starts_with("idea.") && form.action != "idea.create" {
+            subject_id
+        } else {
+            None
+        }
+    });
+    let payload = idea_form_payload(&form);
+    let result = match payload {
+        Ok(payload) => {
+            ideas::run_command(
+                &state.pool,
+                subject_id,
+                IdeaCommandRequest {
+                    client_request_id: request_id,
+                    action: form.action.clone(),
+                    payload,
+                },
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(response) => {
+            if let Some(project_id) = response
+                .result
+                .get("projectId")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+            {
+                return Redirect::to(&format!(
+                    "/projects/{project_id}?notice={}",
+                    urlencoding::encode("ProjectProposal 已批准；根目标契约草案等待审核")
+                ))
+                .into_response();
+            }
+            let target = response
+                .result
+                .get("ideaId")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .or(return_idea_id);
+            if let Some(idea_id) = target {
+                Redirect::to(&format!(
+                    "/ideas/{idea_id}?notice={}",
+                    urlencoding::encode("想法空间已更新")
+                ))
+                .into_response()
+            } else {
+                Redirect::to("/ideas").into_response()
+            }
+        }
+        Err(error) => {
+            let target = return_idea_id
+                .map(|idea_id| format!("/ideas/{idea_id}"))
+                .unwrap_or_else(|| "/ideas/new".into());
+            Redirect::to(&format!(
+                "{target}?error={}",
+                urlencoding::encode(&error.public_message())
+            ))
+            .into_response()
+        }
+    }
+}
+
+fn idea_form_payload(form: &IdeaCommandForm) -> AppResult<Value> {
+    let lines = |value: &Option<String>| split_lines(value.as_deref());
+    let revision = || {
+        json!({
+            "title": form.title.clone().unwrap_or_default(),
+            "body": form.body.clone().unwrap_or_default(),
+            "sourceKind": form.source_kind.clone().unwrap_or_else(|| "text".into()),
+            "sourceRef": form.source_ref.clone().filter(|value| !value.trim().is_empty()),
+            "revisionReason": form.revision_reason.clone().filter(|value| !value.trim().is_empty()),
+        })
+    };
+    let proposal_revision = || -> AppResult<Value> {
+        let idea_id = form
+            .source_idea_id
+            .or(form.return_idea_id)
+            .ok_or_else(|| AppError::bad_request("missing_idea_source", "缺少起始想法"))?;
+        let idea_revision = form
+            .source_idea_revision
+            .ok_or_else(|| AppError::bad_request("missing_idea_revision", "缺少起始想法版本"))?;
+        Ok(json!({
+            "title": form.title.clone().unwrap_or_default(),
+            "projectIntent": form.project_intent.clone().unwrap_or_default(),
+            "whyNow": form.why_now.clone().unwrap_or_default(),
+            "rootGoal": {
+                "whyNeeded": form.why_now.clone().unwrap_or_default(),
+                "contract": {
+                    "desiredOutcome": form.desired_outcome.clone().unwrap_or_default(),
+                    "hardConstraints": lines(&form.hard_constraints),
+                    "subjectivePreferences": lines(&form.subjective_preferences),
+                    "unknowns": lines(&form.unknowns),
+                    "nonGoals": lines(&form.non_goals),
+                    "validationPlan": lines(&form.validation_plan),
+                    "judgmentTriggers": lines(&form.judgment_triggers),
+                    "stopConditions": lines(&form.stop_conditions),
+                    "expectedContributions": lines(&form.expected_contributions),
+                },
+                "expectedContributions": lines(&form.expected_contributions),
+                "explorationPlan": lines(&form.exploration_plan),
+                "contextInheritance": {},
+                "toolRequirements": lines(&form.tool_requirements),
+                "inferences": lines(&form.inferences),
+                "revisionReason": form.revision_reason.clone().filter(|value| !value.trim().is_empty()),
+            },
+            "retainedNotes": lines(&form.retained_notes),
+            "omittedNotes": lines(&form.omitted_notes),
+            "sources": [{
+                "ideaId": idea_id,
+                "ideaRevision": idea_revision,
+                "role": "source",
+                "rationale": "当前想法是立项来源",
+            }],
+            "revisionReason": form.revision_reason.clone().filter(|value| !value.trim().is_empty()),
+        }))
+    };
+    match form.action.as_str() {
+        "idea.create" => Ok(json!({ "revision": revision() })),
+        "idea.revise" => Ok(json!({
+            "expectedRevision": require_form_value(form.expected_revision, "缺少想法版本")?,
+            "revision": revision(),
+        })),
+        "idea.link" => {
+            let target_from_ref = form.target_idea_ref.as_deref().and_then(|value| {
+                let (id, revision) = value.split_once('@')?;
+                Some((Uuid::parse_str(id).ok()?, revision.parse::<i32>().ok()?))
+            });
+            let target_idea_id = form
+                .target_idea_id
+                .or_else(|| target_from_ref.map(|item| item.0));
+            let target_revision = form
+                .target_revision
+                .or_else(|| target_from_ref.map(|item| item.1));
+            Ok(json!({
+            "expectedSourceRevision": require_form_value(form.expected_revision, "缺少当前想法版本")?,
+            "targetIdeaId": require_form_value(target_idea_id, "请选择关联想法")?,
+            "expectedTargetRevision": require_form_value(target_revision, "缺少目标想法版本")?,
+            "relation": form.relation.clone().unwrap_or_default(),
+            "rationale": form.rationale.clone().unwrap_or_default(),
+            }))
+        }
+        "idea.archive" => Ok(json!({ "reason": form.rationale.clone().unwrap_or_default() })),
+        "project_proposal.create" => Ok(json!({ "revision": proposal_revision()? })),
+        "project_proposal.revise" => Ok(json!({
+            "expectedRevision": require_form_value(form.expected_revision, "缺少提案版本")?,
+            "revision": proposal_revision()?,
+        })),
+        "project_proposal.submit" | "project_proposal.approve" => Ok(json!({
+            "expectedRevision": require_form_value(form.expected_revision, "缺少提案版本")?,
+        })),
+        "project_proposal.reject" | "project_proposal.cancel" => Ok(json!({
+            "rationale": form.rationale.clone().unwrap_or_default(),
+        })),
+        _ => Err(AppError::bad_request(
+            "unsupported_idea_action",
+            "不支持的想法动作",
+        )),
+    }
+}
+
+fn require_form_value<T>(value: Option<T>, message: &'static str) -> AppResult<T> {
+    value.ok_or_else(|| AppError::bad_request("missing_form_value", message))
 }
 
 pub async fn new_project_page(Query(query): Query<HashMap<String, String>>) -> Markup {
@@ -583,6 +829,74 @@ pub async fn api_health(State(state): State<Arc<AppState>>) -> AppResult<Json<Va
 pub async fn api_list_projects(State(state): State<Arc<AppState>>) -> AppResult<Json<Value>> {
     let projects = projects::list_projects(&state.pool).await?;
     Ok(Json(json!({ "projects": projects })))
+}
+
+pub async fn api_list_ideas(State(state): State<Arc<AppState>>) -> AppResult<Json<Value>> {
+    let ideas = ideas::list_ideas(&state.pool).await?;
+    Ok(Json(
+        json!({ "modelVersion": "idea-project/v1", "ideas": ideas }),
+    ))
+}
+
+pub async fn api_create_idea(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<IdeaCommandRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    if request.action != "idea.create" {
+        return Err(AppError::bad_request(
+            "invalid_create_idea_action",
+            "创建想法接口只接受 idea.create",
+        ));
+    }
+    let response = ideas::run_command(&state.pool, None, request).await?;
+    let status = if response.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    Ok((status, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_idea_snapshot(
+    State(state): State<Arc<AppState>>,
+    Path(idea_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let snapshot = ideas::get_snapshot(&state.pool, idea_id).await?;
+    Ok(Json(serde_json::to_value(snapshot)?))
+}
+
+pub async fn api_idea_command(
+    State(state): State<Arc<AppState>>,
+    Path(idea_id): Path<Uuid>,
+    Json(request): Json<IdeaCommandRequest>,
+) -> AppResult<Json<Value>> {
+    if request.action.starts_with("project_proposal.")
+        && request.action != "project_proposal.create"
+    {
+        return Err(AppError::bad_request(
+            "wrong_command_endpoint",
+            "ProjectProposal 后续命令应发送到它自己的命令地址",
+        ));
+    }
+    let response = ideas::run_command(&state.pool, Some(idea_id), request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_project_proposal_command(
+    State(state): State<Arc<AppState>>,
+    Path(proposal_id): Path<Uuid>,
+    Json(request): Json<IdeaCommandRequest>,
+) -> AppResult<Json<Value>> {
+    if !request.action.starts_with("project_proposal.")
+        || request.action == "project_proposal.create"
+    {
+        return Err(AppError::bad_request(
+            "wrong_command_endpoint",
+            "该地址只接受已存在 ProjectProposal 的命令",
+        ));
+    }
+    let response = ideas::run_command(&state.pool, Some(proposal_id), request).await?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 pub async fn api_create_project(

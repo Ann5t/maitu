@@ -13,6 +13,10 @@ use crate::{
         GoalContractVersionRecord, GoalGraphSnapshot, GoalProposalRecord,
         GoalProposalRevisionRecord, GoalReviewGateRecord, GoalSessionRecord,
     },
+    idea_models::{
+        IdeaLinkView, IdeaRevisionRecord, IdeaSnapshot, IdeaSummary, ProjectProposalRecord,
+        ProjectProposalRevisionRecord,
+    },
     models::{
         ActionRun, ProjectBranch, ProjectContribution, ProjectNode, ProjectSnapshot, ProjectSummary,
     },
@@ -20,7 +24,7 @@ use crate::{
 
 use super::{
     goal_projection::{GoalGraphProjection, GoalLane, PROJECTION_VERSION},
-    handlers::ProjectPageQuery,
+    handlers::{IdeaPageQuery, ProjectPageQuery},
 };
 
 pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> Markup {
@@ -71,7 +75,7 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
                 h1 { (title) }
                 p { (subtitle) }
             }
-            a class="button button--primary" href="/new" { span aria-hidden="true" { "+" } " 新项目" }
+            a class="button button--primary" href="/ideas/new" { span aria-hidden="true" { "+" } " 记录想法" }
         }
 
         section class="dashboard-strip" aria-label="工作区概览" {
@@ -99,7 +103,7 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
                     span class="empty-state__icon" { "✦" }
                     h3 { (empty_title) }
                     p { (empty_copy) }
-                    a class="button button--primary" href="/new" { "创建第一个项目" }
+                    a class="button button--primary" href="/ideas/new" { "从想法开始" }
                 }
             } @else {
                 div class="project-grid" {
@@ -111,6 +115,439 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
         }
     };
     layout(title, view, content)
+}
+
+pub fn ideas(ideas: &[IdeaSummary], links: &[IdeaLinkView], query: &IdeaPageQuery) -> Markup {
+    let view = if query.view.as_deref() == Some("map") {
+        "map"
+    } else {
+        "stream"
+    };
+    let content = html! {
+        header class="page-head idea-space-head" {
+            div {
+                span class="eyebrow" { "UPSTREAM SPACE" }
+                h1 { "想法" }
+                p { "先保留未经整理的念头；真正立项前再形成可审查的 ProjectProposal。" }
+            }
+            a class="button button--primary" href="/ideas/new" { span aria-hidden="true" { "+" } " 记录想法" }
+        }
+        @if let Some(message) = query.notice.as_deref() {
+            div class="flash flash--success" role="status" { (message) }
+        }
+        @if let Some(message) = query.error.as_deref() {
+            div class="flash flash--error" role="alert" { (message) }
+        }
+        section class="idea-projection-bar" aria-label="想法投影" {
+            div {
+                strong { (ideas.len()) " 个想法" }
+                span { (links.len()) " 条关系；投影可以切换，内容与来源不会变。" }
+            }
+            nav aria-label="切换想法视图" {
+                a class=(if view == "stream" { "is-active" } else { "" }) href="/ideas?view=stream" { "时间流" }
+                a class=(if view == "map" { "is-active" } else { "" }) href="/ideas?view=map" { "关系图" }
+            }
+        }
+        @if ideas.is_empty() {
+            div class="empty-state idea-empty" {
+                span class="empty-state__icon" { "∿" }
+                h3 { "先记下一句话" }
+                p { "它不必已经像项目，也不要求你填一张巨大的表。" }
+                a class="button button--primary" href="/ideas/new" { "记录第一个想法" }
+            }
+        } @else if view == "map" {
+            (idea_map(ideas, links))
+        } @else {
+            section class="idea-stream" aria-label="想法时间流" {
+                @for idea in ideas {
+                    (idea_card(idea, false))
+                }
+            }
+        }
+    };
+    layout("想法", "ideas", content)
+}
+
+fn idea_map(ideas: &[IdeaSummary], links: &[IdeaLinkView]) -> Markup {
+    html! {
+        section class="idea-map" aria-label="想法关系投影" {
+            div class="idea-map__nodes" {
+                @for (index, idea) in ideas.iter().enumerate() {
+                    article class=(format!("idea-map-node idea-map-node--{}", index % 4)) {
+                        (idea_card(idea, true))
+                    }
+                }
+            }
+            aside class="idea-map__relations" {
+                div class="section-heading" { div { span class="eyebrow" { "RELATIONS" } h2 { "关系索引" } } span class="section-count" { (links.len()) } }
+                @if links.is_empty() {
+                    p class="muted-copy" { "还没有关联；打开任一想法即可补充支持、矛盾或依赖关系。" }
+                } @else {
+                    ol {
+                        @for link in links {
+                            li {
+                                a href=(format!("/ideas/{}", link.source_idea_id)) { (&link.source_title) }
+                                span { (idea_relation_label(&link.relation)) }
+                                a href=(format!("/ideas/{}", link.target_idea_id)) { (&link.target_title) }
+                                small { (&link.rationale) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn idea_card(idea: &IdeaSummary, compact: bool) -> Markup {
+    html! {
+        a class=(if compact { "idea-card idea-card--compact" } else { "idea-card" })
+            href=(format!("/ideas/{}", idea.id)) {
+            header {
+                span class=(format!("idea-state idea-state--{}", idea_state_tone(&idea.state))) {
+                    (idea_state_label(&idea.state))
+                }
+                span { "v" (idea.current_revision) }
+                time { (format_date(idea.updated_at)) }
+            }
+            h2 { (&idea.title) }
+            p { (&idea.body) }
+            footer {
+                span { (idea.link_count) " 关系" }
+                span { (idea.proposal_count) " 提案" }
+                @if idea.promoted_project_id.is_some() { b { "已形成项目 →" } } @else { b { "继续发展 →" } }
+            }
+        }
+    }
+}
+
+pub fn new_idea(error: Option<&str>) -> Markup {
+    let content = html! {
+        div class="focused-page" {
+            a class="back-link" href="/ideas" { "← 返回想法" }
+            section class="intake-card idea-intake-card" {
+                div class="intake-card__mark" { "∞" }
+                span class="eyebrow" { "CAPTURE AN IDEA" }
+                h1 { "先把脑中的东西留下来" }
+                p { "一句话就能开始。标题可留空，系统会从第一句话生成；以后每次变化都会保留版本。" }
+                @if let Some(message) = error {
+                    div class="flash flash--error" role="alert" { (message) }
+                }
+                form class="intake-form" method="post" action="/ideas/commands" {
+                    input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                    input type="hidden" name="action" value="idea.create";
+                    input type="hidden" name="source_kind" value="text";
+                    label for="idea-title" { "标题（可留空）" }
+                    input id="idea-title" name="title" maxlength="240" placeholder="系统会从第一句话生成";
+                    label for="idea-body" { "现在想到什么？" }
+                    textarea id="idea-body" name="body" rows="8" required autofocus
+                        placeholder="例如：如果每个科研目标都能展开成可审查的独立枝干，我就能知道是技术不可行，还是还有遗漏。" {}
+                    div class="intake-hints" {
+                        span { "✦ 不要求立即立项" }
+                        span { "✦ 未知可以一直保留" }
+                        span { "✦ 文件、图片和语音随后可追加" }
+                    }
+                    button class="button button--primary button--large" type="submit" { "保留这个想法" span aria-hidden="true" { "→" } }
+                }
+            }
+        }
+    };
+    layout("记录想法", "ideas", content)
+}
+
+pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPageQuery) -> Markup {
+    let current = snapshot
+        .revisions
+        .iter()
+        .find(|revision| revision.revision == snapshot.idea.current_revision)
+        .expect("Idea current revision is protected by a database constraint");
+    let content = html! {
+        header class="idea-detail-head" {
+            a class="back-link" href="/ideas" { "← 想法" }
+            div {
+                span class=(format!("idea-state idea-state--{}", idea_state_tone(&snapshot.idea.state))) { (idea_state_label(&snapshot.idea.state)) }
+                span { "版本 " (snapshot.idea.current_revision) }
+                span { (source_kind_label(&current.source_kind)) }
+            }
+            h1 { (&current.title) }
+            p { (&current.body) }
+            @if let Some(project_id) = snapshot.proposals.iter().find_map(|proposal| proposal.approved_project_id) {
+                a class="button button--primary" href=(format!("/projects/{project_id}")) { "打开已形成的项目 →" }
+            }
+        }
+        @if let Some(message) = query.notice.as_deref() {
+            div class="flash flash--success" role="status" { (message) }
+        }
+        @if let Some(message) = query.error.as_deref() {
+            div class="flash flash--error" role="alert" { (message) }
+        }
+        div class="idea-detail-layout" {
+            main {
+                section class="idea-detail-section" {
+                    div class="section-heading" { div { span class="eyebrow" { "PROJECT PROPOSALS" } h2 { "从想法形成项目" } } span class="section-count" { (snapshot.proposals.len()) } }
+                    @if snapshot.proposals.is_empty() {
+                        article class="idea-explainer" {
+                            strong { "立项不是复制粘贴" }
+                            p { "先明确现在为什么值得做、第一条根目标如何验证，以及哪些想法内容这次暂不采用。提交后仍需你批准，批准才会原子创建项目和根 BranchProposal 草案。" }
+                        }
+                        (project_proposal_form(snapshot.idea.id, current, None))
+                    } @else {
+                        @for proposal in &snapshot.proposals {
+                            (project_proposal_card(snapshot, current, proposal))
+                        }
+                    }
+                }
+                section class="idea-detail-section" {
+                    div class="section-heading" { div { span class="eyebrow" { "RELATIONSHIPS" } h2 { "与其他想法的关系" } } span class="section-count" { (snapshot.links.len()) } }
+                    @for link in &snapshot.links {
+                        article class="idea-link-card" {
+                            span { (idea_relation_label(&link.relation)) }
+                            @if link.source_idea_id == snapshot.idea.id {
+                                a href=(format!("/ideas/{}", link.target_idea_id)) { (&link.target_title) }
+                            } @else {
+                                a href=(format!("/ideas/{}", link.source_idea_id)) { (&link.source_title) }
+                            }
+                            p { (&link.rationale) }
+                        }
+                    }
+                    @if all_ideas.iter().any(|idea| idea.id != snapshot.idea.id) {
+                        form class="idea-inline-form" method="post" action="/ideas/commands" {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="subject_id" value=(snapshot.idea.id);
+                            input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                            input type="hidden" name="action" value="idea.link";
+                            input type="hidden" name="expected_revision" value=(snapshot.idea.current_revision);
+                            label { "关联到"
+                                select name="target_idea_ref" required {
+                                    option value="" { "选择另一个想法" }
+                                    @for idea in all_ideas.iter().filter(|idea| idea.id != snapshot.idea.id) {
+                                        option value=(format!("{}@{}", idea.id, idea.current_revision)) { (&idea.title) " · v" (idea.current_revision) }
+                                    }
+                                }
+                            }
+                            label { "关系"
+                                select name="relation" required {
+                                    option value="related" { "有关联" }
+                                    option value="supports" { "支持" }
+                                    option value="contradicts" { "矛盾" }
+                                    option value="depends_on" { "依赖" }
+                                    option value="duplicates" { "重复" }
+                                }
+                            }
+                            label class="idea-inline-form__wide" { "为什么这样关联？" input name="rationale" required maxlength="4000"; }
+                            button class="button button--secondary" type="submit" { "保存关系" }
+                        }
+                    }
+                }
+            }
+            aside class="idea-history-panel" {
+                details open {
+                    summary { "继续发展这个想法" }
+                    form class="idea-revision-form" method="post" action="/ideas/commands" {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="subject_id" value=(snapshot.idea.id);
+                        input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                        input type="hidden" name="action" value="idea.revise";
+                        input type="hidden" name="expected_revision" value=(snapshot.idea.current_revision);
+                        input type="hidden" name="source_kind" value=(current.source_kind.as_str());
+                        @if let Some(source_ref) = &current.source_ref { input type="hidden" name="source_ref" value=(source_ref); }
+                        label { "标题" input name="title" required value=(&current.title); }
+                        label { "内容" textarea name="body" rows="6" required { (&current.body) } }
+                        label { "这次为什么改变？" textarea name="revision_reason" rows="2" required {} }
+                        button class="button button--primary" type="submit" { "保存为 v" (snapshot.idea.current_revision + 1) }
+                    }
+                }
+                div class="section-heading" { div { span class="eyebrow" { "VERSIONS" } h2 { "不可覆盖的版本" } } span class="section-count" { (snapshot.revisions.len()) } }
+                ol class="idea-version-list" {
+                    @for revision in &snapshot.revisions {
+                        li {
+                            strong { "v" (revision.revision) " · " (&revision.title) }
+                            time { (format_date_time(revision.created_at)) }
+                            @if let Some(reason) = &revision.revision_reason { p { (reason) } }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    layout(&current.title, "ideas", content)
+}
+
+fn project_proposal_card(
+    snapshot: &IdeaSnapshot,
+    current_idea: &IdeaRevisionRecord,
+    proposal: &ProjectProposalRecord,
+) -> Markup {
+    let revision = snapshot
+        .proposal_revisions
+        .iter()
+        .find(|revision| {
+            revision.proposal_id == proposal.id && revision.revision == proposal.current_revision
+        })
+        .expect("ProjectProposal current revision is protected by a database constraint");
+    let desired_outcome = revision
+        .root_goal
+        .0
+        .get("contract")
+        .and_then(|value| value.get("desiredOutcome"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("根目标内容缺失");
+    html! {
+        article class="project-proposal-card" data-project-proposal-id=(proposal.id) {
+            header {
+                span class=(format!("proposal-state proposal-state--{}", proposal_state_tone(&proposal.status))) { (proposal_state_label(&proposal.status)) }
+                span { "ProjectProposal v" (proposal.current_revision) }
+            }
+            h3 { (&revision.title) }
+            p { (&revision.why_now) }
+            div class="project-proposal-card__goal" {
+                span { "拟定根目标" }
+                strong { (desired_outcome) }
+            }
+            @if !revision.omitted_notes.0.is_empty() {
+                details {
+                    summary { "这次暂不采用的内容（" (revision.omitted_notes.0.len()) "）" }
+                    ul { @for note in &revision.omitted_notes.0 { li { (note) } } }
+                }
+            }
+            div class="project-proposal-card__actions" {
+                @if proposal.status == "draft" {
+                    form method="post" action="/ideas/commands" {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="subject_id" value=(proposal.id);
+                        input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                        input type="hidden" name="action" value="project_proposal.submit";
+                        input type="hidden" name="expected_revision" value=(proposal.current_revision);
+                        button class="button button--primary" type="submit" { "提交立项审核" }
+                    }
+                    details class="project-proposal-revise" {
+                        summary { "继续修订提案" }
+                        (project_proposal_form(snapshot.idea.id, current_idea, Some((proposal, revision))))
+                    }
+                } @else if proposal.status == "awaiting_approval" {
+                    form method="post" action="/ideas/commands" {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="subject_id" value=(proposal.id);
+                        input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                        input type="hidden" name="action" value="project_proposal.approve";
+                        input type="hidden" name="expected_revision" value=(proposal.current_revision);
+                        button class="button button--primary" type="submit" { "批准并创建项目" }
+                    }
+                    details class="project-proposal-revise" {
+                        summary { "修改后再审" }
+                        (project_proposal_form(snapshot.idea.id, current_idea, Some((proposal, revision))))
+                    }
+                    details class="proposal-reject" {
+                        summary { "退回这项提案" }
+                        form method="post" action="/ideas/commands" {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="subject_id" value=(proposal.id);
+                            input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                            input type="hidden" name="action" value="project_proposal.reject";
+                            label { "退回理由" textarea name="rationale" rows="2" required {} }
+                            button class="button button--secondary" type="submit" { "确认退回" }
+                        }
+                    }
+                } @else if proposal.status == "approved" {
+                    @if let Some(project_id) = proposal.approved_project_id {
+                        a class="button button--primary" href=(format!("/projects/{project_id}")) { "进入项目空间 →" }
+                    }
+                } @else {
+                    p class="muted-copy" { (proposal.decision_rationale.as_deref().unwrap_or("该提案已经收尾，想法本身仍被保留。")) }
+                }
+            }
+        }
+    }
+}
+
+fn project_proposal_form(
+    idea_id: Uuid,
+    idea_revision: &IdeaRevisionRecord,
+    existing: Option<(&ProjectProposalRecord, &ProjectProposalRevisionRecord)>,
+) -> Markup {
+    let proposal = existing.map(|item| item.0);
+    let revision = existing.map(|item| item.1);
+    let root = revision.map(|item| &item.root_goal.0);
+    let contract = root.and_then(|value| value.get("contract"));
+    let root_lines = |key: &str| {
+        root.and_then(|value| value.get(key))
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
+    let contract_lines = |key: &str| {
+        contract
+            .and_then(|value| value.get(key))
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
+    let desired_outcome = contract
+        .and_then(|value| value.get("desiredOutcome"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&idea_revision.body);
+    html! {
+        form class="project-proposal-form" method="post" action="/ideas/commands" {
+            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+            input type="hidden" name="subject_id" value=(proposal.map(|item| item.id).unwrap_or(idea_id));
+            input type="hidden" name="return_idea_id" value=(idea_id);
+            input type="hidden" name="action" value=(if proposal.is_some() { "project_proposal.revise" } else { "project_proposal.create" });
+            input type="hidden" name="source_idea_id" value=(idea_id);
+            input type="hidden" name="source_idea_revision" value=(idea_revision.revision);
+            @if let Some(proposal) = proposal {
+                input type="hidden" name="expected_revision" value=(proposal.current_revision);
+            }
+            div class="goal-contract-form__intro" {
+                strong { "先审查最少信息" }
+                span { "目标、为何现在做、如何验证、何时停止；不确定的内容放进未知。" }
+            }
+            label { "项目名称"
+                input name="title" required maxlength="240"
+                    value=(revision.map(|item| item.title.as_str()).unwrap_or(&idea_revision.title));
+            }
+            label { "项目意图"
+                textarea name="project_intent" rows="3" required { (revision.map(|item| item.project_intent.as_str()).unwrap_or(&idea_revision.body)) }
+            }
+            label { "为什么现在值得立项？"
+                textarea name="why_now" rows="2" required { (revision.map(|item| item.why_now.as_str()).unwrap_or("这个想法已经值得通过独立目标枝干验证")) }
+            }
+            label { "第一条根目标想得到什么结果？"
+                textarea name="desired_outcome" rows="3" required { (desired_outcome) }
+            }
+            div class="goal-form-columns" {
+                label { "怎样验证（每行一项）"
+                    textarea name="validation_plan" rows="3" required { (contract_lines("validationPlan")) }
+                }
+                label { "何时完成或停止（每行一项）"
+                    textarea name="stop_conditions" rows="3" required { (contract_lines("stopConditions")) }
+                }
+            }
+            label { "仍然不知道什么？"
+                textarea name="unknowns" rows="2" placeholder="不知道可以诚实保留" { (contract_lines("unknowns")) }
+            }
+            label { "何时回来请你凭感觉判断？"
+                textarea name="judgment_triggers" rows="2" { (contract_lines("judgmentTriggers")) }
+            }
+            details class="goal-form-advanced" {
+                summary { "按需披露更多契约与来源取舍" }
+                div class="goal-form-columns" {
+                    label { "硬约束" textarea name="hard_constraints" rows="2" { (contract_lines("hardConstraints")) } }
+                    label { "主观偏好" textarea name="subjective_preferences" rows="2" { (contract_lines("subjectivePreferences")) } }
+                    label { "明确不做" textarea name="non_goals" rows="2" { (contract_lines("nonGoals")) } }
+                    label { "期望贡献" textarea name="expected_contributions" rows="2" { (contract_lines("expectedContributions")) } }
+                    label { "探索计划" textarea name="exploration_plan" rows="2" { (root_lines("explorationPlan")) } }
+                    label { "工具需求" textarea name="tool_requirements" rows="2" { (root_lines("toolRequirements")) } }
+                    label { "这次保留的想法内容" textarea name="retained_notes" rows="2" { (revision.map(|item| item.retained_notes.0.join("\n")).unwrap_or_default()) } }
+                    label { "这次暂不采用的内容" textarea name="omitted_notes" rows="2" { (revision.map(|item| item.omitted_notes.0.join("\n")).unwrap_or_default()) } }
+                    label { "AI 推断（非用户事实）" textarea name="inferences" rows="2" { (root_lines("inferences")) } }
+                }
+                @if proposal.is_some() {
+                    label { "本次修订理由" textarea name="revision_reason" rows="2" required {} }
+                }
+            }
+            button class="button button--primary" type="submit" {
+                @if proposal.is_some() { "保存新版 ProjectProposal" } @else { "建立 ProjectProposal 草案" }
+            }
+        }
+    }
 }
 
 fn project_card(project: &ProjectSummary, view: &str) -> Markup {
@@ -1875,6 +2312,7 @@ fn sidebar(active: &str) -> Markup {
                 (brand_mark()) strong { "浮点" }
             }
             nav class="side-nav" aria-label="主导航" {
+                a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { span { "∿" } b { "想法" } }
                 a class=(if active == "projects" { "is-active" } else { "" }) href="/" { span { "⌘" } b { "项目" } }
                 a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { span { "◌" } b { "待处理" } }
                 a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
@@ -1894,9 +2332,10 @@ fn sidebar(active: &str) -> Markup {
 fn mobile_nav(active: &str) -> Markup {
     html! {
         nav class="mobile-nav" aria-label="移动端导航" {
+            a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { span { "∿" } b { "想法" } }
             a class=(if active == "projects" { "is-active" } else { "" }) href="/" { span { "⌘" } b { "项目" } }
             a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { span { "◌" } b { "待处理" } }
-            a class="mobile-nav__new" href="/new" { span { "+" } b { "新项目" } }
+            a class="mobile-nav__new" href="/ideas/new" { span { "+" } b { "记录" } }
             a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
             button type="button" data-theme-toggle="" { span { "◐" } b { "主题" } }
         }
@@ -1915,6 +2354,67 @@ fn state_tone(state: &str) -> &str {
         "waiting" | "paused" => "waiting",
         "stopped" | "archived" => "muted",
         _ => "shaping",
+    }
+}
+
+fn idea_state_label(state: &str) -> &str {
+    match state {
+        "captured" => "刚记录",
+        "developing" => "发展中",
+        "proposed" => "已提议立项",
+        "promoted" => "已形成项目",
+        "archived" => "已归档",
+        _ => state,
+    }
+}
+
+fn idea_state_tone(state: &str) -> &str {
+    match state {
+        "captured" => "captured",
+        "developing" => "developing",
+        "proposed" => "proposed",
+        "promoted" => "promoted",
+        _ => "muted",
+    }
+}
+
+fn proposal_state_label(state: &str) -> &str {
+    match state {
+        "draft" => "草案",
+        "awaiting_approval" => "等待你批准",
+        "approved" => "已批准立项",
+        "rejected" => "已退回",
+        "cancelled" => "已取消",
+        _ => state,
+    }
+}
+
+fn proposal_state_tone(state: &str) -> &str {
+    match state {
+        "awaiting_approval" => "waiting",
+        "approved" => "active",
+        "rejected" | "cancelled" => "muted",
+        _ => "draft",
+    }
+}
+
+fn idea_relation_label(relation: &str) -> &str {
+    match relation {
+        "supports" => "支持",
+        "contradicts" => "矛盾",
+        "depends_on" => "依赖",
+        "duplicates" => "近似重复",
+        _ => "有关联",
+    }
+}
+
+fn source_kind_label(kind: &str) -> &str {
+    match kind {
+        "file" => "文件来源",
+        "image" => "图片来源",
+        "audio" => "语音来源",
+        "external" => "外部来源",
+        _ => "文字记录",
     }
 }
 

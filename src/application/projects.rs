@@ -131,6 +131,17 @@ pub async fn get_snapshot(pool: &PgPool, project_id: Uuid) -> AppResult<ProjectS
 }
 
 pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uuid> {
+    let mut transaction = pool.begin().await?;
+    let project_id = create_project_in_transaction(&mut transaction, input, "human").await?;
+    transaction.commit().await?;
+    Ok(project_id)
+}
+
+pub(crate) async fn create_project_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    input: ProjectIntake,
+    actor_type: &str,
+) -> AppResult<Uuid> {
     let draft = draft_project_from_intent(&input.intent)?;
     let project_id = Uuid::new_v4();
     let contract_id = Uuid::new_v4();
@@ -138,8 +149,6 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     let gate_id = Uuid::new_v4();
     let main_branch_id = Uuid::new_v4();
     let origin_node_id = Uuid::new_v4();
-    let mut transaction = pool.begin().await?;
-
     sqlx::query(
         "INSERT INTO projects (id, title, intent, state, current_focus) \
          VALUES ($1, $2, $3, 'shaping', $4)",
@@ -148,7 +157,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     .bind(&draft.title)
     .bind(&draft.intent)
     .bind("确认项目何时才算真正结束")
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -159,7 +168,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     .bind(main_branch_id)
     .bind(project_id)
     .bind("保存当前已经接受、可以继续依赖的项目状态")
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -171,7 +180,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     .bind(project_id)
     .bind(main_branch_id)
     .bind(&draft.intent)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -179,7 +188,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     )
     .bind(origin_node_id)
     .bind(main_branch_id)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -196,7 +205,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
     .bind(Json(&draft.outcome_contract.non_goals))
     .bind(&draft.confirmation_question)
     .bind(Json(&draft.contradictions))
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -213,7 +222,7 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
         "澄清目标中的关键矛盾"
     })
     .bind("用户确认什么现实结果代表项目成功")
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     sqlx::query(
@@ -228,18 +237,17 @@ pub async fn create_project(pool: &PgPool, input: ProjectIntake) -> AppResult<Uu
         "成功必须由外部事实验证",
         "硬约束与不做事项已经明确",
     ]))
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     insert_event(
-        &mut transaction,
+        transaction,
         project_id,
         "project.created",
-        "human",
+        actor_type,
         json!({ "contradictions": draft.contradictions.len() }),
     )
     .await?;
-    transaction.commit().await?;
     Ok(project_id)
 }
 

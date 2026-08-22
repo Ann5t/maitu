@@ -42,6 +42,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0004_input_artifacts.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -55,7 +58,13 @@ docker exec -i "$migration_container" \
   < "$migration_repo_root/migrations/0004_input_artifacts.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/tests/sql/idea_project_constraints.sql" >/dev/null
 
 docker exec "$migration_container" createdb -U fudian_test legacy
 docker exec -i "$migration_container" \
@@ -81,6 +90,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0004_input_artifacts.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -105,6 +117,14 @@ migration_input_table_count="$(docker exec "$migration_container" \
    WHERE table_schema = 'public' AND table_name IN (
      'input_artifacts', 'input_artifact_chunks'
    )")"
+migration_idea_table_count="$(docker exec "$migration_container" \
+  psql -U fudian_test -d legacy -Atc \
+  "SELECT count(*) FROM information_schema.tables
+   WHERE table_schema = 'public' AND table_name IN (
+     'ideas', 'idea_revisions', 'idea_links', 'project_proposals',
+     'project_proposal_revisions', 'project_proposal_revision_ideas',
+     'project_origins', 'project_origin_ideas', 'idea_command_receipts', 'idea_events'
+   )")"
 
 if [[ "$migration_counts_before" != "$migration_counts_after" ]]; then
   echo "legacy counts changed: $migration_counts_before -> $migration_counts_after" >&2
@@ -120,6 +140,10 @@ if [[ "$migration_tooling_table_count" != 5 ]]; then
 fi
 if [[ "$migration_input_table_count" != 2 ]]; then
   echo "expected 2 input tables, found $migration_input_table_count" >&2
+  exit 1
+fi
+if [[ "$migration_idea_table_count" != 10 ]]; then
+  echo "expected 10 idea/project-origin tables, found $migration_idea_table_count" >&2
   exit 1
 fi
 
