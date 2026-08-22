@@ -122,12 +122,44 @@ pub struct IdeaEventRecord {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeaSourceRecord {
+    pub id: Uuid,
+    pub idea_id: Uuid,
+    pub client_request_id: Uuid,
+    pub request_hash: String,
+    pub kind: String,
+    pub original_filename: String,
+    pub display_name: String,
+    pub declared_media_type: Option<String>,
+    pub trusted_media_type: String,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub storage_key: String,
+    pub note: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeaRevisionSourceRecord {
+    pub idea_id: Uuid,
+    pub idea_revision: i32,
+    pub source_id: Uuid,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdeaSnapshot {
     pub model_version: &'static str,
     pub idea: IdeaRecord,
     pub revisions: Vec<IdeaRevisionRecord>,
+    pub sources: Vec<IdeaSourceRecord>,
+    pub revision_sources: Vec<IdeaRevisionSourceRecord>,
     pub links: Vec<IdeaLinkView>,
     pub proposals: Vec<ProjectProposalRecord>,
     pub proposal_revisions: Vec<ProjectProposalRevisionRecord>,

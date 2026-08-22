@@ -10,7 +10,8 @@
 
 ```text
 Idea ── current_revision ──> IdeaRevision（不可变）
-  │                              │
+  │                              ├── IdeaRevisionSource ──> IdeaSourceObject
+  │                              │                         └── SHA-256 内容对象
   ├── IdeaLink ──────────────────┤ 固定双方当时的版本
   │
   └── ProjectProposalRevisionIdea（角色 + 精确版本）
@@ -26,6 +27,7 @@ Idea ── current_revision ──> IdeaRevision（不可变）
 ```
 
 - `IdeaRevision` 只追加，不覆盖；改变标题、正文或来源说明都产生新版本和理由。
+- 文件、图片或语音先按服务端嗅探得到可信类型，再写入 SHA-256 内容对象并追加一个想法版本；声明的扩展名和 media type 不作为信任依据。后续文字修订会继承已有来源链接。
 - `IdeaLink` 记录 `related / supports / contradicts / depends_on / duplicates`，并固定关联建立时双方的具体版本。
 - 一个 `ProjectProposalRevision` 可以引用多个想法；每个来源有 `source / supporting / constraint / omitted` 角色。
 - `retainedNotes` 与 `omittedNotes` 明确保留“这次没采用什么”，不能因立项而把原想法删掉或改写成项目描述。
@@ -68,6 +70,8 @@ draft ──submit──> awaiting_approval ──approve──> approved
 | `GET` | `/api/v1/ideas` | 想法摘要列表 |
 | `GET` | `/api/v1/ideas/:id` | 完整来源快照 |
 | `POST` | `/api/v1/ideas/:id/commands` | 修订、关联、归档或创建提案 |
+| `POST` | `/api/v1/ideas/:id/sources` | 校验并附加文件、图片或语音来源 |
+| `GET` | `/api/v1/ideas/:id/sources/:source_id/content` | 按可信类型和 ETag 读取来源 |
 | `POST` | `/api/v1/project-proposals/:id/commands` | 修订、提交、批准、退回或取消提案 |
 
 时间流和关系图只是可替换的只读投影，选择哪种界面不会改变领域记录。桌面使用左右关系索引；820px 平板改为上下布局；390px 手机保持单列操作和固定底部导航。
@@ -77,13 +81,12 @@ draft ──submit──> awaiting_approval ──approve──> approved
 - 32 个 Rust 单元测试通过，其中覆盖一句话自动标题、探索型未知和提案状态权限；
 - `idea_project_constraints.sql` 验证不可变版本、自关联拒绝和不完整批准状态拒绝；
 - `test-goal-migrations.sh` 在空库、迁移重放和带旧 DAG fixture 的库中验证 `0005` 只增不减；
-- `test-ideas-http.sh` 在一次性数据库跑通创建、幂等重放/冲突、修订、旧版本冲突、关联、提交、批准、精确来源和根提案；
-- Chromium 在 1440px、820px 和 390px 跑通真实表单闭环并断言无页面级横向溢出。
+- `test-ideas-http.sh` 在一次性数据库跑通创建、幂等重放/冲突、修订、旧版本冲突、图片/语音/PDF 可信类型、内容下载、关联、提交、批准、精确来源和根提案；
+- Chromium 在 1440px、820px 和 390px 跑通文件直接起始、语音追加、多想法来源选择及完整表单闭环，并断言无页面级横向溢出。
 
 ## 仍未关闭的边界
 
-- v1 页面已支持文字和带来源引用的领域类型，但“直接上传文件、图片、语音并形成内容寻址 IdeaSource”的二进制入口尚未实现；这会与第 8 项内容仓库共同完成。
-- 多来源提案由 API 和数据库支持；当前 HTML 编辑器先展示一个主要来源，尚缺可视化添加/移除多个来源。
 - 时间流和关系图均为可操作候选，但哪种默认投影、关系图密度和移动端手感必须由用户实际体验判断。
+- 当前想法上传是受大小限制的一次请求；Session 文件已经支持分段续传。第 8 项会统一全局对象目录、分段策略、孤儿扫描和保留期，而不改变 IdeaSource 的领域身份。
 - 旧 `/new` 与 `POST /api/projects` 暂保留兼容既有脚本和旧客户端，已从一级导航移除；在迁移策略确定前不冒充“所有项目创建都已强制经过 ProjectProposal”。
 - 身份认证、CSRF 和真正的人类权限证明属于第 12 项；当前只能在本机或受控隔离环境使用。

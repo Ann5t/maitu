@@ -14,7 +14,7 @@
 
 排除 `node_modules` 与 `.next` 后的取证文件已经固化为 `recovery/legacy-docker-source-20260821.tar.gz`，并由同目录的 `SHA256SUMS` 校验。原生产镜像还额外保留为 `fudian-nextgen-app-prod-legacy:recovered-20260821`，供应用级回退使用。
 
-盘点和预览期间没有删除或重建任何现有卷。当前真实数据库仍只有恢复时已有的迁移登记（包括 `0001_rust_baseline.sql`）；本功能枝干新增的 `0002_goal_branch_core.sql`、`0003_tooling_core.sql`、`0004_input_artifacts.sql` 和 `0005_ideas_and_project_proposals.sql` 只在一次性 PostgreSQL 中验证，尚未应用到真实库。未来首次用本枝干镜像启动时会以只增不减方式执行它们，因此仍须先备份再预览。
+盘点和预览期间没有删除或重建任何现有卷。当前真实数据库仍只有恢复时已有的迁移登记（包括 `0001_rust_baseline.sql`）；本功能枝干新增的 `0002_goal_branch_core.sql` 至 `0006_idea_sources.sql` 只在一次性 PostgreSQL 中验证，尚未应用到真实库。未来首次用本枝干镜像启动时会以只增不减方式执行它们，因此仍须先备份再预览。
 
 当前仓库的 Compose 默认把应用和 PostgreSQL 都限制在 `127.0.0.1`。早于该设置启动的容器不会自动改变既有端口映射；切换前应使用 `docker inspect` 核对，若数据库仍映射到 `0.0.0.0`，请在维护窗口、完成备份后重建 PostgreSQL 容器但保留数据卷。
 

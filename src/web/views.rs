@@ -233,19 +233,22 @@ pub fn new_idea(error: Option<&str>) -> Markup {
                 @if let Some(message) = error {
                     div class="flash flash--error" role="alert" { (message) }
                 }
-                form class="intake-form" method="post" action="/ideas/commands" {
+                form class="intake-form" method="post" action="/ideas/commands" data-idea-capture="" {
                     input type="hidden" name="client_request_id" value=(Uuid::new_v4());
                     input type="hidden" name="action" value="idea.create";
                     input type="hidden" name="source_kind" value="text";
                     label for="idea-title" { "标题（可留空）" }
                     input id="idea-title" name="title" maxlength="240" placeholder="系统会从第一句话生成";
                     label for="idea-body" { "现在想到什么？" }
-                    textarea id="idea-body" name="body" rows="8" required autofocus
+                    textarea id="idea-body" name="body" rows="8" autofocus
                         placeholder="例如：如果每个科研目标都能展开成可审查的独立枝干，我就能知道是技术不可行，还是还有遗漏。" {}
+                    label for="idea-file" { "也可以直接从文件、图片或语音开始（可选）" }
+                    input id="idea-file" name="file" type="file"
+                        accept="image/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
                     div class="intake-hints" {
                         span { "✦ 不要求立即立项" }
                         span { "✦ 未知可以一直保留" }
-                        span { "✦ 文件、图片和语音随后可追加" }
+                        span { "✦ 文件、图片和语音可直接开始" }
                     }
                     button class="button button--primary button--large" type="submit" { "保留这个想法" span aria-hidden="true" { "→" } }
                 }
@@ -284,16 +287,52 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
         div class="idea-detail-layout" {
             main {
                 section class="idea-detail-section" {
+                    div class="section-heading" { div { span class="eyebrow" { "SOURCE MATERIALS" } h2 { "文件、图片与语音来源" } } span class="section-count" { (snapshot.sources.len()) } }
+                    @if !snapshot.sources.is_empty() {
+                        div class="idea-source-grid" {
+                            @for source in &snapshot.sources {
+                                article class=(format!("idea-source-card idea-source-card--{}", source.kind)) {
+                                    @if source.kind == "image" {
+                                        img src=(format!("/api/v1/ideas/{}/sources/{}/content", snapshot.idea.id, source.id))
+                                            alt=(source.display_name.as_str()) loading="lazy";
+                                    } @else if source.kind == "audio" {
+                                        div class="idea-source-card__audio" { span aria-hidden="true" { "◖))" } audio controls preload="metadata"
+                                            src=(format!("/api/v1/ideas/{}/sources/{}/content", snapshot.idea.id, source.id)) {} }
+                                    } @else {
+                                        div class="idea-source-card__file" aria-hidden="true" { "FILE" }
+                                    }
+                                    div {
+                                        strong { (&source.display_name) }
+                                        small { (&source.trusted_media_type) " · " (source.size_bytes) " B" }
+                                        @if !source.note.is_empty() { p { (&source.note) } }
+                                        a href=(format!("/api/v1/ideas/{}/sources/{}/content", snapshot.idea.id, source.id)) target="_blank" { "打开原文件 →" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    form class="idea-source-upload" data-idea-source-upload=""
+                        data-idea-id=(snapshot.idea.id) data-idea-revision=(snapshot.idea.current_revision) {
+                        label { "追加来源"
+                            input name="file" type="file" required
+                                accept="image/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
+                        }
+                        label { "这份材料说明什么？（可选）" input name="note" maxlength="4000"; }
+                        button class="button button--secondary" type="submit" { "验证并附加" }
+                        output data-idea-source-status="" aria-live="polite" {}
+                    }
+                }
+                section class="idea-detail-section" {
                     div class="section-heading" { div { span class="eyebrow" { "PROJECT PROPOSALS" } h2 { "从想法形成项目" } } span class="section-count" { (snapshot.proposals.len()) } }
                     @if snapshot.proposals.is_empty() {
                         article class="idea-explainer" {
                             strong { "立项不是复制粘贴" }
                             p { "先明确现在为什么值得做、第一条根目标如何验证，以及哪些想法内容这次暂不采用。提交后仍需你批准，批准才会原子创建项目和根 BranchProposal 草案。" }
                         }
-                        (project_proposal_form(snapshot.idea.id, current, None))
+                        (project_proposal_form(snapshot.idea.id, current, all_ideas, &[], None))
                     } @else {
                         @for proposal in &snapshot.proposals {
-                            (project_proposal_card(snapshot, current, proposal))
+                            (project_proposal_card(snapshot, current, all_ideas, proposal))
                         }
                     }
                 }
@@ -376,6 +415,7 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
 fn project_proposal_card(
     snapshot: &IdeaSnapshot,
     current_idea: &IdeaRevisionRecord,
+    all_ideas: &[IdeaSummary],
     proposal: &ProjectProposalRecord,
 ) -> Markup {
     let revision = snapshot
@@ -392,6 +432,16 @@ fn project_proposal_card(
         .and_then(|value| value.get("desiredOutcome"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("根目标内容缺失");
+    let selected_source_ids = snapshot
+        .proposal_sources
+        .iter()
+        .filter(|source| {
+            source.proposal_id == proposal.id
+                && source.proposal_revision == proposal.current_revision
+                && source.idea_id != snapshot.idea.id
+        })
+        .map(|source| source.idea_id)
+        .collect::<Vec<_>>();
     html! {
         article class="project-proposal-card" data-project-proposal-id=(proposal.id) {
             header {
@@ -422,7 +472,7 @@ fn project_proposal_card(
                     }
                     details class="project-proposal-revise" {
                         summary { "继续修订提案" }
-                        (project_proposal_form(snapshot.idea.id, current_idea, Some((proposal, revision))))
+                        (project_proposal_form(snapshot.idea.id, current_idea, all_ideas, &selected_source_ids, Some((proposal, revision))))
                     }
                 } @else if proposal.status == "awaiting_approval" {
                     form method="post" action="/ideas/commands" {
@@ -435,7 +485,7 @@ fn project_proposal_card(
                     }
                     details class="project-proposal-revise" {
                         summary { "修改后再审" }
-                        (project_proposal_form(snapshot.idea.id, current_idea, Some((proposal, revision))))
+                        (project_proposal_form(snapshot.idea.id, current_idea, all_ideas, &selected_source_ids, Some((proposal, revision))))
                     }
                     details class="proposal-reject" {
                         summary { "退回这项提案" }
@@ -463,6 +513,8 @@ fn project_proposal_card(
 fn project_proposal_form(
     idea_id: Uuid,
     idea_revision: &IdeaRevisionRecord,
+    all_ideas: &[IdeaSummary],
+    selected_source_ids: &[Uuid],
     existing: Option<(&ProjectProposalRecord, &ProjectProposalRevisionRecord)>,
 ) -> Markup {
     let proposal = existing.map(|item| item.0);
@@ -538,6 +590,19 @@ fn project_proposal_form(
                     label { "这次保留的想法内容" textarea name="retained_notes" rows="2" { (revision.map(|item| item.retained_notes.0.join("\n")).unwrap_or_default()) } }
                     label { "这次暂不采用的内容" textarea name="omitted_notes" rows="2" { (revision.map(|item| item.omitted_notes.0.join("\n")).unwrap_or_default()) } }
                     label { "AI 推断（非用户事实）" textarea name="inferences" rows="2" { (root_lines("inferences")) } }
+                }
+                @if all_ideas.iter().any(|idea| idea.id != idea_id) {
+                    fieldset class="proposal-source-selector" data-proposal-source-selector="" {
+                        legend { "同时引用其他想法（按需）" }
+                        input type="hidden" name="additional_sources" value="" data-proposal-sources-value="";
+                        @for idea in all_ideas.iter().filter(|idea| idea.id != idea_id) {
+                            label {
+                                input type="checkbox" value=(format!("{}@{}", idea.id, idea.current_revision))
+                                    data-proposal-source="" checked[selected_source_ids.contains(&idea.id)];
+                                span { strong { (&idea.title) } small { "v" (idea.current_revision) " · 作为支持来源" } }
+                            }
+                        }
+                    }
                 }
                 @if proposal.is_some() {
                     label { "本次修订理由" textarea name="revision_reason" rows="2" required {} }

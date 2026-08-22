@@ -61,6 +61,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/ideas/{idea_id}", get(handlers::api_idea_snapshot))
         .route(
+            "/api/v1/ideas/{idea_id}/sources",
+            post(handlers::api_attach_idea_source),
+        )
+        .route(
+            "/api/v1/ideas/{idea_id}/sources/{source_id}/content",
+            get(handlers::api_download_idea_source),
+        )
+        .route(
             "/api/v1/ideas/{idea_id}/commands",
             post(handlers::api_idea_command),
         )

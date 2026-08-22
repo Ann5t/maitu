@@ -12,7 +12,7 @@
     });
   });
 
-  document.querySelectorAll("form:not([data-input-upload])").forEach((form) => {
+  document.querySelectorAll("form:not([data-input-upload]):not([data-idea-source-upload]):not([data-idea-capture])").forEach((form) => {
     form.addEventListener("submit", () => {
       const button = form.querySelector("button[type='submit']");
       if (!button || button.disabled) return;
@@ -71,6 +71,120 @@
     if (!response.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
     return payload;
   };
+
+  const attachIdeaSource = async ({ ideaId, expectedRevision, file, note, status }) => {
+    const setStatus = (message, state = "working") => {
+      if (!status) return;
+      status.textContent = message;
+      status.dataset.state = state;
+    };
+    setStatus("计算摘要并验证来源…");
+    const buffer = await file.arrayBuffer();
+    const digest = await sha256(buffer);
+    const query = new URLSearchParams({
+      clientRequestId: requestId(),
+      expectedRevision: String(expectedRevision),
+      filename: file.name,
+      declaredMediaType: file.type || "application/octet-stream",
+    });
+    if (digest) query.set("expectedSha256", digest);
+    if (note?.trim()) query.set("note", note.trim());
+    const attached = await jsonRequest(`/api/v1/ideas/${ideaId}/sources?${query}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: buffer,
+    });
+    setStatus(`完成：${attached.source.displayName} 已进入想法 v${attached.ideaRevision}`, "success");
+    return attached;
+  };
+
+  document.querySelectorAll("[data-proposal-source-selector]").forEach((selector) => {
+    const form = selector.closest("form");
+    form?.addEventListener("submit", () => {
+      const selected = [...selector.querySelectorAll("[data-proposal-source]:checked")]
+        .map((input) => input.value);
+      const target = selector.querySelector("[data-proposal-sources-value]");
+      if (target) target.value = JSON.stringify(selected);
+    });
+  });
+
+  document.querySelectorAll("[data-idea-capture]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      const file = form.elements.file?.files?.[0];
+      if (!file) {
+        const button = form.querySelector("button[type='submit']");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "处理中…";
+        }
+        return;
+      }
+      event.preventDefault();
+      const button = form.querySelector("button[type='submit']");
+      button.disabled = true;
+      try {
+        const title = form.elements.title?.value?.trim() || file.name;
+        const body = form.elements.body?.value?.trim() || `由文件开始：${file.name}`;
+        const created = await jsonRequest("/api/v1/ideas", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            clientRequestId: requestId(),
+            action: "idea.create",
+            payload: {
+              revision: {
+                title,
+                body,
+                sourceKind: "text",
+                sourceRef: null,
+                revisionReason: null,
+              },
+            },
+          }),
+        });
+        const ideaId = created.result.ideaId;
+        await attachIdeaSource({
+          ideaId,
+          expectedRevision: created.result.revision,
+          file,
+          note: form.elements.body?.value || "",
+          status: null,
+        });
+        window.location.assign(`/ideas/${ideaId}?notice=${encodeURIComponent("文件已验证并形成想法来源")}`);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "保留这个想法";
+        window.alert(error instanceof Error ? error.message : "想法来源上传失败");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-idea-source-upload]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = form.elements.file?.files?.[0];
+      if (!file) return;
+      const button = form.querySelector("button[type='submit']");
+      const status = form.querySelector("[data-idea-source-status]");
+      button.disabled = true;
+      try {
+        await attachIdeaSource({
+          ideaId: form.dataset.ideaId,
+          expectedRevision: form.dataset.ideaRevision,
+          file,
+          note: form.elements.note?.value || "",
+          status,
+        });
+        const location = new URL(window.location.href);
+        location.searchParams.set("notice", "来源已校验并附加");
+        window.setTimeout(() => window.location.assign(location), 350);
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : "来源附加失败";
+        status.dataset.state = "error";
+        button.disabled = false;
+      }
+    });
+  });
 
   document.querySelectorAll("[data-input-upload]").forEach((form) => {
     form.addEventListener("submit", async (event) => {

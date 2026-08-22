@@ -684,11 +684,35 @@ textarea::placeholder, input::placeholder { color: var(--faint); }
 .idea-explainer { margin-bottom: 12px; border-left: 4px solid var(--acid); border-radius: 10px; background: var(--panel); padding: 15px; }
 .idea-explainer strong { font-size: 15px; }
 .idea-explainer p { margin: 5px 0 0; color: var(--soft); font-size: 14px; line-height: 1.65; }
+.idea-source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+.idea-source-card { display: grid; min-width: 0; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 10px; }
+.idea-source-card > img { width: 96px; height: 76px; border-radius: 8px; background: var(--paper); object-fit: cover; }
+.idea-source-card__file, .idea-source-card__audio { display: grid; width: 96px; height: 76px; place-items: center; border-radius: 8px; background: var(--violet-soft); color: var(--violet-ink); font-size: 12px; font-weight: 800; }
+.idea-source-card__audio { background: var(--good); color: var(--good-ink); }
+.idea-source-card__audio audio { width: 86px; height: 34px; }
+.idea-source-card > div:last-child { display: grid; min-width: 0; gap: 4px; }
+.idea-source-card strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.idea-source-card small { color: var(--faint); font-size: 12px; }
+.idea-source-card p { margin: 2px 0; color: var(--soft); font-size: 13px; line-height: 1.5; }
+.idea-source-card a { color: var(--lime-ink); font-size: 13px; font-weight: 700; }
+.idea-source-upload { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.4fr) auto; gap: 8px; align-items: end; border: 1px dashed var(--line-strong); border-radius: 12px; background: color-mix(in srgb, var(--panel) 55%, transparent); padding: 12px; }
+.idea-source-upload label { display: grid; min-width: 0; gap: 5px; color: var(--soft); font-size: 13px; font-weight: 680; }
+.idea-source-upload input { min-height: 42px; font-size: 13px; }
+.idea-source-upload output { grid-column: 1 / -1; min-height: 20px; color: var(--soft); font-size: 13px; }
+.idea-source-upload output[data-state="success"] { color: var(--good-ink); }
+.idea-source-upload output[data-state="error"] { color: var(--danger-ink); }
 .project-proposal-form, .idea-revision-form { display: grid; min-width: 0; gap: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 17px; }
 .project-proposal-form label, .idea-revision-form label, .idea-inline-form label, .proposal-reject label { display: grid; min-width: 0; gap: 5px; color: var(--soft); font-size: 13px; font-weight: 680; }
 .project-proposal-form input, .project-proposal-form textarea, .project-proposal-form select,
 .idea-revision-form input, .idea-revision-form textarea, .idea-inline-form input, .idea-inline-form select,
 .proposal-reject textarea { width: 100%; min-width: 0; min-height: 42px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 9px 10px; font-size: 14px; line-height: 1.5; }
+.proposal-source-selector { display: grid; gap: 7px; margin: 0; border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+.proposal-source-selector legend { padding: 0 5px; color: var(--soft); font-size: 13px; font-weight: 700; }
+.proposal-source-selector label { display: flex; min-height: 42px; align-items: center; gap: 9px; border-radius: 8px; background: var(--paper); padding: 8px 10px; }
+.proposal-source-selector input[type="checkbox"] { width: 18px; min-height: 18px; flex: 0 0 auto; padding: 0; }
+.proposal-source-selector span { display: grid; gap: 1px; }
+.proposal-source-selector strong { color: var(--ink); font-size: 13px; }
+.proposal-source-selector small { color: var(--faint); font-size: 12px; }
 .project-proposal-card { display: grid; gap: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--panel); padding: 17px; }
 .project-proposal-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--faint); font-size: 12px; }
 .project-proposal-card h3 { margin: 0; font-size: 20px; }
@@ -773,6 +797,8 @@ textarea::placeholder, input::placeholder { color: var(--faint); }
   .idea-history-panel { position: static; }
   .idea-inline-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .idea-inline-form__wide { grid-column: 1 / -1; }
+  .idea-source-upload { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .idea-source-upload .button { grid-column: 1 / -1; }
 }
 
 @media (max-width: 620px) {
@@ -795,6 +821,8 @@ textarea::placeholder, input::placeholder { color: var(--faint); }
   .idea-card h2 { font-size: 18px; }
   .idea-detail-head > p { font-size: 15px; }
   .idea-inline-form { grid-template-columns: 1fr; }
+  .idea-source-grid, .idea-source-upload { grid-template-columns: 1fr; }
+  .idea-source-upload .button { grid-column: auto; width: 100%; }
   .idea-inline-form__wide { grid-column: auto; }
   .project-proposal-form, .idea-history-panel { padding: 13px; }
   .project-card { min-height: 220px; }

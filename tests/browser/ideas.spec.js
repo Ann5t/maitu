@@ -14,26 +14,45 @@ async function noHorizontalOverflow(page) {
 }
 
 test('idea revisions, relationships and ProjectProposal promotion work on three sizes', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('/ideas/new');
   await page.getByLabel('标题（可留空）').fill('科研目标枝干');
   await page.getByLabel('现在想到什么？').fill('把科研目标展开成可审查的独立枝干，并保留未知与反例。');
+  await page.getByLabel('也可以直接从文件、图片或语音开始（可选）').setInputFiles({
+    name: 'research-board.png',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  });
   await page.getByRole('button', { name: '保留这个想法' }).click();
-  const firstIdeaURL = page.url();
   await expect(page.getByRole('heading', { name: '科研目标枝干' })).toBeVisible();
+  await expect(page.locator('.idea-source-card--image')).toContainText('research-board.png');
+  const firstIdeaURL = page.url();
 
   const revision = page.locator('.idea-revision-form');
   await revision.getByLabel('内容').fill('把科研目标展开成可审查的独立枝干，并在移动设备查看工作现场。');
   await revision.getByLabel('这次为什么改变？').fill('补充移动工作现场');
-  await revision.getByRole('button', { name: '保存为 v2' }).click();
-  await expect(page.locator('.idea-version-list')).toContainText('v2');
+  await revision.getByRole('button', { name: '保存为 v3' }).click();
+  await expect(page.locator('.idea-version-list')).toContainText('v3');
 
   await page.goto('/ideas/new');
   await page.getByLabel('标题（可留空）').fill('证据驱动审核');
   await page.getByLabel('现在想到什么？').fill('每次拟合并都冻结证据并由独立审核检查反例。');
   await page.getByRole('button', { name: '保留这个想法' }).click();
   await expect(page.getByRole('heading', { name: '证据驱动审核' })).toBeVisible();
+  const sourceUpload = page.locator('[data-idea-source-upload]');
+  await sourceUpload.getByLabel('追加来源').setInputFiles({
+    name: 'train-note.mp3',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('ID3\x04\x00\x00voice insight'),
+  });
+  await sourceUpload.getByLabel('这份材料说明什么？（可选）').fill('高铁上的语音灵感');
+  await sourceUpload.getByRole('button', { name: '验证并附加' }).click();
+  await expect(sourceUpload.locator('[data-idea-source-status]')).toHaveAttribute('data-state', 'success');
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.idea-source-card--audio')).toContainText('train-note.mp3');
 
   await page.goto(firstIdeaURL);
+  await expect(page.getByLabel('关联到')).toBeVisible();
   const relatedIdeaValue = await page
     .getByLabel('关联到')
     .locator('option')
@@ -54,6 +73,8 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await proposal.getByLabel('何时完成或停止（每行一项）').fill('用户接受候选或明确停止');
   await proposal.getByLabel('仍然不知道什么？').fill('最终图布局手感');
   await proposal.getByLabel('何时回来请你凭感觉判断？').fill('完成三尺寸可操作候选后');
+  await proposal.locator('.goal-form-advanced > summary').click();
+  await proposal.getByLabel(/证据驱动审核/).check();
   await proposal.getByRole('button', { name: '建立 ProjectProposal 草案' }).click();
 
   const proposalCard = page.locator('.project-proposal-card');

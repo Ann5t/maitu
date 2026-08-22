@@ -45,6 +45,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -59,6 +62,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
@@ -93,6 +99,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0005_ideas_and_project_proposals.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -123,7 +132,8 @@ migration_idea_table_count="$(docker exec "$migration_container" \
    WHERE table_schema = 'public' AND table_name IN (
      'ideas', 'idea_revisions', 'idea_links', 'project_proposals',
      'project_proposal_revisions', 'project_proposal_revision_ideas',
-     'project_origins', 'project_origin_ideas', 'idea_command_receipts', 'idea_events'
+     'project_origins', 'project_origin_ideas', 'idea_command_receipts', 'idea_events',
+     'idea_source_objects', 'idea_revision_sources'
    )")"
 
 if [[ "$migration_counts_before" != "$migration_counts_after" ]]; then
@@ -142,8 +152,8 @@ if [[ "$migration_input_table_count" != 2 ]]; then
   echo "expected 2 input tables, found $migration_input_table_count" >&2
   exit 1
 fi
-if [[ "$migration_idea_table_count" != 10 ]]; then
-  echo "expected 10 idea/project-origin tables, found $migration_idea_table_count" >&2
+if [[ "$migration_idea_table_count" != 12 ]]; then
+  echo "expected 12 idea/project-origin tables, found $migration_idea_table_count" >&2
   exit 1
 fi
 

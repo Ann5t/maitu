@@ -23,6 +23,17 @@ pub struct IdeaCommandRequest {
     pub payload: Value,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachIdeaSourceQuery {
+    pub client_request_id: Uuid,
+    pub expected_revision: i32,
+    pub filename: String,
+    pub declared_media_type: Option<String>,
+    pub expected_sha256: Option<String>,
+    pub note: Option<String>,
+}
+
 impl IdeaCommandRequest {
     pub fn identity(&self, subject_id: Option<Uuid>) -> AppResult<CommandReceiptIdentity> {
         CommandReceiptIdentity::from_input(

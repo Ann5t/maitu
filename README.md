@@ -9,7 +9,7 @@
 ## 已实现
 
 - 项目列表、项目创建和原始意图修订
-- 独立“想法”一级空间、不可变版本/关系，以及人工批准的 ProjectProposal 立项来源
+- 独立“想法”一级空间、不可变版本/关系、内容寻址文件/图片/语音，以及人工批准的 ProjectProposal 立项来源
 - 成果契约确认，以及可核验的完成标准
 - 项目启动说明的生成、哈希存储、审阅和批准
 - 项目 DAG：开分支、记录带类型的贡献、暂停、选择性合流
@@ -127,6 +127,7 @@ assets/                      CSS、渐进增强脚本和图标
 | `GET` | `/ideas/:id` | 想法版本、关系与立项工作区 |
 | `GET/POST` | `/api/v1/ideas` | 想法摘要与幂等创建 |
 | `POST` | `/api/v1/ideas/:id/commands` | 想法修订、关联及建立 ProjectProposal |
+| `POST/GET` | `/api/v1/ideas/:id/sources[/:source_id/content]` | 校验附加或读取想法来源 |
 | `POST` | `/api/v1/project-proposals/:id/commands` | 立项提案修订与人工决定 |
 | `GET` | `/projects/:id` | 项目工作区 |
 | `POST` | `/projects/:id/actions` | 成果契约与产物动作 |

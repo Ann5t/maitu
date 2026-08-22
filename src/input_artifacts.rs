@@ -174,6 +174,22 @@ pub fn safe_storage_path(root: &Path, storage_key: &str) -> AppResult<PathBuf> {
 pub fn sniff_media_type(prefix: &[u8]) -> &'static str {
     if prefix.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"
+    } else if prefix.starts_with(&[0xff, 0xd8, 0xff]) {
+        "image/jpeg"
+    } else if prefix.starts_with(b"GIF87a") || prefix.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if prefix.len() >= 12 && &prefix[..4] == b"RIFF" && &prefix[8..12] == b"WEBP" {
+        "image/webp"
+    } else if prefix.len() >= 12 && &prefix[..4] == b"RIFF" && &prefix[8..12] == b"WAVE" {
+        "audio/wav"
+    } else if prefix.starts_with(b"ID3")
+        || (prefix.len() >= 2 && prefix[0] == 0xff && prefix[1] & 0xe0 == 0xe0)
+    {
+        "audio/mpeg"
+    } else if prefix.starts_with(b"OggS") {
+        "audio/ogg"
+    } else if prefix.len() >= 12 && &prefix[4..8] == b"ftyp" {
+        "audio/mp4"
     } else if prefix.starts_with(b"%PDF-") {
         "application/pdf"
     } else if prefix.starts_with(b"PK\x03\x04")
@@ -273,6 +289,8 @@ mod tests {
     fn media_sniffing_does_not_trust_the_extension() {
         assert_eq!(sniff_media_type(b"\x89PNG\r\n\x1a\nrest"), "image/png");
         assert_eq!(sniff_media_type(b"{\"safe\":true}"), "application/json");
+        assert_eq!(sniff_media_type(b"ID3\x04\0\0voice"), "audio/mpeg");
+        assert_eq!(sniff_media_type(b"\xff\xd8\xff\xe0photo"), "image/jpeg");
         assert_eq!(
             sniff_media_type(&[0xff, 0x00, 0x12]),
             "application/octet-stream"

@@ -35,7 +35,7 @@ Axum 路由与传输适配
 
 Rust 版本直接读取当前 `fudian-nextgen` 的 14 张业务表，不引入第二套影子数据。基线迁移使用 `CREATE TABLE IF NOT EXISTS`、受控的约束补全和幂等索引，因此既能初始化空库，也能接管已有库。
 
-`0002_goal_branch_core.sql` 以只增不减方式添加新 `goal_` 聚合，`0003_tooling_core.sql` 添加插件/环境/工具审计，`0004_input_artifacts.sql` 添加 Session 输入，`0005_ideas_and_project_proposals.sql` 添加想法、立项提案和精确项目来源。旧 DAG 与新 GoalBranch 并存，应用不会把旧节点自动重解释为 Session。
+`0002_goal_branch_core.sql` 以只增不减方式添加新 `goal_` 聚合，`0003_tooling_core.sql` 添加插件/环境/工具审计，`0004_input_artifacts.sql` 添加 Session 输入，`0005_ideas_and_project_proposals.sql` 添加想法、立项提案和精确项目来源，`0006_idea_sources.sql` 添加内容寻址的文件/图片/语音来源。旧 DAG 与新 GoalBranch 并存，应用不会把旧节点自动重解释为 Session。
 
 已有的 `0001_initial.sql`、`0002_project_evolution_graph.sql`、`0003_selective_branch_merges.sql` 迁移记录会保留；Rust 基线以 `0001_rust_baseline.sql` 单独登记。该记录代表 Rust 已确认数据库具备所需结构，不代表重建或复制已有数据。
 
@@ -85,6 +85,6 @@ Rust 版本直接读取当前 `fudian-nextgen` 的 14 张业务表，不引入�
 2. 对空库、迁移 SQL 重放和带旧 DAG fixture 的数据库验证只增不减迁移；
 3. 分别通过真实 HTTP 跑通想法立项、目标枝干、插件环境、文件输入和结构化工作台流程；
 4. 在固定 Playwright 容器中用真实 Chromium 验证 1440px、820px、390px、上传、立项和完整审核；
-5. 构建 runtime 镜像，以 UID 1000、只读根文件系统、随机 `127.0.0.1` 端口和一次性 PostgreSQL 启动，再验证健康、静态资源、5 个迁移和隔离写入。
+5. 构建 runtime 镜像，以 UID 1000、只读根文件系统、随机 `127.0.0.1` 端口和一次性 PostgreSQL 启动，再验证健康、静态资源、6 个迁移和隔离写入。
 
 `.github/workflows/ci.yml` 不另造一套 CI 特例，而是直接运行该入口。测试脚本按唯一进程后缀命名容器和网络，并用 `trap` 清理；任何失败都会保留应用日志，但不会连接 `fudian_nextgen_postgres_data` 或 `fudian_nextgen_artifacts`。

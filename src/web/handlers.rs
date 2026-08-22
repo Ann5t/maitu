@@ -22,7 +22,7 @@ use crate::{
         contribution_kind_label,
     },
     error::{AppError, AppResult},
-    idea_domain::IdeaCommandRequest,
+    idea_domain::{AttachIdeaSourceQuery, IdeaCommandRequest},
     input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
     tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
 };
@@ -85,6 +85,7 @@ pub struct IdeaCommandForm {
     pub omitted_notes: Option<String>,
     pub source_idea_id: Option<Uuid>,
     pub source_idea_revision: Option<i32>,
+    pub additional_sources: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,6 +292,40 @@ fn idea_form_payload(form: &IdeaCommandForm) -> AppResult<Value> {
         let idea_revision = form
             .source_idea_revision
             .ok_or_else(|| AppError::bad_request("missing_idea_revision", "缺少起始想法版本"))?;
+        let mut sources = vec![json!({
+            "ideaId": idea_id,
+            "ideaRevision": idea_revision,
+            "role": "source",
+            "rationale": "当前想法是立项来源",
+        })];
+        if let Some(encoded) = form
+            .additional_sources
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let references: Vec<String> = serde_json::from_str(encoded).map_err(|_| {
+                AppError::bad_request("invalid_additional_sources", "附加想法来源格式不正确")
+            })?;
+            for reference in references {
+                let (source_id, source_revision) = reference.split_once('@').ok_or_else(|| {
+                    AppError::bad_request("invalid_additional_sources", "附加想法来源缺少版本")
+                })?;
+                let source_id = Uuid::parse_str(source_id).map_err(|_| {
+                    AppError::bad_request("invalid_additional_sources", "附加想法 ID 不正确")
+                })?;
+                let source_revision = source_revision.parse::<i32>().map_err(|_| {
+                    AppError::bad_request("invalid_additional_sources", "附加想法版本不正确")
+                })?;
+                if source_id != idea_id {
+                    sources.push(json!({
+                        "ideaId": source_id,
+                        "ideaRevision": source_revision,
+                        "role": "supporting",
+                        "rationale": "用户在立项编辑器中选为支持来源",
+                    }));
+                }
+            }
+        }
         Ok(json!({
             "title": form.title.clone().unwrap_or_default(),
             "projectIntent": form.project_intent.clone().unwrap_or_default(),
@@ -317,12 +352,7 @@ fn idea_form_payload(form: &IdeaCommandForm) -> AppResult<Value> {
             },
             "retainedNotes": lines(&form.retained_notes),
             "omittedNotes": lines(&form.omitted_notes),
-            "sources": [{
-                "ideaId": idea_id,
-                "ideaRevision": idea_revision,
-                "role": "source",
-                "rationale": "当前想法是立项来源",
-            }],
+            "sources": sources,
             "revisionReason": form.revision_reason.clone().filter(|value| !value.trim().is_empty()),
         }))
     };
@@ -863,6 +893,63 @@ pub async fn api_idea_snapshot(
 ) -> AppResult<Json<Value>> {
     let snapshot = ideas::get_snapshot(&state.pool, idea_id).await?;
     Ok(Json(serde_json::to_value(snapshot)?))
+}
+
+pub async fn api_attach_idea_source(
+    State(state): State<Arc<AppState>>,
+    Path(idea_id): Path<Uuid>,
+    Query(query): Query<AttachIdeaSourceQuery>,
+    body: Body,
+) -> AppResult<Json<Value>> {
+    let limit = usize::try_from(state.config.input_max_bytes).unwrap_or(usize::MAX);
+    let bytes = to_bytes(body, limit).await.map_err(|_| {
+        AppError::bad_request(
+            "upload_too_large",
+            format!("单个想法来源不能超过 {} 字节", state.config.input_max_bytes),
+        )
+    })?;
+    let response = ideas::attach_source(
+        &state.pool,
+        &state.config.artifact_root,
+        state.config.input_max_bytes,
+        idea_id,
+        query,
+        bytes.to_vec(),
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_download_idea_source(
+    State(state): State<Arc<AppState>>,
+    Path((idea_id, source_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<(HeaderMap, Vec<u8>)> {
+    let (source, bytes) =
+        ideas::read_source(&state.pool, &state.config.artifact_root, idea_id, source_id).await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&source.trusted_media_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "inline; filename*=UTF-8''{}",
+            urlencoding::encode(&source.display_name)
+        ))
+        .map_err(|_| AppError::internal("想法来源文件名无法用于响应"))?,
+    );
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(&format!("\"{}\"", source.sha256))
+            .map_err(|_| AppError::internal("想法来源摘要不合法"))?,
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    Ok((headers, bytes))
 }
 
 pub async fn api_idea_command(

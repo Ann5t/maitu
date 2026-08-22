@@ -1,6 +1,13 @@
+use std::{io::ErrorKind, path::Path};
+
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool, Postgres, Transaction, types::Json};
+use tokio::{
+    fs::{self, OpenOptions},
+    io::AsyncWriteExt,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -8,12 +15,17 @@ use crate::{
     domain::ProjectIntake,
     error::{AppError, AppResult},
     idea_domain::{
-        IdeaCommandRequest, IdeaRevisionDraft, ProjectProposalRevisionDraft, ProjectProposalStatus,
-        clean_required, validate_idea_relation,
+        AttachIdeaSourceQuery, IdeaCommandRequest, IdeaRevisionDraft, ProjectProposalRevisionDraft,
+        ProjectProposalStatus, clean_required, validate_idea_relation,
     },
     idea_models::{
-        IdeaEventRecord, IdeaLinkView, IdeaRecord, IdeaRevisionRecord, IdeaSnapshot, IdeaSummary,
-        ProjectProposalIdeaRecord, ProjectProposalRecord, ProjectProposalRevisionRecord,
+        IdeaEventRecord, IdeaLinkView, IdeaRecord, IdeaRevisionRecord, IdeaRevisionSourceRecord,
+        IdeaSnapshot, IdeaSourceRecord, IdeaSummary, ProjectProposalIdeaRecord,
+        ProjectProposalRecord, ProjectProposalRevisionRecord,
+    },
+    input_artifacts::{
+        normalize_bare_sha256, normalize_declared_media_type, normalize_upload_name,
+        safe_storage_path, sniff_media_type,
     },
 };
 
@@ -24,6 +36,14 @@ type IdeaTransaction<'a> = Transaction<'a, Postgres>;
 pub struct IdeaCommandResponse {
     pub replayed: bool,
     pub result: Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeaSourceResponse {
+    pub replayed: bool,
+    pub idea_revision: i32,
+    pub source: IdeaSourceRecord,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +165,19 @@ pub async fn get_snapshot(pool: &PgPool, idea_id: Uuid) -> AppResult<IdeaSnapsho
     .bind(idea_id)
     .fetch_all(pool)
     .await?;
+    let sources = sqlx::query_as::<_, IdeaSourceRecord>(
+        "SELECT * FROM idea_source_objects WHERE idea_id = $1 ORDER BY created_at DESC, id",
+    )
+    .bind(idea_id)
+    .fetch_all(pool)
+    .await?;
+    let revision_sources = sqlx::query_as::<_, IdeaRevisionSourceRecord>(
+        "SELECT * FROM idea_revision_sources WHERE idea_id = $1 \
+         ORDER BY idea_revision DESC, created_at, source_id",
+    )
+    .bind(idea_id)
+    .fetch_all(pool)
+    .await?;
     let links = sqlx::query_as::<_, IdeaLinkView>(
         "SELECT l.*, sr.title AS source_title, tr.title AS target_title \
          FROM idea_links l \
@@ -205,12 +238,221 @@ pub async fn get_snapshot(pool: &PgPool, idea_id: Uuid) -> AppResult<IdeaSnapsho
         model_version: "idea-project/v1",
         idea,
         revisions,
+        sources,
+        revision_sources,
         links,
         proposals,
         proposal_revisions,
         proposal_sources,
         events,
     })
+}
+
+pub async fn attach_source(
+    pool: &PgPool,
+    artifact_root: &Path,
+    input_max_bytes: u64,
+    idea_id: Uuid,
+    query: AttachIdeaSourceQuery,
+    bytes: Vec<u8>,
+) -> AppResult<IdeaSourceResponse> {
+    if bytes.is_empty() {
+        return Err(AppError::bad_request(
+            "empty_idea_source",
+            "想法来源文件不能为空",
+        ));
+    }
+    if bytes.len() as u64 > input_max_bytes || bytes.len() > i64::MAX as usize {
+        return Err(AppError::bad_request(
+            "upload_too_large",
+            format!("单个想法来源不能超过 {input_max_bytes} 字节"),
+        ));
+    }
+    let (original_filename, display_name) = normalize_upload_name(query.filename)?;
+    let declared_media_type = normalize_declared_media_type(query.declared_media_type)?;
+    let sha256 = hex::encode(Sha256::digest(&bytes));
+    if let Some(expected) = query
+        .expected_sha256
+        .map(normalize_bare_sha256)
+        .transpose()?
+        && expected != sha256
+    {
+        return Err(AppError::bad_request(
+            "artifact_hash_mismatch",
+            "想法来源的 SHA-256 与请求声明不一致",
+        ));
+    }
+    let trusted_media_type = sniff_media_type(&bytes[..bytes.len().min(8_192)]).to_owned();
+    let kind = if trusted_media_type.starts_with("image/") {
+        "image"
+    } else if trusted_media_type.starts_with("audio/") {
+        "audio"
+    } else {
+        "file"
+    };
+    let note = query.note.unwrap_or_default().trim().to_owned();
+    if note.chars().count() > 4_000 {
+        return Err(AppError::bad_request(
+            "text_too_long",
+            "来源说明不能超过 4000 个字符",
+        ));
+    }
+    let request_hash = crate::goal_domain::canonical_json_sha256(&json!({
+        "ideaId": idea_id,
+        "expectedRevision": query.expected_revision,
+        "filename": original_filename,
+        "declaredMediaType": declared_media_type,
+        "sha256": sha256,
+        "note": note,
+    }))?;
+    let storage_key = format!("objects/sha256/{}/{}", &sha256[..2], sha256);
+    write_content_object(artifact_root, &storage_key, &sha256, &bytes).await?;
+
+    let mut transaction = pool.begin().await?;
+    let idea = lock_idea(&mut transaction, idea_id).await?;
+    if let Some(existing) = sqlx::query_as::<_, IdeaSourceRecord>(
+        "SELECT * FROM idea_source_objects WHERE idea_id = $1 AND client_request_id = $2",
+    )
+    .bind(idea_id)
+    .bind(query.client_request_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    {
+        crate::goal_domain::CommandReceiptIdentity {
+            command_kind: "idea.source.attach".into(),
+            input_hash: existing.request_hash.clone(),
+        }
+        .ensure_replay_matches(&crate::goal_domain::CommandReceiptIdentity {
+            command_kind: "idea.source.attach".into(),
+            input_hash: request_hash,
+        })?;
+        let attached_revision: i32 = sqlx::query_scalar(
+            "SELECT min(idea_revision) FROM idea_revision_sources \
+             WHERE idea_id = $1 AND source_id = $2",
+        )
+        .bind(idea_id)
+        .bind(existing.id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        return Ok(IdeaSourceResponse {
+            replayed: true,
+            idea_revision: attached_revision,
+            source: existing,
+        });
+    }
+    if idea.state == "archived" {
+        return Err(AppError::conflict(
+            "idea_archived",
+            "已归档想法不能再附加来源",
+        ));
+    }
+    ensure_revision(idea.current_revision, query.expected_revision)?;
+    let current = sqlx::query_as::<_, IdeaRevisionRecord>(
+        "SELECT * FROM idea_revisions WHERE idea_id = $1 AND revision = $2",
+    )
+    .bind(idea_id)
+    .bind(idea.current_revision)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let source_id = Uuid::new_v4();
+    let next = idea.current_revision + 1;
+    let source = sqlx::query_as::<_, IdeaSourceRecord>(
+        "INSERT INTO idea_source_objects \
+         (id, idea_id, client_request_id, request_hash, kind, original_filename, \
+          display_name, declared_media_type, trusted_media_type, size_bytes, sha256, \
+          storage_key, note, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'human') \
+         RETURNING *",
+    )
+    .bind(source_id)
+    .bind(idea_id)
+    .bind(query.client_request_id)
+    .bind(&request_hash)
+    .bind(kind)
+    .bind(&original_filename)
+    .bind(&display_name)
+    .bind(&declared_media_type)
+    .bind(&trusted_media_type)
+    .bind(bytes.len() as i64)
+    .bind(&sha256)
+    .bind(&storage_key)
+    .bind(&note)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let revision = IdeaRevisionDraft {
+        title: current.title,
+        body: current.body,
+        source_kind: kind.into(),
+        source_ref: Some(format!("idea-source:{source_id}")),
+        revision_reason: Some(format!("附加来源：{display_name}")),
+    }
+    .validate(true)?;
+    insert_idea_revision(&mut transaction, idea_id, next, &revision).await?;
+    copy_revision_sources(&mut transaction, idea_id, idea.current_revision, next).await?;
+    sqlx::query(
+        "INSERT INTO idea_revision_sources \
+         (idea_id, idea_revision, source_id, role) VALUES ($1, $2, $3, 'material')",
+    )
+    .bind(idea_id)
+    .bind(next)
+    .bind(source_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE ideas SET current_revision = $1, \
+         state = CASE WHEN state = 'promoted' THEN state ELSE 'developing' END, \
+         updated_at = now() WHERE id = $2",
+    )
+    .bind(next)
+    .bind(idea_id)
+    .execute(&mut *transaction)
+    .await?;
+    insert_event(
+        &mut transaction,
+        "idea",
+        idea_id,
+        "idea.source_attached",
+        query.client_request_id,
+        json!({
+            "sourceId": source_id,
+            "revision": next,
+            "kind": kind,
+            "sha256": sha256,
+            "trustedMediaType": trusted_media_type,
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(IdeaSourceResponse {
+        replayed: false,
+        idea_revision: next,
+        source,
+    })
+}
+
+pub async fn read_source(
+    pool: &PgPool,
+    artifact_root: &Path,
+    idea_id: Uuid,
+    source_id: Uuid,
+) -> AppResult<(IdeaSourceRecord, Vec<u8>)> {
+    let source = sqlx::query_as::<_, IdeaSourceRecord>(
+        "SELECT * FROM idea_source_objects WHERE id = $1 AND idea_id = $2",
+    )
+    .bind(source_id)
+    .bind(idea_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::not_found("想法来源不存在"))?;
+    let path = safe_storage_path(artifact_root, &source.storage_key)?;
+    let bytes = fs::read(path).await?;
+    if bytes.len() as i64 != source.size_bytes
+        || hex::encode(Sha256::digest(&bytes)) != source.sha256
+    {
+        return Err(AppError::internal("想法来源对象完整性校验失败"));
+    }
+    Ok((source, bytes))
 }
 
 pub async fn run_command(
@@ -413,8 +655,11 @@ async fn revise_idea(
     let revision = input.revision.validate(true)?;
     let next = idea.current_revision + 1;
     insert_idea_revision(transaction, idea_id, next, &revision).await?;
+    copy_revision_sources(transaction, idea_id, idea.current_revision, next).await?;
     sqlx::query(
-        "UPDATE ideas SET current_revision = $1, state = 'developing', updated_at = now() \
+        "UPDATE ideas SET current_revision = $1, \
+         state = CASE WHEN state = 'promoted' THEN state ELSE 'developing' END, \
+         updated_at = now() \
          WHERE id = $2",
     )
     .bind(next)
@@ -952,6 +1197,77 @@ async fn load_proposal_draft(
             .collect(),
         revision_reason: row.revision_reason,
     })
+}
+
+async fn copy_revision_sources(
+    transaction: &mut IdeaTransaction<'_>,
+    idea_id: Uuid,
+    from_revision: i32,
+    to_revision: i32,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO idea_revision_sources \
+         (idea_id, idea_revision, source_id, role) \
+         SELECT idea_id, $1, source_id, role FROM idea_revision_sources \
+         WHERE idea_id = $2 AND idea_revision = $3",
+    )
+    .bind(to_revision)
+    .bind(idea_id)
+    .bind(from_revision)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn write_content_object(
+    artifact_root: &Path,
+    storage_key: &str,
+    expected_sha256: &str,
+    bytes: &[u8],
+) -> AppResult<()> {
+    let object_path = safe_storage_path(artifact_root, storage_key)?;
+    let parent = object_path
+        .parent()
+        .ok_or_else(|| AppError::internal("想法来源对象路径无父目录"))?;
+    fs::create_dir_all(parent).await?;
+    if fs::try_exists(&object_path).await? {
+        let existing = fs::read(&object_path).await?;
+        if hex::encode(Sha256::digest(&existing)) != expected_sha256 {
+            return Err(AppError::conflict(
+                "artifact_hash_mismatch",
+                "同摘要内容对象与实际内容不一致",
+            ));
+        }
+        return Ok(());
+    }
+    let temporary = parent.join(format!(".{expected_sha256}.{}.tmp", Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .await?;
+    file.write_all(bytes).await?;
+    file.flush().await?;
+    drop(file);
+    match fs::hard_link(&temporary, &object_path).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            let existing = fs::read(&object_path).await?;
+            if hex::encode(Sha256::digest(&existing)) != expected_sha256 {
+                let _ = fs::remove_file(&temporary).await;
+                return Err(AppError::conflict(
+                    "artifact_hash_mismatch",
+                    "并发写入的内容对象与摘要不一致",
+                ));
+            }
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temporary).await;
+            return Err(error.into());
+        }
+    }
+    fs::remove_file(&temporary).await?;
+    Ok(())
 }
 
 async fn lock_idea(
