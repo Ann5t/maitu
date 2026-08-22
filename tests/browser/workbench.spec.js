@@ -3,6 +3,34 @@ const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BASE_URL;
 const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/screenshots';
 
+async function renderedFontSize(locator) {
+  return locator.first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+}
+
+async function renderedContrast(locator) {
+  return locator.first().evaluate((element) => {
+    const channels = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const luminance = (value) => {
+      const normalized = channels(value).map((channel) => {
+        const ratio = channel / 255;
+        return ratio <= 0.04045 ? ratio / 12.92 : ((ratio + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * normalized[0] + 0.7152 * normalized[1] + 0.0722 * normalized[2];
+    };
+    let backgroundElement = element;
+    let background = getComputedStyle(backgroundElement).backgroundColor;
+    while (backgroundElement.parentElement && background.endsWith(', 0)')) {
+      backgroundElement = backgroundElement.parentElement;
+      background = getComputedStyle(backgroundElement).backgroundColor;
+    }
+    const foregroundLuminance = luminance(getComputedStyle(element).color);
+    const backgroundLuminance = luminance(background);
+    const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+    const darker = Math.min(foregroundLuminance, backgroundLuminance);
+    return (lighter + 0.05) / (darker + 0.05);
+  });
+}
+
 test.use({
   baseURL,
   viewport: { width: 1440, height: 1000 },
@@ -56,6 +84,15 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await contribution.getByRole('button', { name: '保存可回流产出' }).click();
   await expect(page.locator('.contribution-stack')).toContainText('Chromium 端到端证据');
 
+  expect(await renderedFontSize(page.locator('body'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.goal-toolbar p'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.worksite-assignment'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.worksite-section > h4'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.worksite-meta span'))).toBeGreaterThanOrEqual(12);
+  expect(await renderedContrast(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(4.5);
+
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-desktop.png`, fullPage: true });
 
@@ -79,6 +116,9 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
   await expect(page.locator('.session-worksite')).toBeVisible();
+  expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.worksite-assignment'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.mobile-nav b'))).toBeGreaterThanOrEqual(12);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   const workbenchBox = await page.locator('#goal-workbench').boundingBox();
   expect(workbenchBox.x).toBeGreaterThanOrEqual(0);
