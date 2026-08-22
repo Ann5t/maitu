@@ -6,15 +6,19 @@ use uuid::Uuid;
 use crate::{
     error::{AppError, AppResult},
     goal_domain::{
-        BranchProposalRevisionDraft, CandidateSnapshot, CommandReceiptIdentity, GoalActor,
-        GoalBranchStatus, GoalContractDraft, ProposalStatus, ReviewDecisionKind, ReviewGateStatus,
-        SessionStatus, canonical_json_sha256, validate_new_running_session,
+        BranchProposalRevisionDraft, CandidateSnapshot, CommandReceiptIdentity,
+        ContractRevisionStatus, ContractSourceAnnotation, GoalActor, GoalBranchStatus,
+        GoalContractDraft, ProposalStatus, ReviewDecisionKind, ReviewGateStatus, SessionStatus,
+        canonical_json_sha256, validate_new_running_session,
     },
     goal_models::{
-        GoalAttentionRecord, GoalBranchRecord, GoalContractVersionRecord, GoalContributionRecord,
-        GoalEventRecord, GoalGraphSnapshot, GoalIntegrationContributionRecord,
+        GoalAttentionRecord, GoalBranchRecord, GoalContractProvenanceRecord,
+        GoalContractRevisionDecisionRecord, GoalContractRevisionRequestRecord,
+        GoalContractVersionRecord, GoalContributionEvidenceRecord, GoalContributionRecord,
+        GoalEventRecord, GoalEvidenceRecord, GoalGraphSnapshot, GoalIntegrationContributionRecord,
         GoalIntegrationRecord, GoalProposalRecord, GoalProposalRevisionRecord,
-        GoalReviewDecisionRecord, GoalReviewGateRecord, GoalSessionRecord,
+        GoalReviewDecisionRecord, GoalReviewGateEvidenceRecord, GoalReviewGateRecord,
+        GoalSessionRecord,
     },
     models::Project,
 };
@@ -30,6 +34,17 @@ const CONTRIBUTION_KINDS: &[&str] = &[
     "code_change",
     "other",
 ];
+const EVIDENCE_KINDS: &[&str] = &[
+    "test",
+    "browser",
+    "observation",
+    "external_source",
+    "artifact",
+    "tool_result",
+    "research",
+];
+const EVIDENCE_STANCES: &[&str] = &["supports", "refutes", "blocks", "context"];
+const EVIDENCE_VERIFICATION: &[&str] = &["unverified", "verified", "failed"];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,7 +117,42 @@ struct AddContributionInput {
     artifact_id: Option<Uuid>,
     #[serde(default)]
     evidence_refs: Value,
+    #[serde(default)]
+    evidence_ids: Vec<Uuid>,
     supersedes_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddEvidenceInput {
+    session_id: Uuid,
+    kind: String,
+    stance: String,
+    claim: String,
+    observation: String,
+    source_uri: Option<String>,
+    artifact_id: Option<Uuid>,
+    tool_call_id: Option<Uuid>,
+    verification_status: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProposeContractRevisionInput {
+    goal_branch_id: Uuid,
+    expected_contract_version_id: Uuid,
+    proposed_by_session_id: Option<Uuid>,
+    contract: GoalContractDraft,
+    reason: String,
+    #[serde(default)]
+    source_annotations: Vec<ContractSourceAnnotation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContractRevisionDecisionInput {
+    revision_request_id: Uuid,
+    rationale: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -153,9 +203,32 @@ struct StartNextSessionInput {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct StopSessionInput {
+    session_id: Uuid,
+    reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ProposeMergeInput {
     session_id: Uuid,
     candidate: CandidateSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WithdrawMergeInput {
+    review_gate_id: Uuid,
+    reason: String,
+    #[serde(default)]
+    new_evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveGoalBranchInput {
+    goal_branch_id: Uuid,
+    reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -196,6 +269,7 @@ struct ProposalRevisionRow {
     contract: Json<Value>,
     expected_contributions: Json<Value>,
     context_inheritance: Json<Value>,
+    inferences: Json<Value>,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -229,6 +303,15 @@ struct GateStateRow {
     status: String,
     candidate_hash: String,
     candidate_snapshot: Json<Value>,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct ContractRevisionStateRow {
+    id: Uuid,
+    goal_branch_id: Uuid,
+    based_on_contract_version_id: Uuid,
+    proposed_contract_version_id: Uuid,
+    status: String,
 }
 
 pub async fn run_command(
@@ -341,6 +424,48 @@ pub async fn run_command(
             )
             .await?
         }
+        "session.add_evidence" => {
+            let input: AddEvidenceInput = decode_payload(request.payload)?;
+            add_evidence(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+            )
+            .await?
+        }
+        "contract.propose_revision" => {
+            let input: ProposeContractRevisionInput = decode_payload(request.payload)?;
+            propose_contract_revision(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+            )
+            .await?
+        }
+        "contract.accept_revision" => {
+            let input: ContractRevisionDecisionInput = decode_payload(request.payload)?;
+            decide_contract_revision(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+                true,
+            )
+            .await?
+        }
+        "contract.reject_revision" => {
+            let input: ContractRevisionDecisionInput = decode_payload(request.payload)?;
+            decide_contract_revision(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+                false,
+            )
+            .await?
+        }
         "session.request_judgment" => {
             let input: RequestJudgmentInput = decode_payload(request.payload)?;
             request_judgment(
@@ -391,9 +516,29 @@ pub async fn run_command(
             )
             .await?
         }
+        "session.stop" => {
+            let input: StopSessionInput = decode_payload(request.payload)?;
+            stop_session(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+            )
+            .await?
+        }
         "merge.propose" => {
             let input: ProposeMergeInput = decode_payload(request.payload)?;
             propose_merge(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+            )
+            .await?
+        }
+        "merge.withdraw" => {
+            let input: WithdrawMergeInput = decode_payload(request.payload)?;
+            withdraw_merge(
                 &mut transaction,
                 project_id,
                 request.client_request_id,
@@ -414,6 +559,16 @@ pub async fn run_command(
         "review.human_decide" => {
             let input: HumanReviewInput = decode_payload(request.payload)?;
             record_human_review(
+                &mut transaction,
+                project_id,
+                request.client_request_id,
+                input,
+            )
+            .await?
+        }
+        "goal_branch.archive" => {
+            let input: ArchiveGoalBranchInput = decode_payload(request.payload)?;
+            archive_goal_branch(
                 &mut transaction,
                 project_id,
                 request.client_request_id,
@@ -476,6 +631,27 @@ pub async fn get_snapshot(pool: &PgPool, project_id: Uuid) -> AppResult<GoalGrap
     .bind(project_id)
     .fetch_all(pool)
     .await?;
+    let contract_revision_requests = sqlx::query_as::<_, GoalContractRevisionRequestRecord>(
+        "SELECT * FROM goal_contract_revision_requests WHERE project_id = $1 \
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+    let contract_revision_decisions = sqlx::query_as::<_, GoalContractRevisionDecisionRecord>(
+        "SELECT * FROM goal_contract_revision_decisions WHERE project_id = $1 \
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+    let contract_provenance = sqlx::query_as::<_, GoalContractProvenanceRecord>(
+        "SELECT * FROM goal_contract_provenance WHERE project_id = $1 \
+         ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
     let branches = sqlx::query_as::<_, GoalBranchRecord>(
         "SELECT * FROM goal_branches WHERE project_id = $1 ORDER BY created_at, id",
     )
@@ -495,6 +671,20 @@ pub async fn get_snapshot(pool: &PgPool, project_id: Uuid) -> AppResult<GoalGrap
     .bind(project_id)
     .fetch_all(pool)
     .await?;
+    let evidence = sqlx::query_as::<_, GoalEvidenceRecord>(
+        "SELECT * FROM goal_evidence WHERE project_id = $1 ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+    let contribution_evidence = sqlx::query_as::<_, GoalContributionEvidenceRecord>(
+        "SELECT ce.* FROM goal_contribution_evidence ce \
+         JOIN goal_contributions c ON c.id = ce.contribution_id \
+         WHERE c.project_id = $1 ORDER BY ce.created_at, ce.evidence_id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
     let review_gates = sqlx::query_as::<_, GoalReviewGateRecord>(
         "SELECT * FROM goal_review_gates WHERE project_id = $1 ORDER BY created_at, id",
     )
@@ -503,6 +693,14 @@ pub async fn get_snapshot(pool: &PgPool, project_id: Uuid) -> AppResult<GoalGrap
     .await?;
     let review_decisions = sqlx::query_as::<_, GoalReviewDecisionRecord>(
         "SELECT * FROM goal_review_decisions WHERE project_id = $1 ORDER BY created_at, id",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+    let review_gate_evidence = sqlx::query_as::<_, GoalReviewGateEvidenceRecord>(
+        "SELECT ge.* FROM goal_review_gate_evidence ge \
+         JOIN goal_review_gates g ON g.id = ge.review_gate_id \
+         WHERE g.project_id = $1 ORDER BY ge.created_at, ge.evidence_id",
     )
     .bind(project_id)
     .fetch_all(pool)
@@ -535,15 +733,21 @@ pub async fn get_snapshot(pool: &PgPool, project_id: Uuid) -> AppResult<GoalGrap
     .await?;
 
     Ok(GoalGraphSnapshot {
-        model_version: "goal-branch-v1",
+        model_version: "goal-branch-v2",
         project,
         proposals,
         proposal_revisions,
         contracts,
+        contract_revision_requests,
+        contract_revision_decisions,
+        contract_provenance,
         branches,
         sessions,
         contributions,
+        evidence,
+        contribution_evidence,
         review_gates,
+        review_gate_evidence,
         review_decisions,
         integrations,
         integration_contributions,
@@ -972,8 +1176,8 @@ async fn approve_proposal(
         "INSERT INTO goal_contract_versions \
          (id, project_id, goal_branch_id, version, desired_outcome, hard_constraints, \
           subjective_preferences, unknowns, non_goals, validation_plan, judgment_triggers, \
-          stop_conditions, expected_contributions, source_proposal_id, created_by) \
-         VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'human')",
+          stop_conditions, expected_contributions, exploration_policy, source_proposal_id, created_by) \
+         VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'human')",
     )
     .bind(contract_id)
     .bind(project_id)
@@ -987,9 +1191,47 @@ async fn approve_proposal(
     .bind(Json(contract.judgment_triggers))
     .bind(Json(contract.stop_conditions))
     .bind(Json(contract.expected_contributions))
+    .bind(Json(serde_json::to_value(&contract.exploration)?))
     .bind(proposal.id)
     .execute(&mut **transaction)
     .await?;
+    insert_contract_provenance(
+        transaction,
+        project_id,
+        goal_branch_id,
+        contract_id,
+        &ContractSourceAnnotation {
+            field_path: "/".into(),
+            source_kind: "human_input".into(),
+            source_ref: Some(format!(
+                "branch-proposal:{}@{}",
+                proposal.id, proposal.current_revision
+            )),
+            note: "用户批准了形成该目标枝干的准确 BranchProposal 修订".into(),
+        },
+    )
+    .await?;
+    for (index, inference) in value_to_string_vec("AI 推断", revision.inferences.0.clone())?
+        .into_iter()
+        .enumerate()
+    {
+        insert_contract_provenance(
+            transaction,
+            project_id,
+            goal_branch_id,
+            contract_id,
+            &ContractSourceAnnotation {
+                field_path: "/".into(),
+                source_kind: "agent_inference".into(),
+                source_ref: Some(format!(
+                    "branch-proposal:{}@{}:inference:{}",
+                    proposal.id, proposal.current_revision, index
+                )),
+                note: inference,
+            },
+        )
+        .await?;
+    }
     sqlx::query(
         "INSERT INTO goal_sessions \
          (id, project_id, goal_branch_id, session_number, status, assignment, \
@@ -1165,6 +1407,32 @@ async fn add_contribution(
     if input.evidence_refs.is_null() {
         input.evidence_refs = json!([]);
     }
+    input.evidence_ids.sort_unstable();
+    let evidence_count = input.evidence_ids.len();
+    input.evidence_ids.dedup();
+    if evidence_count != input.evidence_ids.len() {
+        return Err(AppError::bad_request(
+            "duplicate_evidence",
+            "Contribution 不能重复引用同一 Evidence",
+        ));
+    }
+    if !input.evidence_ids.is_empty() {
+        let matching_evidence: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM goal_evidence \
+             WHERE project_id = $1 AND goal_branch_id = $2 AND id = ANY($3)",
+        )
+        .bind(project_id)
+        .bind(session.goal_branch_id)
+        .bind(&input.evidence_ids)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if matching_evidence != input.evidence_ids.len() as i64 {
+            return Err(AppError::bad_request(
+                "cross_project_reference",
+                "Contribution 引用的 Evidence 必须属于当前目标枝干",
+            ));
+        }
+    }
     if let Some(artifact_id) = input.artifact_id {
         let belongs: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM artifacts WHERE id = $1 AND project_id = $2)",
@@ -1205,6 +1473,7 @@ async fn add_contribution(
         "body": input.body,
         "artifactId": input.artifact_id,
         "evidenceRefs": input.evidence_refs,
+        "evidenceIds": input.evidence_ids,
         "supersedesId": input.supersedes_id,
     }))?;
     sqlx::query(
@@ -1226,6 +1495,16 @@ async fn add_contribution(
     .bind(&content_hash)
     .execute(&mut **transaction)
     .await?;
+    for evidence_id in &input.evidence_ids {
+        sqlx::query(
+            "INSERT INTO goal_contribution_evidence (contribution_id, evidence_id) \
+             VALUES ($1, $2)",
+        )
+        .bind(contribution_id)
+        .bind(evidence_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     insert_goal_event(
         transaction,
         project_id,
@@ -1246,6 +1525,466 @@ async fn add_contribution(
     Ok(json!({
         "contributionId": contribution_id,
         "contentHash": content_hash,
+        "evidenceIds": input.evidence_ids,
+    }))
+}
+
+async fn add_evidence(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    mut input: AddEvidenceInput,
+) -> AppResult<Value> {
+    let session = load_session_for_update(transaction, project_id, input.session_id).await?;
+    if !SessionStatus::try_from(session.status.as_str())?.is_writable() {
+        return Err(AppError::conflict(
+            "candidate_frozen",
+            "只有 running Session 可以新增 Evidence",
+        ));
+    }
+    input.kind = clean_text("Evidence 类型", input.kind, 80)?;
+    input.stance = clean_text("Evidence 作用", input.stance, 80)?;
+    input.verification_status = clean_text("Evidence 核验状态", input.verification_status, 80)?;
+    if !EVIDENCE_KINDS.contains(&input.kind.as_str()) {
+        return Err(AppError::bad_request(
+            "invalid_evidence_kind",
+            "未知的 Evidence 类型",
+        ));
+    }
+    if !EVIDENCE_STANCES.contains(&input.stance.as_str()) {
+        return Err(AppError::bad_request(
+            "invalid_evidence_stance",
+            "未知的 Evidence 作用",
+        ));
+    }
+    if !EVIDENCE_VERIFICATION.contains(&input.verification_status.as_str()) {
+        return Err(AppError::bad_request(
+            "invalid_evidence_status",
+            "未知的 Evidence 核验状态",
+        ));
+    }
+    input.claim = clean_text("Evidence 支持或反驳的判断", input.claim, 4_000)?;
+    input.observation = clean_text("Evidence 观察", input.observation, 16_000)?;
+    input.source_uri = clean_optional_text("Evidence 来源", input.source_uri, 8_000)?;
+    if let Some(artifact_id) = input.artifact_id {
+        let belongs: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM artifacts WHERE id = $1 AND project_id = $2)",
+        )
+        .bind(artifact_id)
+        .bind(project_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if !belongs {
+            return Err(AppError::bad_request(
+                "cross_project_reference",
+                "Evidence Artifact 不属于当前项目",
+            ));
+        }
+    }
+    if let Some(tool_call_id) = input.tool_call_id {
+        let belongs: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM tool_calls \
+             WHERE id = $1 AND project_id = $2 AND goal_branch_id = $3 AND session_id = $4)",
+        )
+        .bind(tool_call_id)
+        .bind(project_id)
+        .bind(session.goal_branch_id)
+        .bind(session.id)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if !belongs {
+            return Err(AppError::bad_request(
+                "cross_project_reference",
+                "Evidence ToolCall 不属于当前 Session",
+            ));
+        }
+    }
+
+    let content_hash = canonical_json_sha256(&json!({
+        "kind": input.kind,
+        "stance": input.stance,
+        "claim": input.claim,
+        "observation": input.observation,
+        "sourceUri": input.source_uri,
+        "artifactId": input.artifact_id,
+        "toolCallId": input.tool_call_id,
+        "verificationStatus": input.verification_status,
+    }))?;
+    let evidence_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO goal_evidence \
+         (id, project_id, goal_branch_id, session_id, kind, stance, claim, observation, \
+          source_uri, artifact_id, tool_call_id, verification_status, content_hash, captured_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'agent')",
+    )
+    .bind(evidence_id)
+    .bind(project_id)
+    .bind(session.goal_branch_id)
+    .bind(session.id)
+    .bind(&input.kind)
+    .bind(&input.stance)
+    .bind(&input.claim)
+    .bind(&input.observation)
+    .bind(&input.source_uri)
+    .bind(input.artifact_id)
+    .bind(input.tool_call_id)
+    .bind(&input.verification_status)
+    .bind(&content_hash)
+    .execute(&mut **transaction)
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "evidence",
+        evidence_id,
+        "evidence.recorded",
+        "agent",
+        session.agent_identity.as_deref(),
+        client_request_id,
+        json!({
+            "goalBranchId": session.goal_branch_id,
+            "sessionId": session.id,
+            "kind": input.kind,
+            "stance": input.stance,
+            "verificationStatus": input.verification_status,
+            "contentHash": content_hash,
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "evidenceId": evidence_id,
+        "contentHash": content_hash,
+    }))
+}
+
+async fn propose_contract_revision(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    mut input: ProposeContractRevisionInput,
+) -> AppResult<Value> {
+    input.contract = input.contract.validate_for_approval()?;
+    input.reason = clean_text("契约修订原因", input.reason, 8_000)?;
+    if input.source_annotations.is_empty() {
+        return Err(AppError::bad_request(
+            "missing_contract_sources",
+            "契约修订必须标明用户输入、AI 推断或外部资料来源",
+        ));
+    }
+    input.source_annotations = input
+        .source_annotations
+        .into_iter()
+        .map(ContractSourceAnnotation::validate)
+        .collect::<AppResult<Vec<_>>>()?;
+
+    let branch = load_branch_for_update(transaction, project_id, input.goal_branch_id).await?;
+    if branch.current_contract_version_id != input.expected_contract_version_id {
+        return Err(AppError::conflict(
+            "stale_revision",
+            "目标契约已经变化，请基于当前版本重新生成修订",
+        ));
+    }
+    if !matches!(branch.status.as_str(), "active" | "waiting") {
+        return Err(AppError::conflict(
+            "invalid_state_transition",
+            "正在审核或已经终止的目标枝干不能提出契约修订",
+        ));
+    }
+    let pending_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_contract_revision_requests \
+         WHERE goal_branch_id = $1 AND status = 'awaiting_approval')",
+    )
+    .bind(branch.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if pending_exists {
+        return Err(AppError::conflict(
+            "contract_revision_pending",
+            "该目标枝干已有一项契约修订等待用户决定",
+        ));
+    }
+    if let Some(session_id) = input.proposed_by_session_id {
+        let session = load_session_for_update(transaction, project_id, session_id).await?;
+        if session.goal_branch_id != branch.id
+            || branch.head_session_id != session.id
+            || SessionStatus::try_from(session.status.as_str())? != SessionStatus::Running
+        {
+            return Err(AppError::conflict(
+                "invalid_state_transition",
+                "只有当前 running Session 可以代表工作 Agent 提出契约修订",
+            ));
+        }
+    }
+
+    let current = sqlx::query_as::<_, GoalContractVersionRecord>(
+        "SELECT * FROM goal_contract_versions WHERE id = $1 AND project_id = $2",
+    )
+    .bind(branch.current_contract_version_id)
+    .bind(project_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let change_summary = contract_change_summary(&current, &input.contract)?;
+    if change_summary.as_array().is_none_or(Vec::is_empty) {
+        return Err(AppError::bad_request(
+            "no_contract_changes",
+            "新契约与当前契约没有差异",
+        ));
+    }
+    validate_contract_annotation_paths(&input.source_annotations, &change_summary)?;
+
+    let next_version: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(max(version), 0) + 1 FROM goal_contract_versions \
+         WHERE goal_branch_id = $1",
+    )
+    .bind(branch.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let proposed_contract_id = Uuid::new_v4();
+    insert_contract_version(
+        transaction,
+        proposed_contract_id,
+        project_id,
+        branch.id,
+        next_version,
+        &input.contract,
+        None,
+        Some(branch.current_contract_version_id),
+        "agent",
+    )
+    .await?;
+    insert_contract_provenance(
+        transaction,
+        project_id,
+        branch.id,
+        proposed_contract_id,
+        &ContractSourceAnnotation {
+            field_path: "/".into(),
+            source_kind: "inherited_contract".into(),
+            source_ref: Some(format!("contract:{}", current.id)),
+            note: "未列出的字段继承自当前已批准契约".into(),
+        },
+    )
+    .await?;
+    for annotation in &input.source_annotations {
+        insert_contract_provenance(
+            transaction,
+            project_id,
+            branch.id,
+            proposed_contract_id,
+            annotation,
+        )
+        .await?;
+    }
+
+    let request_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO goal_contract_revision_requests \
+         (id, project_id, goal_branch_id, based_on_contract_version_id, \
+          proposed_contract_version_id, proposed_by_session_id, status, reason, \
+          change_summary, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'awaiting_approval', $7, $8, 'agent')",
+    )
+    .bind(request_id)
+    .bind(project_id)
+    .bind(branch.id)
+    .bind(current.id)
+    .bind(proposed_contract_id)
+    .bind(input.proposed_by_session_id)
+    .bind(&input.reason)
+    .bind(Json(change_summary.clone()))
+    .execute(&mut **transaction)
+    .await?;
+    insert_attention(
+        transaction,
+        project_id,
+        Some(branch.id),
+        input.proposed_by_session_id,
+        "contract_review",
+        &format!("contract-revision:{request_id}:review"),
+        "目标契约修订等待用户决定",
+        &input.reason,
+        Some("当前已批准契约仍然有效；待批准版本不可用于拟合并"),
+        None,
+        Some("接受后执行中的 Session 会先安全暂停，不会静默改变目标"),
+        Some("查看字段差异和每项来源，再接受或拒绝"),
+        Some("只批准符合当前意图且未降低验收条件的修订"),
+    )
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "contract_revision",
+        request_id,
+        "contract.revision_proposed",
+        "agent",
+        None,
+        client_request_id,
+        json!({
+            "goalBranchId": branch.id,
+            "basedOnContractVersionId": current.id,
+            "proposedContractVersionId": proposed_contract_id,
+            "version": next_version,
+            "changeSummary": change_summary,
+            "proposedBySessionId": input.proposed_by_session_id,
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "revisionRequestId": request_id,
+        "basedOnContractVersionId": current.id,
+        "proposedContractVersionId": proposed_contract_id,
+        "version": next_version,
+        "status": ContractRevisionStatus::AwaitingApproval.as_str(),
+        "changeSummary": change_summary,
+    }))
+}
+
+async fn decide_contract_revision(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    input: ContractRevisionDecisionInput,
+    accept: bool,
+) -> AppResult<Value> {
+    let rationale = clean_text("契约修订决定理由", input.rationale, 8_000)?;
+    let request =
+        load_contract_revision_for_update(transaction, project_id, input.revision_request_id)
+            .await?;
+    let status = ContractRevisionStatus::try_from(request.status.as_str())?
+        .decide(GoalActor::Human, accept)?;
+    let branch = load_branch_for_update(transaction, project_id, request.goal_branch_id).await?;
+    if branch.current_contract_version_id != request.based_on_contract_version_id {
+        return Err(AppError::conflict(
+            "stale_revision",
+            "目标契约已经变化，这项修订不能再直接决定",
+        ));
+    }
+    if !matches!(branch.status.as_str(), "active" | "waiting") {
+        return Err(AppError::conflict(
+            "invalid_state_transition",
+            "正在拟合并审核或已终止的枝干不能切换契约",
+        ));
+    }
+
+    let mut paused_session_id = None;
+    if accept {
+        let head = load_session_for_update(transaction, project_id, branch.head_session_id).await?;
+        let head_status = SessionStatus::try_from(head.status.as_str())?;
+        if matches!(
+            head_status,
+            SessionStatus::AwaitingMergeReview | SessionStatus::Accepted | SessionStatus::Stopped
+        ) {
+            return Err(AppError::conflict(
+                "invalid_state_transition",
+                "冻结审核或已终止的 Session 不能切换契约",
+            ));
+        }
+        if head_status != SessionStatus::ReviewRejected {
+            let next_status = if head_status == SessionStatus::Running {
+                paused_session_id = Some(head.id);
+                SessionStatus::ManualPaused
+            } else {
+                head_status
+            };
+            sqlx::query(
+                "UPDATE goal_sessions SET status = $1, contract_version_id = $2, \
+                 updated_at = now() WHERE id = $3",
+            )
+            .bind(next_status.as_str())
+            .bind(request.proposed_contract_version_id)
+            .bind(head.id)
+            .execute(&mut **transaction)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE goal_branches SET current_contract_version_id = $1, \
+             status = CASE WHEN status = 'active' THEN 'waiting' ELSE status END, \
+             updated_at = now() WHERE id = $2",
+        )
+        .bind(request.proposed_contract_version_id)
+        .bind(branch.id)
+        .execute(&mut **transaction)
+        .await?;
+        if let Some(session_id) = paused_session_id {
+            insert_attention(
+                transaction,
+                project_id,
+                Some(branch.id),
+                Some(session_id),
+                "manual_pause",
+                &format!("contract-revision:{}:resume", request.id),
+                "契约已更新，Session 等待显式恢复",
+                "用户接受了新的目标契约；旧执行现场已停在安全边界",
+                Some("Session 尚未在新契约下继续写入"),
+                None,
+                Some("直接继续可能遗漏新约束或错误沿用旧验收"),
+                Some("确认下一步分配后显式恢复 Session"),
+                Some("恢复前先阅读契约差异和来源"),
+            )
+            .await?;
+        }
+    }
+
+    sqlx::query(
+        "UPDATE goal_contract_revision_requests \
+         SET status = $1, updated_at = now(), decided_at = now() WHERE id = $2",
+    )
+    .bind(status.as_str())
+    .bind(request.id)
+    .execute(&mut **transaction)
+    .await?;
+    let decision_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO goal_contract_revision_decisions \
+         (id, project_id, revision_request_id, actor_role, decision, rationale) \
+         VALUES ($1, $2, $3, 'human', $4, $5)",
+    )
+    .bind(decision_id)
+    .bind(project_id)
+    .bind(request.id)
+    .bind(if accept { "accept" } else { "reject" })
+    .bind(&rationale)
+    .execute(&mut **transaction)
+    .await?;
+    resolve_attention_by_key(
+        transaction,
+        project_id,
+        &format!("contract-revision:{}:review", request.id),
+        &rationale,
+    )
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "contract_revision",
+        request.id,
+        if accept {
+            "contract.revision_accepted"
+        } else {
+            "contract.revision_rejected"
+        },
+        "human",
+        None,
+        client_request_id,
+        json!({
+            "decisionId": decision_id,
+            "basedOnContractVersionId": request.based_on_contract_version_id,
+            "proposedContractVersionId": request.proposed_contract_version_id,
+            "pausedSessionId": paused_session_id,
+            "rationale": rationale,
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "revisionRequestId": request.id,
+        "decisionId": decision_id,
+        "status": status.as_str(),
+        "activeContractVersionId": if accept {
+            request.proposed_contract_version_id
+        } else {
+            request.based_on_contract_version_id
+        },
+        "pausedSessionId": paused_session_id,
     }))
 }
 
@@ -1602,6 +2341,147 @@ async fn start_next_session(
     }))
 }
 
+async fn stop_session(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    input: StopSessionInput,
+) -> AppResult<Value> {
+    let reason = clean_text("停止理由", input.reason, 8_000)?;
+    let session = load_session_for_update(transaction, project_id, input.session_id).await?;
+    let branch = load_branch_for_update(transaction, project_id, session.goal_branch_id).await?;
+    if branch.head_session_id != session.id {
+        return Err(AppError::conflict(
+            "stale_session_head",
+            "只能停止目标枝干当前的 Session",
+        ));
+    }
+    let status = SessionStatus::try_from(session.status.as_str())?.stop(GoalActor::Human)?;
+    let unresolved_child: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_branches \
+         WHERE parent_goal_branch_id = $1 AND status IN ('active', 'waiting', 'review_pending'))",
+    )
+    .bind(branch.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let unresolved_proposal: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_branch_proposals \
+         WHERE parent_session_id = $1 AND status IN ('draft', 'awaiting_approval'))",
+    )
+    .bind(session.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if unresolved_child || unresolved_proposal {
+        return Err(AppError::conflict(
+            "unresolved_child_goal",
+            "仍有未决定 Proposal 或推进中的子目标，先处理后才能停止父枝干",
+        ));
+    }
+    let pending_contract: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_contract_revision_requests \
+         WHERE goal_branch_id = $1 AND status = 'awaiting_approval')",
+    )
+    .bind(branch.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if pending_contract {
+        return Err(AppError::conflict(
+            "contract_revision_pending",
+            "先决定等待中的契约修订，再停止目标枝干",
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE goal_sessions SET status = $1, updated_at = now(), ended_at = now() \
+         WHERE id = $2",
+    )
+    .bind(status.as_str())
+    .bind(session.id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_branches SET status = 'stopped', updated_at = now(), stopped_at = now() \
+         WHERE id = $1",
+    )
+    .bind(branch.id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_attention_items SET status = 'cancelled', resolution = $1, \
+         resolved_at = now() WHERE project_id = $2 AND goal_branch_id = $3 AND status = 'open'",
+    )
+    .bind(&reason)
+    .bind(project_id)
+    .bind(branch.id)
+    .execute(&mut **transaction)
+    .await?;
+
+    if let Some(parent_session_id) = branch.inherited_from_session_id {
+        resolve_attention_by_key(
+            transaction,
+            project_id,
+            &format!("session:{parent_session_id}:dependency:{}", branch.id),
+            &reason,
+        )
+        .await?;
+        insert_attention(
+            transaction,
+            project_id,
+            branch.parent_goal_branch_id,
+            Some(parent_session_id),
+            "child_result_ready",
+            &format!("session:{parent_session_id}:child-result:{}", branch.id),
+            "子目标已停止，等待父 Session 处理结论",
+            &reason,
+            Some("子枝干历史和 Evidence 保留；没有 Contribution 被自动回流"),
+            None,
+            Some("停止子目标不等于父目标满足，也不能伪装成合并"),
+            Some("检查负面结论或剩余依赖，再显式恢复父 Session"),
+            Some("必要时修订父契约、提出替代子目标或有理由地豁免"),
+        )
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE projects SET state = 'stopped', completion_reason = $1, \
+             current_focus = NULL, updated_at = now() WHERE id = $2",
+        )
+        .bind(&reason)
+        .bind(project_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    insert_goal_event(
+        transaction,
+        project_id,
+        "session",
+        session.id,
+        "session.stopped",
+        "human",
+        None,
+        client_request_id,
+        json!({ "goalBranchId": branch.id, "reason": reason }),
+    )
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "goal_branch",
+        branch.id,
+        "goal_branch.stopped",
+        "human",
+        None,
+        client_request_id,
+        json!({ "sessionId": session.id, "reason": reason }),
+    )
+    .await?;
+    Ok(json!({
+        "sessionId": session.id,
+        "goalBranchId": branch.id,
+        "sessionStatus": status.as_str(),
+        "goalBranchStatus": GoalBranchStatus::Stopped.as_str(),
+    }))
+}
+
 async fn pause_session_and_branch(
     transaction: &mut GoalTransaction<'_>,
     session: &SessionStateRow,
@@ -1670,6 +2550,36 @@ async fn propose_merge(
             "候选至少要包含当前 Session 新形成的一项 Contribution",
         ));
     }
+    if !candidate.evidence_ids.is_empty() {
+        let matching_evidence: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM goal_evidence \
+             WHERE project_id = $1 AND goal_branch_id = $2 AND id = ANY($3)",
+        )
+        .bind(project_id)
+        .bind(session.goal_branch_id)
+        .bind(&candidate.evidence_ids)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if matching_evidence != candidate.evidence_ids.len() as i64 {
+            return Err(AppError::bad_request(
+                "cross_project_reference",
+                "候选 Evidence 必须全部属于当前目标枝干",
+            ));
+        }
+    }
+    let pending_contract: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_contract_revision_requests \
+         WHERE goal_branch_id = $1 AND status = 'awaiting_approval')",
+    )
+    .bind(session.goal_branch_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if pending_contract {
+        return Err(AppError::conflict(
+            "contract_revision_pending",
+            "仍有契约修订等待决定，不能冻结拟合并候选",
+        ));
+    }
     let unresolved_child: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM goal_branches \
          WHERE parent_goal_branch_id = $1 \
@@ -1721,6 +2631,16 @@ async fn propose_merge(
         .execute(&mut **transaction)
         .await?;
     }
+    for evidence_id in &candidate.evidence_ids {
+        sqlx::query(
+            "INSERT INTO goal_review_gate_evidence (review_gate_id, evidence_id) \
+             VALUES ($1, $2)",
+        )
+        .bind(review_gate_id)
+        .bind(evidence_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     sqlx::query("UPDATE goal_sessions SET status = $1, updated_at = now() WHERE id = $2")
         .bind(next_session_status.as_str())
         .bind(session.id)
@@ -1762,6 +2682,7 @@ async fn propose_merge(
             "sessionId": session.id,
             "candidateHash": candidate_hash,
             "contributionIds": candidate.contribution_ids,
+            "evidenceIds": candidate.evidence_ids,
         }),
     )
     .await?;
@@ -1769,6 +2690,89 @@ async fn propose_merge(
         "reviewGateId": review_gate_id,
         "candidateHash": candidate_hash,
         "status": ReviewGateStatus::PendingAiReview.as_str(),
+    }))
+}
+
+async fn withdraw_merge(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    mut input: WithdrawMergeInput,
+) -> AppResult<Value> {
+    input.reason = clean_text("撤回候选原因", input.reason, 8_000)?;
+    normalize_text_list("新发现证据", &mut input.new_evidence, 100, 4_000)?;
+    let gate = load_gate_for_update(transaction, project_id, input.review_gate_id).await?;
+    ensure_gate_hash(&gate)?;
+    let status = ReviewGateStatus::try_from(gate.status.as_str())?.withdraw(GoalActor::Agent)?;
+    let session = load_session_for_update(transaction, project_id, gate.session_id).await?;
+    let branch = load_branch_for_update(transaction, project_id, gate.goal_branch_id).await?;
+    let session_status =
+        SessionStatus::try_from(session.status.as_str())?.mark_review_rejected()?;
+
+    sqlx::query(
+        "UPDATE goal_review_gates SET status = $1, updated_at = now(), resolved_at = now() \
+         WHERE id = $2",
+    )
+    .bind(status.as_str())
+    .bind(gate.id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE goal_sessions SET status = $1, updated_at = now(), ended_at = now() \
+         WHERE id = $2",
+    )
+    .bind(session_status.as_str())
+    .bind(session.id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query("UPDATE goal_branches SET status = 'active', updated_at = now() WHERE id = $1")
+        .bind(branch.id)
+        .execute(&mut **transaction)
+        .await?;
+    resolve_attention_by_key(
+        transaction,
+        project_id,
+        &format!("gate:{}:review", gate.id),
+        &input.reason,
+    )
+    .await?;
+    insert_attention(
+        transaction,
+        project_id,
+        Some(branch.id),
+        Some(session.id),
+        "continuation_required",
+        &format!("branch:{}:continuation", branch.id),
+        "拟合并候选已撤回，需要下一 Session",
+        &input.reason,
+        Some("原候选和哈希保持冻结；没有继续修改原 Session"),
+        Some(&input.new_evidence.join("\n")),
+        Some("已知候选不再可信，继续审核会产生错误接受"),
+        Some("根据新证据分配下一 Session"),
+        Some("修正后重新构建完整候选，不复用旧 Gate"),
+    )
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "review_gate",
+        gate.id,
+        "merge.withdrawn",
+        "agent",
+        session.agent_identity.as_deref(),
+        client_request_id,
+        json!({
+            "reason": input.reason,
+            "newEvidence": input.new_evidence,
+            "candidateHash": gate.candidate_hash,
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "reviewGateId": gate.id,
+        "status": status.as_str(),
+        "sessionStatus": session_status.as_str(),
+        "goalBranchStatus": GoalBranchStatus::Active.as_str(),
     }))
 }
 
@@ -2155,6 +3159,60 @@ async fn record_human_review(
     }))
 }
 
+async fn archive_goal_branch(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    client_request_id: Uuid,
+    input: ArchiveGoalBranchInput,
+) -> AppResult<Value> {
+    let reason = clean_text("归档理由", input.reason, 8_000)?;
+    let branch = load_branch_for_update(transaction, project_id, input.goal_branch_id).await?;
+    let current = GoalBranchStatus::try_from(branch.status.as_str())?;
+    let status = current.archive(GoalActor::Human)?;
+    let open_attention: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM goal_attention_items \
+         WHERE goal_branch_id = $1 AND status = 'open')",
+    )
+    .bind(branch.id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if open_attention {
+        return Err(AppError::conflict(
+            "unresolved_attention",
+            "该枝干仍有待处理事项，不能归档",
+        ));
+    }
+    sqlx::query(
+        "UPDATE goal_branches SET status = $1, archived_from_status = $2, \
+         updated_at = now() WHERE id = $3",
+    )
+    .bind(status.as_str())
+    .bind(current.as_str())
+    .bind(branch.id)
+    .execute(&mut **transaction)
+    .await?;
+    insert_goal_event(
+        transaction,
+        project_id,
+        "goal_branch",
+        branch.id,
+        "goal_branch.archived",
+        "human",
+        None,
+        client_request_id,
+        json!({
+            "archivedFromStatus": current.as_str(),
+            "reason": reason,
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "goalBranchId": branch.id,
+        "status": status.as_str(),
+        "archivedFromStatus": current.as_str(),
+    }))
+}
+
 async fn mark_child_result_ready(
     transaction: &mut GoalTransaction<'_>,
     project_id: Uuid,
@@ -2212,7 +3270,7 @@ async fn load_proposal_revision(
     revision: i32,
 ) -> AppResult<ProposalRevisionRow> {
     sqlx::query_as::<_, ProposalRevisionRow>(
-        "SELECT why_needed, contract, expected_contributions, context_inheritance \
+        "SELECT why_needed, contract, expected_contributions, context_inheritance, inferences \
          FROM goal_branch_proposal_revisions \
          WHERE proposal_id = $1 AND revision = $2",
     )
@@ -2273,6 +3331,24 @@ async fn load_gate_for_update(
     .ok_or_else(|| AppError::not_found("ReviewGate 不存在"))
 }
 
+async fn load_contract_revision_for_update(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    request_id: Uuid,
+) -> AppResult<ContractRevisionStateRow> {
+    sqlx::query_as::<_, ContractRevisionStateRow>(
+        "SELECT id, goal_branch_id, based_on_contract_version_id, \
+         proposed_contract_version_id, status \
+         FROM goal_contract_revision_requests \
+         WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(request_id)
+    .bind(project_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| AppError::not_found("目标契约修订不存在"))
+}
+
 async fn insert_proposal_revision(
     transaction: &mut GoalTransaction<'_>,
     proposal_id: Uuid,
@@ -2305,6 +3381,74 @@ async fn insert_proposal_revision(
     .execute(&mut **transaction)
     .await?;
     Ok(revision_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_contract_version(
+    transaction: &mut GoalTransaction<'_>,
+    contract_id: Uuid,
+    project_id: Uuid,
+    goal_branch_id: Uuid,
+    version: i32,
+    contract: &GoalContractDraft,
+    source_proposal_id: Option<Uuid>,
+    supersedes_id: Option<Uuid>,
+    created_by: &str,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO goal_contract_versions \
+         (id, project_id, goal_branch_id, version, desired_outcome, hard_constraints, \
+          subjective_preferences, unknowns, non_goals, validation_plan, judgment_triggers, \
+          stop_conditions, expected_contributions, exploration_policy, source_proposal_id, \
+          supersedes_id, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+    )
+    .bind(contract_id)
+    .bind(project_id)
+    .bind(goal_branch_id)
+    .bind(version)
+    .bind(&contract.desired_outcome)
+    .bind(Json(&contract.hard_constraints))
+    .bind(Json(&contract.subjective_preferences))
+    .bind(Json(&contract.unknowns))
+    .bind(Json(&contract.non_goals))
+    .bind(Json(&contract.validation_plan))
+    .bind(Json(&contract.judgment_triggers))
+    .bind(Json(&contract.stop_conditions))
+    .bind(Json(&contract.expected_contributions))
+    .bind(Json(serde_json::to_value(&contract.exploration)?))
+    .bind(source_proposal_id)
+    .bind(supersedes_id)
+    .bind(created_by)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn insert_contract_provenance(
+    transaction: &mut GoalTransaction<'_>,
+    project_id: Uuid,
+    goal_branch_id: Uuid,
+    contract_version_id: Uuid,
+    annotation: &ContractSourceAnnotation,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO goal_contract_provenance \
+         (id, project_id, goal_branch_id, contract_version_id, field_path, \
+          source_kind, source_ref, note) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(goal_branch_id)
+    .bind(contract_version_id)
+    .bind(&annotation.field_path)
+    .bind(&annotation.source_kind)
+    .bind(&annotation.source_ref)
+    .bind(&annotation.note)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2407,6 +3551,78 @@ fn ensure_gate_hash(gate: &GateStateRow) -> AppResult<()> {
         "candidate_frozen",
         "拟合并候选内容与冻结哈希不一致",
     ))
+}
+
+fn contract_change_summary(
+    current: &GoalContractVersionRecord,
+    proposed: &GoalContractDraft,
+) -> AppResult<Value> {
+    let current_value = json!({
+        "desiredOutcome": current.desired_outcome,
+        "hardConstraints": current.hard_constraints.0,
+        "subjectivePreferences": current.subjective_preferences.0,
+        "unknowns": current.unknowns.0,
+        "nonGoals": current.non_goals.0,
+        "validationPlan": current.validation_plan.0,
+        "judgmentTriggers": current.judgment_triggers.0,
+        "stopConditions": current.stop_conditions.0,
+        "expectedContributions": current.expected_contributions.0,
+        "exploration": current.exploration_policy.0,
+    });
+    let proposed_value = serde_json::to_value(proposed)?;
+    let fields = [
+        "desiredOutcome",
+        "hardConstraints",
+        "subjectivePreferences",
+        "unknowns",
+        "nonGoals",
+        "validationPlan",
+        "judgmentTriggers",
+        "stopConditions",
+        "expectedContributions",
+        "exploration",
+    ];
+    let changes = fields
+        .into_iter()
+        .filter_map(|field| {
+            let before = current_value.get(field)?;
+            let after = proposed_value.get(field)?;
+            (before != after).then(|| {
+                json!({
+                    "field": field,
+                    "before": before,
+                    "after": after,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Value::Array(changes))
+}
+
+fn validate_contract_annotation_paths(
+    annotations: &[ContractSourceAnnotation],
+    change_summary: &Value,
+) -> AppResult<()> {
+    let changed_fields = change_summary
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change.get("field").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    for field in changed_fields {
+        let prefix = format!("/{field}");
+        if !annotations.iter().any(|annotation| {
+            annotation.field_path == "/"
+                || annotation.field_path == prefix
+                || annotation.field_path.starts_with(&format!("{prefix}/"))
+        }) {
+            return Err(AppError::bad_request(
+                "missing_contract_sources",
+                format!("契约字段 {field} 的变化缺少来源说明"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn clean_text(label: &str, value: String, max: usize) -> AppResult<String> {

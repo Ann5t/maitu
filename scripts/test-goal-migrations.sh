@@ -48,6 +48,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0007_goal_domain_v2.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -65,6 +68,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0007_goal_domain_v2.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
@@ -102,6 +108,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0006_idea_sources.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0007_goal_domain_v2.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -140,8 +149,8 @@ if [[ "$migration_counts_before" != "$migration_counts_after" ]]; then
   echo "legacy counts changed: $migration_counts_before -> $migration_counts_after" >&2
   exit 1
 fi
-if [[ "$migration_goal_table_count" != 14 ]]; then
-  echo "expected 14 goal tables, found $migration_goal_table_count" >&2
+if [[ "$migration_goal_table_count" != 20 ]]; then
+  echo "expected 20 goal tables, found $migration_goal_table_count" >&2
   exit 1
 fi
 if [[ "$migration_tooling_table_count" != 5 ]]; then

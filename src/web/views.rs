@@ -532,6 +532,17 @@ fn project_proposal_form(
             .map(json_value_lines)
             .unwrap_or_default()
     };
+    let exploration = contract.and_then(|value| value.get("exploration"));
+    let exploration_mode = exploration
+        .and_then(|value| value.get("mode"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("delivery");
+    let exploration_lines = |key: &str| {
+        exploration
+            .and_then(|value| value.get(key))
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
     let desired_outcome = contract
         .and_then(|value| value.get("desiredOutcome"))
         .and_then(serde_json::Value::as_str)
@@ -590,6 +601,16 @@ fn project_proposal_form(
                     label { "这次保留的想法内容" textarea name="retained_notes" rows="2" { (revision.map(|item| item.retained_notes.0.join("\n")).unwrap_or_default()) } }
                     label { "这次暂不采用的内容" textarea name="omitted_notes" rows="2" { (revision.map(|item| item.omitted_notes.0.join("\n")).unwrap_or_default()) } }
                     label { "AI 推断（非用户事实）" textarea name="inferences" rows="2" { (root_lines("inferences")) } }
+                    label { "目标模式"
+                        select name="exploration_mode" {
+                            option value="delivery" selected[exploration_mode == "delivery"] { "交付：结果和验收已较清楚" }
+                            option value="exploration" selected[exploration_mode == "exploration"] { "探索：先减少未知，再请你判断" }
+                            option value="hybrid" selected[exploration_mode == "hybrid"] { "混合：交付与探索并行" }
+                        }
+                    }
+                    label { "探索预算 / 边界（每行一项）" textarea name="exploration_budgets" rows="2" placeholder="例如：最多比较 3 个候选" { (exploration_lines("budgets")) } }
+                    label { "候选产出（每行一项）" textarea name="exploration_candidates" rows="2" placeholder="例如：两个可操作原型" { (exploration_lines("candidateOutputs")) } }
+                    label { "怎样算不确定性减少（每行一项）" textarea name="uncertainty_reduction" rows="2" placeholder="例如：能明确排除至少一个方向" { (exploration_lines("uncertaintyReduction")) } }
                 }
                 @if all_ideas.iter().any(|idea| idea.id != idea_id) {
                     fieldset class="proposal-source-selector" data-proposal-source-selector="" {
@@ -1193,6 +1214,17 @@ fn proposal_editor(
             .map(json_value_lines)
             .unwrap_or_default()
     };
+    let exploration = revision.and_then(|item| item.contract.0.get("exploration"));
+    let exploration_mode = exploration
+        .and_then(|value| value.get("mode"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("delivery");
+    let exploration_lines = |key: &str| {
+        exploration
+            .and_then(|value| value.get(key))
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
     let outer_lines =
         |value: Option<&serde_json::Value>| value.map(json_value_lines).unwrap_or_default();
     let form_id = proposal
@@ -1245,6 +1277,16 @@ fn proposal_editor(
                     label { "探索计划" textarea name="exploration_plan" rows="2" { (revision.map(|item| outer_lines(Some(&item.exploration_plan.0))).unwrap_or_default()) } }
                     label { "工具需求" textarea name="tool_requirements" rows="2" { (revision.map(|item| outer_lines(Some(&item.tool_requirements.0))).unwrap_or_default()) } }
                     label { "AI 推断（非用户确认）" textarea name="inferences" rows="2" { (revision.map(|item| outer_lines(Some(&item.inferences.0))).unwrap_or_default()) } }
+                    label { "目标模式"
+                        select name="exploration_mode" {
+                            option value="delivery" selected[exploration_mode == "delivery"] { "交付：结果和验收已较清楚" }
+                            option value="exploration" selected[exploration_mode == "exploration"] { "探索：先减少未知，再请你判断" }
+                            option value="hybrid" selected[exploration_mode == "hybrid"] { "混合：交付与探索并行" }
+                        }
+                    }
+                    label { "探索预算 / 边界（每行一项）" textarea name="exploration_budgets" rows="2" placeholder="例如：最多比较 3 个候选" { (exploration_lines("budgets")) } }
+                    label { "候选产出（每行一项）" textarea name="exploration_candidates" rows="2" placeholder="例如：两个可操作原型" { (exploration_lines("candidateOutputs")) } }
+                    label { "怎样算不确定性减少（每行一项）" textarea name="uncertainty_reduction" rows="2" placeholder="例如：能明确排除至少一个方向" { (exploration_lines("uncertaintyReduction")) } }
                 }
                 @if proposal.is_some() {
                     label { "本次修订理由" textarea name="revision_reason" rows="2" required { (revision.and_then(|item| item.revision_reason.as_deref()).unwrap_or("")) } }
@@ -1291,6 +1333,16 @@ fn session_worksite(
         .iter()
         .filter(|item| item.session_id == session.id)
         .collect::<Vec<_>>();
+    let evidence = snapshot
+        .evidence
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let contract_revisions = snapshot
+        .contract_revision_requests
+        .iter()
+        .filter(|item| item.goal_branch_id == session.goal_branch_id)
+        .collect::<Vec<_>>();
     let gates = snapshot
         .review_gates
         .iter()
@@ -1334,8 +1386,13 @@ fn session_worksite(
                     (compact_list("验证", &contract.validation_plan.0))
                     (compact_list("停止", &contract.stop_conditions.0))
                     (compact_list("未知", &contract.unknowns.0))
+                    (exploration_policy_summary(&contract.exploration_policy.0))
                 }
             }
+        }
+
+        @for request in contract_revisions.iter().filter(|item| item.status == "awaiting_approval") {
+            (contract_revision_card(snapshot, session, request))
         }
 
         @for item in attention.iter().filter(|item| item.status == "open") {
@@ -1386,9 +1443,9 @@ fn session_worksite(
             }
 
             section class="worksite-section" data-worksite-tools {
-                header { span class="eyebrow" { "TOOLS / BROWSER / TESTS" } b { (tool_calls.len()) } }
+                header { span class="eyebrow" { "TOOLS / BROWSER / TESTS" } b { (tool_calls.len() + evidence.len()) } }
                 h4 { "工具行动与测试证据" }
-                @if tool_calls.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
+                @if tool_calls.is_empty() && evidence.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
                     p class="worksite-empty-copy" { "尚无工具或测试记录。未来 Playwright 浏览器会以插件 ToolCall 出现在这里。" }
                 }
                 div class="worksite-records" {
@@ -1402,6 +1459,16 @@ fn session_worksite(
                     @for gate in &gates {
                         @for evidence in json_value_strings(&gate.test_evidence.0) {
                             article class="test-evidence-record" { span { "✓" } p { (evidence) } }
+                        }
+                    }
+                    @for item in &evidence {
+                        article class="test-evidence-record" {
+                            span { (evidence_stance_icon(&item.stance)) }
+                            div {
+                                strong { (&item.claim) }
+                                p { (&item.observation) }
+                                small { (&item.kind) " · " (&item.verification_status) " · " (&item.content_hash[..item.content_hash.len().min(23)]) "…" }
+                            }
                         }
                     }
                 }
@@ -1433,6 +1500,56 @@ fn session_worksite(
     }
 }
 
+fn contract_revision_card(
+    snapshot: &GoalGraphSnapshot,
+    session: &GoalSessionRecord,
+    request: &crate::goal_models::GoalContractRevisionRequestRecord,
+) -> Markup {
+    let proposed = snapshot
+        .contracts
+        .iter()
+        .find(|item| item.id == request.proposed_contract_version_id);
+    html! {
+        section class="review-panel review-panel--attention" data-contract-revision-id=(request.id) {
+            header {
+                div { span class="eyebrow" { "CONTRACT REVISION" } h4 { "目标契约差异待决定" } }
+                span class="goal-state goal-state--attention" { "等待你" }
+            }
+            p { (&request.reason) }
+            @if let Some(proposed) = proposed {
+                p { b { "候选 v" (proposed.version) } "；当前活动版本不会在批准前改变。" }
+            }
+            div class="review-evidence-grid" {
+                @for change in request.change_summary.0.as_array().into_iter().flatten() {
+                    div {
+                        b { (contract_field_label(change.get("field").and_then(serde_json::Value::as_str).unwrap_or("unknown"))) }
+                        small { "原：" (compact_json(change.get("before"))) }
+                        small { "新：" (compact_json(change.get("after"))) }
+                    }
+                }
+            }
+            div class="human-review-actions" {
+                form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                    input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                    input type="hidden" name="action" value="contract.accept_revision";
+                    input type="hidden" name="revision_request_id" value=(request.id);
+                    input type="hidden" name="return_session_id" value=(session.id);
+                    label { "接受理由" textarea name="rationale" rows="2" required {} }
+                    button class="button button--primary button--small" type="submit" { "接受并安全暂停" }
+                }
+                form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                    input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                    input type="hidden" name="action" value="contract.reject_revision";
+                    input type="hidden" name="revision_request_id" value=(request.id);
+                    input type="hidden" name="return_session_id" value=(session.id);
+                    label { "拒绝理由" textarea name="rationale" rows="2" required {} }
+                    button class="button button--secondary button--small" type="submit" { "保留旧契约" }
+                }
+            }
+        }
+    }
+}
+
 fn compact_list(title: &str, items: &[String]) -> Markup {
     html! {
         div {
@@ -1440,6 +1557,84 @@ fn compact_list(title: &str, items: &[String]) -> Markup {
             @if items.is_empty() { span { "未设定" } }
             @for item in items { span { (item) } }
         }
+    }
+}
+
+fn compact_json(value: Option<&serde_json::Value>) -> String {
+    let rendered = value
+        .map(|value| match value {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join("；"),
+            serde_json::Value::String(value) => value.clone(),
+            value => value.to_string(),
+        })
+        .unwrap_or_else(|| "未设置".into());
+    if rendered.chars().count() <= 180 {
+        rendered
+    } else {
+        rendered
+            .chars()
+            .take(179)
+            .chain(std::iter::once('…'))
+            .collect()
+    }
+}
+
+fn contract_field_label(field: &str) -> &'static str {
+    match field {
+        "desiredOutcome" => "目标结果",
+        "hardConstraints" => "硬约束",
+        "subjectivePreferences" => "主观偏好",
+        "unknowns" => "未知",
+        "nonGoals" => "不做事项",
+        "validationPlan" => "验证计划",
+        "judgmentTriggers" => "判断时机",
+        "stopConditions" => "停止条件",
+        "expectedContributions" => "期望贡献",
+        "exploration" => "探索契约",
+        _ => "其他字段",
+    }
+}
+
+fn exploration_policy_summary(policy: &serde_json::Value) -> Markup {
+    let mode = policy
+        .get("mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("delivery");
+    let label = match mode {
+        "exploration" => "探索模式",
+        "hybrid" => "混合模式",
+        _ => "交付模式",
+    };
+    let details = ["budgets", "candidateOutputs", "uncertaintyReduction"]
+        .into_iter()
+        .flat_map(|key| {
+            policy
+                .get(key)
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+        })
+        .collect::<Vec<_>>();
+    html! {
+        div {
+            b { "模式" }
+            span { (label) }
+            @for item in details { span { (item) } }
+        }
+    }
+}
+
+fn evidence_stance_icon(stance: &str) -> &'static str {
+    match stance {
+        "supports" => "✓",
+        "refutes" => "×",
+        "blocks" => "!",
+        _ => "·",
     }
 }
 
@@ -1459,6 +1654,17 @@ fn review_gate_panel(
         .map(Uuid::to_string)
         .collect::<Vec<_>>()
         .join(",");
+    let frozen_evidence = snapshot
+        .review_gate_evidence
+        .iter()
+        .filter(|item| item.review_gate_id == gate.id)
+        .filter_map(|link| {
+            snapshot
+                .evidence
+                .iter()
+                .find(|item| item.id == link.evidence_id)
+        })
+        .collect::<Vec<_>>();
     html! {
         section class=(format!("review-panel review-panel--{}", goal_status_tone(&gate.status)))
             data-review-gate-id=(gate.id) {
@@ -1471,6 +1677,7 @@ fn review_gate_panel(
                 div { b { "Agent 自查" } p { (gate.self_check.0.get("summary").and_then(serde_json::Value::as_str).unwrap_or("未记录")) } }
                 div { b { "测试" } @for item in json_value_strings(&gate.test_evidence.0) { span { (item) } } }
                 div { b { "风险" } @if json_value_len(&gate.risks.0) == 0 { span { "未记录" } } @for item in json_value_strings(&gate.risks.0) { span { (item) } } }
+                div { b { "结构化 Evidence" } @if frozen_evidence.is_empty() { span { "未绑定" } } @for item in &frozen_evidence { span { (evidence_stance_icon(&item.stance)) " " (&item.claim) } } }
             }
             @for decision in decisions {
                 article class="review-decision-record" {
@@ -1533,6 +1740,20 @@ fn review_gate_panel(
                     }
                 }
             }
+            @if matches!(gate.status.as_str(), "pending_ai_review" | "pending_human_review") {
+                details class="review-action proposal-decision--danger" {
+                    summary { "工作 Agent 发现候选不再可信" }
+                    form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        input type="hidden" name="action" value="merge.withdraw";
+                        input type="hidden" name="review_gate_id" value=(gate.id);
+                        input type="hidden" name="return_session_id" value=(session.id);
+                        label { "撤回原因" textarea name="reason" rows="2" required {} }
+                        label { "新发现的证据（每行一项）" textarea name="new_evidence" rows="2" required {} }
+                        button class="button button--secondary button--small" type="submit" { "撤回并转入下一 Session" }
+                    }
+                }
+            }
         }
     }
 }
@@ -1543,6 +1764,10 @@ fn session_action_panel(
     contract: Option<&GoalContractVersionRecord>,
     current_contributions: &[&crate::goal_models::GoalContributionRecord],
 ) -> Markup {
+    let branch = snapshot
+        .branches
+        .iter()
+        .find(|item| item.id == session.goal_branch_id);
     let branch_contributions = snapshot
         .contributions
         .iter()
@@ -1553,6 +1778,19 @@ fn session_action_panel(
         .map(|item| item.id.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    let branch_evidence = snapshot
+        .evidence
+        .iter()
+        .filter(|item| item.goal_branch_id == session.goal_branch_id)
+        .collect::<Vec<_>>();
+    let evidence_ids = branch_evidence
+        .iter()
+        .map(|item| item.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let pending_contract_revision = snapshot.contract_revision_requests.iter().any(|item| {
+        item.goal_branch_id == session.goal_branch_id && item.status == "awaiting_approval"
+    });
     let blocking_proposal = snapshot.proposals.iter().any(|proposal| {
         proposal.parent_session_id == Some(session.id)
             && matches!(proposal.status.as_str(), "draft" | "awaiting_approval")
@@ -1605,8 +1843,64 @@ fn session_action_panel(
                         }
                     }
                     details class="session-action" {
+                        summary { "+ 记录可追溯 Evidence" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.add_evidence";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "类型"
+                                select name="evidence_kind" {
+                                    option value="test" { "测试" }
+                                    option value="browser" { "浏览器验证" }
+                                    option value="observation" { "观察" }
+                                    option value="research" { "研究资料" }
+                                    option value="external_source" { "外部资料" }
+                                }
+                            }
+                            label { "作用"
+                                select name="evidence_stance" {
+                                    option value="supports" { "支持" }
+                                    option value="refutes" { "反驳" }
+                                    option value="blocks" { "阻塞" }
+                                    option value="context" { "背景" }
+                                }
+                            }
+                            label { "它支持或反驳什么判断？" textarea name="claim" rows="2" required {} }
+                            label { "实际观察" textarea name="observation" rows="3" required {} }
+                            label { "来源链接（可选）" input name="source_uri"; }
+                            label { "核验状态"
+                                select name="verification_status" {
+                                    option value="verified" { "已核验" }
+                                    option value="unverified" { "未核验" }
+                                    option value="failed" { "核验失败" }
+                                }
+                            }
+                            button class="button button--primary button--small" type="submit" { "保存 Evidence" }
+                        }
+                    }
+                    @if let Some(contract) = contract {
+                        details class="session-action" open[pending_contract_revision] {
+                            summary { "≠ 提议修订目标契约" }
+                            @if pending_contract_revision {
+                                p class="worksite-empty-copy" { "已有修订等待决定，请先处理上方差异。" }
+                            } @else {
+                                (contract_revision_editor(snapshot.project.id, session, contract))
+                            }
+                        }
+                    }
+                    details class="session-action" {
                         summary { "⑂ 拆出子目标" }
                         (proposal_editor(snapshot.project.id, "session.propose_child", None, Some(session.id), None))
+                    }
+                    details class="session-action proposal-decision--danger" {
+                        summary { "■ 停止这条目标枝干" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="session.stop";
+                            input type="hidden" name="session_id" value=(session.id);
+                            label { "停止理由（历史和已有成果会保留）" textarea name="reason" rows="3" required {} }
+                            button class="button button--secondary button--small" type="submit" { "确认停止，不冒充完成" }
+                        }
                     }
                     details class="session-action" {
                         summary { "? 请你做方向 / 品味判断" }
@@ -1657,9 +1951,16 @@ fn session_action_panel(
                                 input type="hidden" name="session_id" value=(session.id);
                                 input type="hidden" name="contract_version_id" value=(contract.map(|item| item.id).unwrap_or(session.contract_version_id));
                                 input type="hidden" name="contribution_ids" value=(contribution_ids.as_str());
+                                input type="hidden" name="evidence_ids" value=(evidence_ids.as_str());
                                 div class="candidate-contributions" {
                                     b { "冻结以下 Contribution" }
                                     @for item in &branch_contributions { span { (&item.title) } }
+                                }
+                                @if !branch_evidence.is_empty() {
+                                    div class="candidate-contributions" {
+                                        b { "同时冻结 Evidence" }
+                                        @for item in &branch_evidence { span { (evidence_stance_icon(&item.stance)) " " (&item.claim) } }
+                                    }
                                 }
                                 label { "测试 / 浏览器证据（每行一项）" textarea name="test_evidence" rows="3" required {} }
                                 label { "已知风险（每行一项，可留空）" textarea name="risks" rows="2" {} }
@@ -1703,7 +2004,81 @@ fn session_action_panel(
                         @else { "这个 Session 已结束或当前不可写。" }
                     }
                 }
+                @if let Some(branch) = branch.filter(|item| matches!(item.status.as_str(), "integrated" | "completed" | "stopped")) {
+                    details class="session-action proposal-decision--danger" {
+                        summary { "归档这条终态枝干" }
+                        form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
+                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                            input type="hidden" name="action" value="goal_branch.archive";
+                            input type="hidden" name="goal_branch_id" value=(branch.id);
+                            input type="hidden" name="return_session_id" value=(session.id);
+                            label { "归档理由" textarea name="reason" rows="2" required {} }
+                            button class="button button--secondary button--small" type="submit" { "归档但保留终态结论" }
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+fn contract_revision_editor(
+    project_id: Uuid,
+    session: &GoalSessionRecord,
+    contract: &GoalContractVersionRecord,
+) -> Markup {
+    let lines = |items: &[String]| items.join("\n");
+    let exploration = &contract.exploration_policy.0;
+    let exploration_mode = exploration
+        .get("mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("delivery");
+    let exploration_lines = |key: &str| {
+        exploration
+            .get(key)
+            .map(json_value_lines)
+            .unwrap_or_default()
+    };
+    html! {
+        form class="goal-contract-form" method="post" action=(format!("/projects/{project_id}/goal-commands")) {
+            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+            input type="hidden" name="action" value="contract.propose_revision";
+            input type="hidden" name="goal_branch_id" value=(session.goal_branch_id);
+            input type="hidden" name="session_id" value=(session.id);
+            input type="hidden" name="return_session_id" value=(session.id);
+            input type="hidden" name="contract_version_id" value=(contract.id);
+            div class="goal-contract-form__intro" {
+                strong { "只改真正变化的部分" }
+                span { "系统会生成逐字段差异；批准前 v" (contract.version) " 继续有效。" }
+            }
+            label { "为什么需要改变目标？" textarea name="reason" rows="2" required {} }
+            label { "想得到的结果" textarea name="desired_outcome" rows="3" required { (&contract.desired_outcome) } }
+            div class="goal-form-columns" {
+                label { "怎样验证" textarea name="validation_plan" rows="3" required { (lines(&contract.validation_plan.0)) } }
+                label { "何时完成或停止" textarea name="stop_conditions" rows="3" required { (lines(&contract.stop_conditions.0)) } }
+            }
+            label { "目前还不知道什么？" textarea name="unknowns" rows="2" { (lines(&contract.unknowns.0)) } }
+            details class="goal-form-advanced" {
+                summary { "按需修改其余契约字段" }
+                div class="goal-form-columns" {
+                    label { "硬约束" textarea name="hard_constraints" rows="2" { (lines(&contract.hard_constraints.0)) } }
+                    label { "主观偏好" textarea name="subjective_preferences" rows="2" { (lines(&contract.subjective_preferences.0)) } }
+                    label { "明确不做" textarea name="non_goals" rows="2" { (lines(&contract.non_goals.0)) } }
+                    label { "何时请你判断" textarea name="judgment_triggers" rows="2" { (lines(&contract.judgment_triggers.0)) } }
+                    label { "期望回流的贡献" textarea name="expected_contributions" rows="2" { (lines(&contract.expected_contributions.0)) } }
+                    label { "目标模式"
+                        select name="exploration_mode" {
+                            option value="delivery" selected[exploration_mode == "delivery"] { "交付：结果和验收已较清楚" }
+                            option value="exploration" selected[exploration_mode == "exploration"] { "探索：先减少未知，再请你判断" }
+                            option value="hybrid" selected[exploration_mode == "hybrid"] { "混合：交付与探索并行" }
+                        }
+                    }
+                    label { "探索预算 / 边界（每行一项）" textarea name="exploration_budgets" rows="2" placeholder="例如：最多比较 3 个候选" { (exploration_lines("budgets")) } }
+                    label { "候选产出（每行一项）" textarea name="exploration_candidates" rows="2" placeholder="例如：两个可操作原型" { (exploration_lines("candidateOutputs")) } }
+                    label { "怎样算不确定性减少（每行一项）" textarea name="uncertainty_reduction" rows="2" placeholder="例如：能明确排除至少一个方向" { (exploration_lines("uncertaintyReduction")) } }
+                }
+            }
+            button class="button button--secondary button--small" type="submit" { "生成差异，等待决定" }
         }
     }
 }

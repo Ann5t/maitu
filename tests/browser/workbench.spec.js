@@ -38,6 +38,7 @@ test.use({
 });
 
 test('goal branch workbench is operable on desktop and mobile', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('/new');
   await page.getByLabel('项目意图').fill('用 Chromium 验证目标枝干工作台');
   await page.getByRole('button', { name: '形成项目起点' }).click();
@@ -77,6 +78,46 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.worksite-record')).toContainText('browser-evidence.md');
 
+  const contractRevisionPanel = page.locator('details').filter({
+    has: page.locator('input[value="contract.propose_revision"]'),
+  });
+  await contractRevisionPanel.locator(':scope > summary').click();
+  const contractRevision = contractRevisionPanel.locator('form');
+  await contractRevision.locator('[name="reason"]').fill('把结构化 Evidence 纳入浏览器验收');
+  await contractRevision.locator('[name="validation_plan"]').fill(
+    'Playwright 运行桌面与移动端闭环\n记录并冻结结构化 Evidence',
+  );
+  const contractAdvanced = contractRevision.locator('details.goal-form-advanced');
+  await contractAdvanced.locator(':scope > summary').click();
+  await contractRevision.locator('[name="exploration_mode"]').selectOption('exploration');
+  await contractRevision.locator('[name="exploration_budgets"]').fill('最多验证两个候选后请用户判断');
+  await contractRevision.locator('[name="exploration_candidates"]').fill('桌面与手机可操作候选');
+  await contractRevision.locator('[name="uncertainty_reduction"]').fill('用户能排除至少一种不合适的交互');
+  await contractRevision.getByRole('button', { name: '生成差异，等待决定' }).click();
+  const contractReview = page.locator('[data-contract-revision-id]');
+  await expect(contractReview).toContainText('验证计划');
+  await expect(contractReview).toContainText('探索契约');
+  const contractAccept = contractReview.locator('form:has(input[value="contract.accept_revision"])');
+  await contractAccept.locator('[name="rationale"]').fill('差异明确且没有降低原验收');
+  await contractAccept.getByRole('button', { name: '接受并安全暂停' }).click();
+  const resume = page.locator('form:has(input[value="session.resume"])');
+  await resume.locator('[name="resolution"]').fill('已阅读契约差异，继续浏览器验收');
+  await resume.getByRole('button', { name: '恢复 Session' }).click();
+  await expect(page.locator('.worksite-contract')).toContainText('探索模式');
+
+  const structuredEvidencePanel = page.locator('details').filter({
+    has: page.locator('input[value="session.add_evidence"]'),
+  });
+  await structuredEvidencePanel.locator(':scope > summary').click();
+  const structuredEvidence = structuredEvidencePanel.locator('form');
+  await structuredEvidence.locator('[name="evidence_kind"]').selectOption('browser');
+  await structuredEvidence.locator('[name="evidence_stance"]').selectOption('supports');
+  await structuredEvidence.locator('[name="claim"]').fill('工作台在真实 Chromium 可操作');
+  await structuredEvidence.locator('[name="observation"]').fill('契约差异批准、暂停和恢复全部由页面完成');
+  await structuredEvidence.locator('[name="verification_status"]').selectOption('verified');
+  await structuredEvidence.getByRole('button', { name: '保存 Evidence' }).click();
+  await expect(page.locator('.test-evidence-record')).toContainText('工作台在真实 Chromium 可操作');
+
   const contribution = page.locator('form:has(input[value="session.add_contribution"])');
   await contribution.locator('[name="contribution_kind"]').selectOption('evidence');
   await contribution.locator('[name="title"]').fill('Chromium 端到端证据');
@@ -100,6 +141,8 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await merge.locator('[name="test_evidence"]').fill('Chromium 桌面布局无溢出\n文件导入成功');
   await merge.locator('[name="self_check"]').fill('已核对目标、验证、未知与停止条件');
   await merge.getByRole('button', { name: '冻结现场并进入拟合并审核' }).click();
+  await expect(page.locator('.review-evidence-grid')).toContainText('结构化 Evidence');
+  await expect(page.locator('.review-evidence-grid')).toContainText('工作台在真实 Chromium 可操作');
 
   const aiReview = page.locator('form:has(input[value="review.ai_record"])');
   await aiReview.locator('[name="reviewer_identity"]').fill('browser-reviewer');

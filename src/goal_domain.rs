@@ -98,6 +98,12 @@ string_enum!(ReviewDecisionKind {
     Withdraw => "withdraw",
 });
 
+string_enum!(ContractRevisionStatus {
+    AwaitingApproval => "awaiting_approval",
+    Accepted => "accepted",
+    Rejected => "rejected",
+});
+
 impl ProposalStatus {
     pub fn revise(self) -> AppResult<Self> {
         match self {
@@ -163,6 +169,14 @@ impl GoalBranchStatus {
                 "start_session",
             )),
         }
+    }
+
+    pub fn archive(self, actor: GoalActor) -> AppResult<Self> {
+        require_human(actor)?;
+        if matches!(self, Self::Integrated | Self::Completed | Self::Stopped) {
+            return Ok(Self::Archived);
+        }
+        Err(invalid_transition("GoalBranch", self.as_str(), "archive"))
     }
 }
 
@@ -253,6 +267,24 @@ impl SessionStatus {
         }
     }
 
+    pub fn stop(self, actor: GoalActor) -> AppResult<Self> {
+        require_human(actor)?;
+        match self {
+            Self::Running
+            | Self::WaitingBranchReview
+            | Self::WaitingDependency
+            | Self::WaitingJudgment
+            | Self::ExceptionPaused
+            | Self::ManualPaused
+            | Self::ReviewRejected => Ok(Self::Stopped),
+            _ => Err(invalid_transition(
+                "AgentSessionNode",
+                self.as_str(),
+                "stop",
+            )),
+        }
+    }
+
     fn running_exit(self, next: Self, action: &'static str) -> AppResult<Self> {
         match self {
             Self::Running => Ok(next),
@@ -335,6 +367,89 @@ impl ReviewGateStatus {
     }
 }
 
+impl ContractRevisionStatus {
+    pub fn decide(self, actor: GoalActor, accept: bool) -> AppResult<Self> {
+        require_human(actor)?;
+        if self != Self::AwaitingApproval {
+            return Err(invalid_transition(
+                "ContractRevision",
+                self.as_str(),
+                if accept { "accept" } else { "reject" },
+            ));
+        }
+        Ok(if accept {
+            Self::Accepted
+        } else {
+            Self::Rejected
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorationPolicy {
+    #[serde(default = "default_exploration_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub budgets: Vec<String>,
+    #[serde(default)]
+    pub candidate_outputs: Vec<String>,
+    #[serde(default)]
+    pub uncertainty_reduction: Vec<String>,
+}
+
+impl Default for ExplorationPolicy {
+    fn default() -> Self {
+        Self {
+            mode: default_exploration_mode(),
+            budgets: Vec::new(),
+            candidate_outputs: Vec::new(),
+            uncertainty_reduction: Vec::new(),
+        }
+    }
+}
+
+impl ExplorationPolicy {
+    fn validate(mut self) -> AppResult<Self> {
+        self.mode = required_text("目标模式", self.mode, 40)?;
+        if !matches!(self.mode.as_str(), "delivery" | "exploration" | "hybrid") {
+            return Err(AppError::bad_request(
+                "invalid_exploration_mode",
+                "目标模式必须是交付、探索或混合",
+            ));
+        }
+        normalize_list("探索预算", &mut self.budgets)?;
+        normalize_list("探索候选产出", &mut self.candidate_outputs)?;
+        normalize_list("不确定性收敛方式", &mut self.uncertainty_reduction)?;
+        Ok(self)
+    }
+
+    fn validate_for_approval(self) -> AppResult<Self> {
+        let policy = self.validate()?;
+        if matches!(policy.mode.as_str(), "exploration" | "hybrid") {
+            if policy.budgets.is_empty() {
+                return Err(AppError::bad_request(
+                    "insufficient_exploration_contract",
+                    "探索型目标至少要写明一项时间、资源、候选数量或判断边界",
+                ));
+            }
+            if policy.candidate_outputs.is_empty() {
+                return Err(AppError::bad_request(
+                    "insufficient_exploration_contract",
+                    "探索型目标至少要写明一种原型、实验或候选产出",
+                ));
+            }
+            if policy.uncertainty_reduction.is_empty() {
+                return Err(AppError::bad_request(
+                    "insufficient_exploration_contract",
+                    "探索型目标要说明如何判断不确定性已经减少",
+                ));
+            }
+        }
+        Ok(policy)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalContractDraft {
@@ -355,6 +470,8 @@ pub struct GoalContractDraft {
     pub stop_conditions: Vec<String>,
     #[serde(default)]
     pub expected_contributions: Vec<String>,
+    #[serde(default)]
+    pub exploration: ExplorationPolicy,
 }
 
 impl GoalContractDraft {
@@ -368,6 +485,7 @@ impl GoalContractDraft {
         normalize_list("判断时机", &mut self.judgment_triggers)?;
         normalize_list("停止条件", &mut self.stop_conditions)?;
         normalize_list("期望贡献", &mut self.expected_contributions)?;
+        self.exploration = self.exploration.validate()?;
         Ok(self)
     }
 
@@ -385,7 +503,11 @@ impl GoalContractDraft {
                 "批准前至少要说明验证方法或何时请用户判断",
             ));
         }
-        Ok(contract)
+        let exploration = contract.exploration.validate_for_approval()?;
+        Ok(Self {
+            exploration,
+            ..contract
+        })
     }
 }
 
@@ -432,8 +554,59 @@ impl BranchProposalRevisionDraft {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ContractSourceAnnotation {
+    pub field_path: String,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub note: String,
+}
+
+impl ContractSourceAnnotation {
+    pub fn validate(mut self) -> AppResult<Self> {
+        self.field_path = required_text("契约来源字段", self.field_path, 240)?;
+        if !self.field_path.starts_with('/') {
+            return Err(AppError::bad_request(
+                "invalid_contract_source",
+                "契约来源字段必须是以 / 开头的 JSON Pointer",
+            ));
+        }
+        self.source_kind = required_text("契约来源类型", self.source_kind, 80)?;
+        if !matches!(
+            self.source_kind.as_str(),
+            "human_input"
+                | "agent_inference"
+                | "external_source"
+                | "inherited_contract"
+                | "artifact"
+                | "evidence"
+        ) {
+            return Err(AppError::bad_request(
+                "invalid_contract_source",
+                "未知的契约来源类型",
+            ));
+        }
+        self.source_ref = optional_text("契约来源引用", self.source_ref, 4_000)?;
+        if matches!(
+            self.source_kind.as_str(),
+            "external_source" | "artifact" | "evidence"
+        ) && self.source_ref.is_none()
+        {
+            return Err(AppError::bad_request(
+                "invalid_contract_source",
+                "外部资料、Artifact 或 Evidence 来源必须提供可追溯引用",
+            ));
+        }
+        self.note = required_text("契约来源说明", self.note, 4_000)?;
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CandidateSnapshot {
     pub contribution_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub evidence_ids: Vec<Uuid>,
     pub contract_version_id: Uuid,
     pub git_base_commit: Option<String>,
     pub git_head_commit: Option<String>,
@@ -467,6 +640,21 @@ impl CandidateSnapshot {
             return Err(AppError::bad_request(
                 "duplicate_contribution",
                 "候选中不能重复引用同一 Contribution",
+            ));
+        }
+        if self.evidence_ids.len() > 1_000 {
+            return Err(AppError::bad_request(
+                "too_many_evidence",
+                "一次拟合并包含的 Evidence 过多",
+            ));
+        }
+        self.evidence_ids.sort_unstable();
+        let original_len = self.evidence_ids.len();
+        self.evidence_ids.dedup();
+        if self.evidence_ids.len() != original_len {
+            return Err(AppError::bad_request(
+                "duplicate_evidence",
+                "候选中不能重复引用同一 Evidence",
             ));
         }
         self.git_base_commit = optional_text("Git 基线", self.git_base_commit, 200)?;
@@ -634,6 +822,10 @@ fn empty_object() -> Value {
     serde_json::json!({})
 }
 
+fn default_exploration_mode() -> String {
+    "delivery".into()
+}
+
 fn invalid_transition(entity: &str, state: &str, action: &str) -> AppError {
     AppError::conflict(
         "invalid_state_transition",
@@ -659,6 +851,12 @@ mod tests {
             judgment_triggers: vec!["出现两种都可行的布局时找用户体验".into()],
             stop_conditions: vec!["两个真实流程原型可操作后暂停评审".into()],
             expected_contributions: vec!["原型与体验证据".into()],
+            exploration: ExplorationPolicy {
+                mode: "exploration".into(),
+                budgets: vec!["最多形成两个可操作候选后请求判断".into()],
+                candidate_outputs: vec!["桌面与手机交互原型".into()],
+                uncertainty_reduction: vec!["用户能明确排除至少一个方向".into()],
+            },
         }
     }
 
@@ -667,6 +865,30 @@ mod tests {
         let contract = exploratory_contract().validate_for_approval().unwrap();
         assert_eq!(contract.unknowns, vec!["图和工作台的最佳比例"]);
         assert_eq!(contract.subjective_preferences.len(), 1);
+    }
+
+    #[test]
+    fn exploratory_contract_requires_budget_candidates_and_uncertainty_reduction() {
+        let mut contract = exploratory_contract();
+        contract.exploration.budgets.clear();
+        assert_eq!(
+            contract.validate_for_approval().unwrap_err().code(),
+            "insufficient_exploration_contract"
+        );
+
+        let mut contract = exploratory_contract();
+        contract.exploration.candidate_outputs.clear();
+        assert_eq!(
+            contract.validate_for_approval().unwrap_err().code(),
+            "insufficient_exploration_contract"
+        );
+
+        let mut contract = exploratory_contract();
+        contract.exploration.uncertainty_reduction.clear();
+        assert_eq!(
+            contract.validate_for_approval().unwrap_err().code(),
+            "insufficient_exploration_contract"
+        );
     }
 
     #[test]
@@ -792,6 +1014,7 @@ mod tests {
         let second = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
         let snapshot = CandidateSnapshot {
             contribution_ids: vec![second, first],
+            evidence_ids: vec![second],
             contract_version_id: first,
             git_base_commit: Some("abc".into()),
             git_head_commit: Some("def".into()),
@@ -804,6 +1027,7 @@ mod tests {
         .validate()
         .unwrap();
         assert_eq!(snapshot.contribution_ids, vec![first, second]);
+        assert_eq!(snapshot.evidence_ids, vec![second]);
         assert_eq!(snapshot.fingerprint().unwrap().len(), 71);
     }
 
@@ -829,6 +1053,58 @@ mod tests {
         assert_eq!(
             stored.ensure_replay_matches(&changed).unwrap_err().code(),
             "idempotency_conflict"
+        );
+    }
+
+    #[test]
+    fn contract_revision_requires_human_decision_and_explicit_source() {
+        assert_eq!(
+            ContractRevisionStatus::AwaitingApproval
+                .decide(GoalActor::Agent, true)
+                .unwrap_err()
+                .code(),
+            "human_authority_required"
+        );
+        assert_eq!(
+            ContractRevisionStatus::AwaitingApproval
+                .decide(GoalActor::Human, true)
+                .unwrap(),
+            ContractRevisionStatus::Accepted
+        );
+        assert_eq!(
+            ContractSourceAnnotation {
+                field_path: "/unknowns".into(),
+                source_kind: "human_input".into(),
+                source_ref: None,
+                note: "用户在体验原型后补充".into(),
+            }
+            .validate()
+            .unwrap()
+            .field_path,
+            "/unknowns"
+        );
+    }
+
+    #[test]
+    fn only_human_can_stop_or_archive_a_goal_branch() {
+        assert_eq!(
+            SessionStatus::Running
+                .stop(GoalActor::Agent)
+                .unwrap_err()
+                .code(),
+            "human_authority_required"
+        );
+        assert_eq!(
+            SessionStatus::WaitingDependency
+                .stop(GoalActor::Human)
+                .unwrap(),
+            SessionStatus::Stopped
+        );
+        assert_eq!(
+            GoalBranchStatus::Completed
+                .archive(GoalActor::Human)
+                .unwrap(),
+            GoalBranchStatus::Archived
         );
     }
 }

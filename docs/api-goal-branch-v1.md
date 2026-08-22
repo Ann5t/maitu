@@ -6,7 +6,7 @@
 
 `GET /api/v1/projects/:project_id/goal-graph`
 
-返回 `modelVersion: "goal-branch-v1"`，以及 Project、Proposal 修订、契约版本、GoalBranch、Session、Contribution、ReviewGate/Decision、Integration、AttentionItem 与有序 Event。它是领域快照，不规定前端必须怎样画图。
+返回 `modelVersion: "goal-branch-v2"`，以及 Project、Proposal 修订、契约版本/修订请求/来源、GoalBranch、Session、Contribution、Evidence、ReviewGate/Decision、Integration、AttentionItem 与有序 Event。URL 保持 v1 是为了兼容现有客户端；`modelVersion` 明确表达增量快照结构。它是领域快照，不规定前端必须怎样画图。
 
 ## 命令
 
@@ -33,16 +33,25 @@
 | `proposal.approve` | 用户批准并原子创建枝干、契约 v1 与首个 Session |
 | `session.propose_child` | 工作 Agent 提出子目标并暂停父 Session |
 | `session.add_contribution` | running Session 登记不可变 Contribution |
+| `session.add_evidence` | running Session 登记带哈希和来源的不可变 Evidence |
+| `contract.propose_revision` | 基于活动契约生成不可变候选、字段差异和来源 |
+| `contract.accept_revision` | 用户接受候选，切换活动契约并安全暂停 running Session |
+| `contract.reject_revision` | 用户拒绝候选，保留审计且不改变活动契约 |
 | `session.request_judgment` | 请求用户品味/科研判断并创建待处理项 |
 | `session.pause_exception` | 带完整诊断信息异常暂停 |
 | `session.pause_manual` | 用户手动暂停 |
 | `session.resume` | 解决待处理后显式恢复同一 Session |
 | `session.start_next` | 拟合并被退回后在同一枝干创建下一 Session |
+| `session.stop` | 用户明确停止 Session/枝干，保留未达成结论 |
 | `merge.propose` | 冻结 Contribution、Git、环境与证据候选 |
+| `merge.withdraw` | 发现反例后撤回冻结候选，要求下一 Session |
 | `review.ai_record` | 独立审核 AI 记录建议和复验 |
 | `review.human_decide` | 用户接受、部分接受、退回或放弃 |
+| `goal_branch.archive` | 用户归档终态枝干并保留归档前结论 |
 
 `review.human_decide` 完整接受时必须选择冻结候选中的全部 Contribution；部分接受必须选择非空真子集；退回和放弃不得选择 Contribution。领域接受只把选中贡献放入父上下文，Git 状态明确记录为 `not_attempted`，不会把尚未执行的物理 merge 冒充完成。
+
+契约中的 `exploration` 支持 `delivery | exploration | hybrid`。探索/混合模式还必须提供 `budgets`、`candidateOutputs` 和 `uncertaintyReduction`；否则在 Proposal 批准或契约修订时返回 422 / `insufficient_exploration_contract`。完整语义见 [`core-domain-v2.md`](core-domain-v2.md)。
 
 ## HTML 表单适配
 

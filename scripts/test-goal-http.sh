@@ -6,6 +6,7 @@ goal_http_suffix="$$"
 goal_http_network="fudian-goal-http-test-$goal_http_suffix"
 goal_http_db="fudian-goal-http-db-$goal_http_suffix"
 goal_http_app="fudian-goal-http-app-$goal_http_suffix"
+goal_http_tmp="$(mktemp -d)"
 
 cleanup_goal_http() {
   if [[ "$goal_http_app" == fudian-goal-http-app-* ]]; then
@@ -17,6 +18,7 @@ cleanup_goal_http() {
   if [[ "$goal_http_network" == fudian-goal-http-test-* ]]; then
     docker network rm "$goal_http_network" >/dev/null 2>&1 || true
   fi
+  [[ "$goal_http_tmp" == /tmp/tmp.* ]] && rm -rf "$goal_http_tmp"
 }
 trap cleanup_goal_http EXIT
 
@@ -263,7 +265,7 @@ s=json.loads(sys.argv[1])
 root=sys.argv[2]; child=sys.argv[3]
 branches={b["id"]:b for b in s["branches"]}
 sessions=sorted((x for x in s["sessions"] if x["goalBranchId"]==child), key=lambda x:x["sessionNumber"])
-assert s["modelVersion"] == "goal-branch-v1"
+assert s["modelVersion"] == "goal-branch-v2"
 assert s["project"]["state"] == "completed"
 assert branches[root]["status"] == "completed"
 assert branches[child]["status"] == "integrated"
@@ -272,6 +274,148 @@ assert len(s["integrations"]) == 2
 assert all(i["gitIntegrationStatus"] == "not_attempted" for i in s["integrations"])
 assert not [a for a in s["attentionItems"] if a["status"] == "open"]' \
   "$goal_snapshot" "$goal_root_branch_id" "$goal_child_branch_id"
+
+# A second isolated project covers contract evolution, first-class Evidence, candidate withdrawal,
+# explicit stop and archival without making the already dense acceptance flow harder to inspect.
+goal_v2_project_response="$(curl -fsS -H 'content-type: application/json' \
+  -d '{"intent":"验证契约演进、Evidence、撤回和停止"}' \
+  "$goal_http_base/api/projects")"
+goal_project_id="$(json_field "$goal_v2_project_response" id)"
+goal_response="$(post_goal proposal.create \
+  "{\"revision\":$goal_root_revision}" "$(new_uuid)")"
+goal_v2_proposal_id="$(json_field "$goal_response" result.proposalId)"
+post_goal proposal.submit \
+  "{\"proposalId\":\"$goal_v2_proposal_id\",\"expectedRevision\":1}" \
+  "$(new_uuid)" >/dev/null
+goal_response="$(post_goal proposal.approve \
+  "{\"proposalId\":\"$goal_v2_proposal_id\",\"expectedRevision\":1,\"branchName\":\"契约演进根目标\",\"assignment\":\"验证 v2 状态机\",\"agentIdentity\":\"worker-v2\"}" \
+  "$(new_uuid)")"
+goal_v2_branch_id="$(json_field "$goal_response" result.goalBranchId)"
+goal_v2_session_1="$(json_field "$goal_response" result.sessionId)"
+goal_v2_contract_1="$(json_field "$goal_response" result.contractVersionId)"
+goal_v2_contract_base="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_project_id/goal-graph" | \
+  python3 -c 'import json,sys
+s=json.load(sys.stdin); target=sys.argv[1]
+c=next(x for x in s["contracts"] if x["id"]==target)
+keys=["desiredOutcome","hardConstraints","subjectivePreferences","unknowns","nonGoals","validationPlan","judgmentTriggers","stopConditions","expectedContributions"]
+contract={key:c[key] for key in keys}
+contract["exploration"]=c["explorationPolicy"]
+print(json.dumps(contract,ensure_ascii=False))' "$goal_v2_contract_1")"
+
+goal_contract_rejected="$(python3 -c 'import json,sys
+value=json.loads(sys.argv[1])
+value["hardConstraints"].append("这条候选将被拒绝")
+print(json.dumps(value,ensure_ascii=False))' "$goal_v2_contract_base")"
+goal_response="$(post_goal contract.propose_revision \
+  "{\"goalBranchId\":\"$goal_v2_branch_id\",\"expectedContractVersionId\":\"$goal_v2_contract_1\",\"proposedBySessionId\":\"$goal_v2_session_1\",\"contract\":$goal_contract_rejected,\"reason\":\"验证拒绝不改变当前契约\",\"sourceAnnotations\":[{\"fieldPath\":\"/hardConstraints\",\"sourceKind\":\"agent_inference\",\"sourceRef\":null,\"note\":\"测试生成的候选约束\"}]}" \
+  "$(new_uuid)")"
+goal_v2_contract_request_rejected="$(json_field "$goal_response" result.revisionRequestId)"
+post_goal contract.reject_revision \
+  "{\"revisionRequestId\":\"$goal_v2_contract_request_rejected\",\"rationale\":\"这项约束不符合目标，只保留审计记录\"}" \
+  "$(new_uuid)" >/dev/null
+
+goal_contract_accepted="$(python3 -c 'import json,sys
+value=json.loads(sys.argv[1])
+value["unknowns"].append("撤回候选后是否保持同一枝干")
+value["validationPlan"].append("冻结结构化 Evidence 并验证撤回")
+value["exploration"]={
+  "mode":"exploration",
+  "budgets":["最多验证两个候选后请求判断"],
+  "candidateOutputs":["可撤回并保留历史的候选现场"],
+  "uncertaintyReduction":["能排除候选被静默修改或冒充完成"]
+}
+print(json.dumps(value,ensure_ascii=False))' "$goal_v2_contract_base")"
+goal_response="$(post_goal contract.propose_revision \
+  "{\"goalBranchId\":\"$goal_v2_branch_id\",\"expectedContractVersionId\":\"$goal_v2_contract_1\",\"proposedBySessionId\":\"$goal_v2_session_1\",\"contract\":$goal_contract_accepted,\"reason\":\"把候选撤回纳入有边界的探索验证\",\"sourceAnnotations\":[{\"fieldPath\":\"/unknowns\",\"sourceKind\":\"human_input\",\"sourceRef\":null,\"note\":\"用户要求不能遗漏撤回路径\"},{\"fieldPath\":\"/validationPlan\",\"sourceKind\":\"evidence\",\"sourceRef\":\"planned:http-v2-flow\",\"note\":\"将由隔离 HTTP 流程核验\"},{\"fieldPath\":\"/exploration\",\"sourceKind\":\"human_input\",\"sourceRef\":null,\"note\":\"未知效果用候选、预算和判断边界推进\"}]}" \
+  "$(new_uuid)")"
+goal_v2_contract_request_accepted="$(json_field "$goal_response" result.revisionRequestId)"
+goal_v2_contract_3="$(json_field "$goal_response" result.proposedContractVersionId)"
+goal_response="$(post_goal contract.accept_revision \
+  "{\"revisionRequestId\":\"$goal_v2_contract_request_accepted\",\"rationale\":\"差异和来源清楚，接受为活动契约\"}" \
+  "$(new_uuid)")"
+[[ "$(json_field "$goal_response" result.pausedSessionId)" == "$goal_v2_session_1" ]]
+post_goal session.resume \
+  "{\"sessionId\":\"$goal_v2_session_1\",\"resolution\":\"已阅读契约差异，在 v3 下继续\"}" \
+  "$(new_uuid)" >/dev/null
+
+goal_response="$(post_goal session.add_evidence \
+  "{\"sessionId\":\"$goal_v2_session_1\",\"kind\":\"test\",\"stance\":\"supports\",\"claim\":\"候选撤回保持旧候选冻结\",\"observation\":\"隔离 HTTP 将 Gate 转为 withdrawn 并要求下一 Session\",\"sourceUri\":null,\"artifactId\":null,\"toolCallId\":null,\"verificationStatus\":\"verified\"}" \
+  "$(new_uuid)")"
+goal_v2_evidence="$(json_field "$goal_response" result.evidenceId)"
+goal_response="$(post_goal session.add_contribution \
+  "{\"sessionId\":\"$goal_v2_session_1\",\"kind\":\"finding\",\"title\":\"撤回前候选\",\"body\":\"这项结果随后因新证据撤回\",\"artifactId\":null,\"evidenceRefs\":[],\"evidenceIds\":[\"$goal_v2_evidence\"],\"supersedesId\":null}" \
+  "$(new_uuid)")"
+goal_v2_contribution="$(json_field "$goal_response" result.contributionId)"
+goal_response="$(post_goal merge.propose \
+  "{\"sessionId\":\"$goal_v2_session_1\",\"candidate\":{\"contributionIds\":[\"$goal_v2_contribution\"],\"evidenceIds\":[\"$goal_v2_evidence\"],\"contractVersionId\":\"$goal_v2_contract_3\",\"gitBaseCommit\":null,\"gitHeadCommit\":null,\"gitDirty\":false,\"environmentFingerprint\":null,\"testEvidence\":[\"候选已冻结\"],\"risks\":[],\"selfCheck\":\"先冻结，再用新证据撤回\"}}" \
+  "$(new_uuid)")"
+goal_v2_gate="$(json_field "$goal_response" result.reviewGateId)"
+
+goal_frozen_body="$(python3 -c 'import json,sys,uuid; print(json.dumps({
+  "clientRequestId":str(uuid.uuid4()),"action":"session.add_evidence","payload":{
+    "sessionId":sys.argv[1],"kind":"test","stance":"supports","claim":"非法写入",
+    "observation":"冻结后不应出现","sourceUri":None,"artifactId":None,"toolCallId":None,
+    "verificationStatus":"verified"}}))' "$goal_v2_session_1")"
+goal_frozen_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H 'content-type: application/json' -d "$goal_frozen_body" \
+  "$goal_http_base/api/v1/projects/$goal_project_id/goal-commands")"
+[[ "$goal_frozen_status" == 409 ]]
+
+post_goal merge.withdraw \
+  "{\"reviewGateId\":\"$goal_v2_gate\",\"reason\":\"发现候选没有覆盖停止语义\",\"newEvidence\":[\"冻结后的反例不写入旧候选\"]}" \
+  "$(new_uuid)" >/dev/null
+
+goal_parallel_payload="{\"goalBranchId\":\"$goal_v2_branch_id\",\"previousSessionId\":\"$goal_v2_session_1\",\"assignment\":\"根据撤回原因决定安全停止\",\"agentIdentity\":\"worker-v2\"}"
+for goal_parallel_index in 1 2; do
+  goal_parallel_body="$(python3 -c 'import json,sys; print(json.dumps({
+    "clientRequestId":sys.argv[1],"action":"session.start_next","payload":json.loads(sys.argv[2])
+  },ensure_ascii=False))' "$(new_uuid)" "$goal_parallel_payload")"
+  curl -sS -w $'\n%{http_code}' -H 'content-type: application/json' \
+    -d "$goal_parallel_body" \
+    "$goal_http_base/api/v1/projects/$goal_project_id/goal-commands" \
+    > "$goal_http_tmp/parallel-$goal_parallel_index" &
+done
+wait
+goal_parallel_statuses="$(for goal_parallel_index in 1 2; do
+  printf '%s\n' "$(tail -n1 "$goal_http_tmp/parallel-$goal_parallel_index")"
+done | sort | paste -sd: -)"
+[[ "$goal_parallel_statuses" == "200:409" ]]
+goal_parallel_success_file="$(for goal_parallel_index in 1 2; do
+  if [[ "$(tail -n1 "$goal_http_tmp/parallel-$goal_parallel_index")" == 200 ]]; then
+    printf '%s' "$goal_http_tmp/parallel-$goal_parallel_index"
+  fi
+done)"
+goal_response="$(sed '$d' "$goal_parallel_success_file")"
+goal_v2_session_2="$(json_field "$goal_response" result.sessionId)"
+post_goal session.stop \
+  "{\"sessionId\":\"$goal_v2_session_2\",\"reason\":\"验证明确停止保留负面结论且不冒充完成\"}" \
+  "$(new_uuid)" >/dev/null
+post_goal goal_branch.archive \
+  "{\"goalBranchId\":\"$goal_v2_branch_id\",\"reason\":\"终态验证完成后归档\"}" \
+  "$(new_uuid)" >/dev/null
+
+goal_v2_snapshot="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_project_id/goal-graph")"
+python3 -c 'import json,sys
+s=json.loads(sys.argv[1]); branch=sys.argv[2]; contract=sys.argv[3]
+b=next(x for x in s["branches"] if x["id"]==branch)
+sessions=sorted(s["sessions"],key=lambda x:x["sessionNumber"])
+assert s["modelVersion"]=="goal-branch-v2"
+assert s["project"]["state"]=="stopped"
+assert b["status"]=="archived" and b["archivedFromStatus"]=="stopped"
+assert b["currentContractVersionId"]==contract
+active_contract=next(x for x in s["contracts"] if x["id"]==contract)
+assert active_contract["explorationPolicy"]["mode"]=="exploration"
+assert active_contract["explorationPolicy"]["budgets"]==["最多验证两个候选后请求判断"]
+assert [x["status"] for x in sessions]==["review_rejected","stopped"]
+assert [x["status"] for x in s["contractRevisionRequests"]]==["rejected","accepted"]
+assert len(s["contractRevisionDecisions"])==2
+assert len(s["contractProvenance"])>=5
+assert len(s["evidence"])==1 and s["evidence"][0]["verificationStatus"]=="verified"
+assert len(s["contributionEvidence"])==1
+assert len(s["reviewGateEvidence"])==1
+assert s["reviewGates"][0]["status"]=="withdrawn"
+assert not [a for a in s["attentionItems"] if a["status"]=="open"]' \
+  "$goal_v2_snapshot" "$goal_v2_branch_id" "$goal_v2_contract_3"
 
 goal_form_project_response="$(curl -fsS -H 'content-type: application/json' \
   -d '{"intent":"验证 HTML 表单共享目标枝干服务"}' \
@@ -286,4 +430,4 @@ goal_form_snapshot="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_form_proj
 python3 -c 'import json,sys; assert len(json.loads(sys.argv[1])["proposals"]) == 1' \
   "$goal_form_snapshot"
 
-echo "goal HTTP flow passed: Proposal -> child branch -> reject -> next Session -> accept -> root complete"
+echo "goal HTTP flow passed: Proposal, contract diff/decision, Evidence, withdraw, stop/archive and root completion"

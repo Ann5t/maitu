@@ -57,9 +57,54 @@ pub struct GoalContractVersionRecord {
     pub judgment_triggers: Json<Vec<String>>,
     pub stop_conditions: Json<Vec<String>>,
     pub expected_contributions: Json<Vec<String>>,
+    pub exploration_policy: Json<Value>,
     pub source_proposal_id: Option<Uuid>,
     pub supersedes_id: Option<Uuid>,
     pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalContractRevisionRequestRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub goal_branch_id: Uuid,
+    pub based_on_contract_version_id: Uuid,
+    pub proposed_contract_version_id: Uuid,
+    pub proposed_by_session_id: Option<Uuid>,
+    pub status: String,
+    pub reason: String,
+    pub change_summary: Json<Value>,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub decided_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalContractRevisionDecisionRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub revision_request_id: Uuid,
+    pub actor_role: String,
+    pub decision: String,
+    pub rationale: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalContractProvenanceRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub goal_branch_id: Uuid,
+    pub contract_version_id: Uuid,
+    pub field_path: String,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub note: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -83,6 +128,7 @@ pub struct GoalBranchRecord {
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub stopped_at: Option<DateTime<Utc>>,
+    pub archived_from_status: Option<String>,
 }
 
 #[derive(Clone, Debug, FromRow, Serialize)]
@@ -117,6 +163,42 @@ pub struct GoalContributionRecord {
     pub evidence_refs: Json<Value>,
     pub supersedes_id: Option<Uuid>,
     pub content_hash: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalEvidenceRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub goal_branch_id: Uuid,
+    pub session_id: Uuid,
+    pub kind: String,
+    pub stance: String,
+    pub claim: String,
+    pub observation: String,
+    pub source_uri: Option<String>,
+    pub artifact_id: Option<Uuid>,
+    pub tool_call_id: Option<Uuid>,
+    pub verification_status: String,
+    pub content_hash: String,
+    pub captured_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalContributionEvidenceRecord {
+    pub contribution_id: Uuid,
+    pub evidence_id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalReviewGateEvidenceRecord {
+    pub review_gate_id: Uuid,
+    pub evidence_id: Uuid,
     pub created_at: DateTime<Utc>,
 }
 
@@ -227,10 +309,16 @@ pub struct GoalGraphSnapshot {
     pub proposals: Vec<GoalProposalRecord>,
     pub proposal_revisions: Vec<GoalProposalRevisionRecord>,
     pub contracts: Vec<GoalContractVersionRecord>,
+    pub contract_revision_requests: Vec<GoalContractRevisionRequestRecord>,
+    pub contract_revision_decisions: Vec<GoalContractRevisionDecisionRecord>,
+    pub contract_provenance: Vec<GoalContractProvenanceRecord>,
     pub branches: Vec<GoalBranchRecord>,
     pub sessions: Vec<GoalSessionRecord>,
     pub contributions: Vec<GoalContributionRecord>,
+    pub evidence: Vec<GoalEvidenceRecord>,
+    pub contribution_evidence: Vec<GoalContributionEvidenceRecord>,
     pub review_gates: Vec<GoalReviewGateRecord>,
+    pub review_gate_evidence: Vec<GoalReviewGateEvidenceRecord>,
     pub review_decisions: Vec<GoalReviewDecisionRecord>,
     pub integrations: Vec<GoalIntegrationRecord>,
     pub integration_contributions: Vec<GoalIntegrationContributionRecord>,

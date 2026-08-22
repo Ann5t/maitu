@@ -16,6 +16,8 @@
 - 图谱、契约、产物和历史四个项目视图
 - 与现有 `fudian-nextgen` PostgreSQL 表和 Docker 产物卷兼容
 - HTML 表单与 JSON API 两套入口，共用同一应用服务和事务逻辑
+- 不可变目标契约修订、逐字段来源与人工接受/拒绝，以及有预算和收敛边界的探索型目标
+- 结构化 Evidence、候选冻结、撤回、停止和保留原结论的终态归档
 - 请求幂等、输入校验、产物路径防穿越和基础安全响应头
 - 明暗主题、响应式布局和移动端项目脉络列表
 
@@ -107,6 +109,8 @@ assets/                      CSS、渐进增强脚本和图标
 当前覆盖全产品第一阶段的 12 个方面、每项完成定义、缺口与实施顺序，以 [12 方面总验收矩阵](docs/design-12-aspects.md) 为唯一准绳；执行状态见 [12 方面总 Goal 进度](docs/goal-12-progress.md)。
 
 想法版本、关系、ProjectProposal、精确来源和原子立项协议见 [想法空间与 ProjectProposal v1](docs/idea-project-domain-v1.md)。
+
+契约演进、探索模式、结构化 Evidence、候选撤回与停止/归档边界见 [目标契约、Evidence 与执行生命周期 v2](docs/core-domain-v2.md)。
 
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 

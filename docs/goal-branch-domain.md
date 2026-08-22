@@ -1,6 +1,6 @@
-# 目标枝干领域与状态机 v0.1
+# 目标枝干领域与状态机 v0.2
 
-- 状态：里程碑 1 的实现契约
+- 状态：逻辑领域 v2 的实现契约；物理 Git/Runner/调度仍属后续阶段
 - 上位语义：[`product-design.md`](product-design.md)
 - 适用实现：`feat/goal-branch-core-v0.1`
 
@@ -57,6 +57,8 @@
 
 每条 GoalBranch 恰好有一个当前 `active` 版本。新版本只能由提案产生并经用户确认；执行 Agent 不得原地修改、降低或替换当前契约。
 
+契约同时包含 `exploration_policy`。普通交付使用 `delivery`；验收暂不明确的目标使用 `exploration` 或 `hybrid`，批准前必须写明探索预算/判断边界、候选产出和不确定性怎样收敛。详细协议与验证证据见 [`core-domain-v2.md`](core-domain-v2.md)。
+
 ### 2.4 GoalBranch
 
 `GoalBranch` 表示一个目标的完整枝干，包含：
@@ -106,6 +108,8 @@ Session 是枝干主图上的主要工作节点。它保存分配的一轮工作
 ### 2.6 Contribution、ReviewGate 与 Integration
 
 `GoalContribution` 是 Session 产出的不可变回流候选，种类为 `artifact | finding | evidence | decision | condition | code_change | other`。修改内容会产生新记录并用 `supersedes_id` 关联旧版本。
+
+`GoalEvidence` 是独立的一等事实记录，保存声明、观察、支持/反驳/阻塞立场、验证状态、内容哈希及可选 Artifact/ToolCall 来源。Contribution 可以引用 Evidence；ReviewGate 会冻结准确 Evidence 集。Evidence 与关联记录不可原地修改。
 
 `ReviewGate` 冻结一次拟合并候选，包含：
 
@@ -209,7 +213,7 @@ Gate 状态为 `pending_ai_review | pending_human_review | accepted | partially_
 | `human_authority_required` | AI 试图执行用户专属决定 |
 | `independent_reviewer_required` | 审核者与工作 Agent 不是独立身份 |
 
-HTTP 层把校验错误映射到 400、权限错误映射到 403、不存在映射到 404、版本/状态/幂等冲突映射到 409；内部错误不向客户端泄露 SQL、路径或秘密。
+HTTP 层把校验错误映射到 422、权限错误映射到 403、不存在映射到 404、版本/状态/幂等冲突映射到 409；内部错误不向客户端泄露 SQL、路径或秘密。
 
 ## 10. 旧模型共存策略
 
@@ -217,9 +221,9 @@ HTTP 层把校验错误映射到 400、权限错误映射到 403、不存在映�
 2. 新表使用 `goal_branch_proposals`、`goal_branches`、`goal_sessions`、`goal_contributions`、`goal_review_gates` 等独立命名，仅复用 `projects` 身份。
 3. 旧项目页面和旧 API 继续从旧表读取；新纵向流程使用版本化 `/api/v1/projects/:id/goal-*` 路径。
 4. 现有项目可以创建一个无父 GoalBranch 的根 Proposal；旧主枝干不会被自动解释或复制成新 GoalBranch。
-5. 新图快照返回明确的 `modelVersion: "goal-branch-v1"`。过渡期 UI 可以并列显示“旧探索图”和“目标枝干图”，不得把二者 ID 混用。
+5. 新图快照返回明确的 `modelVersion: "goal-branch-v2"`。过渡期 UI 可以并列显示“旧探索图”和“目标枝干图”，不得把二者 ID 混用。
 6. Artifact/Evidence 的旧表继续可读；新 Contribution 通过显式引用关联旧产物，不原地改变旧记录。
-7. 数据迁移采用只增不减的 `0002_goal_branch_core.sql`。必须分别在空库和只含 `0001` 的隔离库验证；真实库只做只读基线核验。
+7. 数据迁移采用只增不减的 `0002_goal_branch_core.sql` 至 `0007_goal_domain_v2.sql`。必须分别在空库和只含 `0001` 的隔离库验证；真实库只做只读基线核验。
 8. 将来是否导入旧图必须由单独 Goal 决定，并保留来源映射、演练、回滚与用户审核，不属于 v0.1。
 
 ## 11. 图投影边界

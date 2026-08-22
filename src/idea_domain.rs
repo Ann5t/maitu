@@ -365,7 +365,7 @@ fn optional_text(label: &str, value: Option<String>, max: usize) -> AppResult<Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::goal_domain::GoalContractDraft;
+    use crate::goal_domain::{ExplorationPolicy, GoalContractDraft};
 
     fn proposal() -> ProjectProposalRevisionDraft {
         ProjectProposalRevisionDraft {
@@ -384,6 +384,7 @@ mod tests {
                     judgment_triggers: vec!["可操作原型完成后".into()],
                     stop_conditions: vec!["用户接受或明确停止".into()],
                     expected_contributions: vec!["实现和证据".into()],
+                    exploration: ExplorationPolicy::default(),
                 },
                 expected_contributions: vec!["实现和证据".into()],
                 exploration_plan: vec![],
