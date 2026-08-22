@@ -159,6 +159,8 @@ pub struct PrepareRunnerJobRequest {
     pub client_request_id: Uuid,
     pub base_workspace_snapshot: String,
     #[serde(default)]
+    pub runtime_entry_digest: Option<String>,
+    #[serde(default)]
     pub allowed_writes: Vec<String>,
     #[serde(default)]
     pub delete_paths: Vec<String>,
@@ -172,6 +174,9 @@ pub struct PrepareRunnerJobRequest {
 impl PrepareRunnerJobRequest {
     pub fn normalize(mut self) -> AppResult<Self> {
         validate_sha256("workspace snapshot", &self.base_workspace_snapshot)?;
+        if let Some(digest) = &self.runtime_entry_digest {
+            validate_sha256("runtime entry", digest)?;
+        }
         normalize_write_patterns(&mut self.allowed_writes)?;
         if self.allowed_writes.is_empty() {
             return Err(AppError::bad_request(

@@ -41,6 +41,7 @@ RUN useradd --system --uid 1000 --create-home runner \
     && mkdir -p /workspace/input /workspace/output /workspace/result /tmp/fudian-home \
     && chown -R runner:runner /workspace/output /workspace/result /tmp/fudian-home
 COPY --from=builder /app/target/release/fudian-runner /usr/local/bin/fudian-runner
+COPY --from=builder /app/target/release/fudian-tool-runtime /opt/fudian/fudian-tool-runtime
 USER runner
 WORKDIR /workspace/input
 ENTRYPOINT ["/usr/local/bin/fudian-runner"]

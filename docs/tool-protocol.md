@@ -10,7 +10,7 @@
 
 中央共享的是不可变包、镜像和内容寻址缓存，不是一个所有 Session 共同修改的 Python/Rust/系统依赖环境。实际执行发生在受限 Worker 中；worktree 本身不是安全边界。
 
-v0.1 实现协议、注册表、确定性环境指纹、Broker trait 与不依赖外部软件的模拟插件。容器编排、签名信任链、MCP 网络传输和完整插件市场仍是后续目标。
+协议最初以 Mock 插件验证注册表、确定性环境指纹和 Broker trait；BP-05 已在不改变这些语义的前提下加入 Ed25519 签名安装、固定 OCI 镜像/入口、真实一次性 Worker 和 Git CAS 回写。持久 ToolLease 调度、MCP 传输和完整插件市场仍是后续目标，详见 [`plugin-system-v1.md`](plugin-system-v1.md) 与 [`tooling-api-v1.md`](tooling-api-v1.md)。
 
 ## 2. 标识、版本与摘要
 

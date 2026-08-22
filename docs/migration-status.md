@@ -11,9 +11,9 @@
 | 项目 DAG | 已完成 | 分支、节点、边、类型化贡献、暂停、选择性合流 |
 | 现有 nextgen 数据 | 已完成 | 直接读取现有 PostgreSQL 和产物卷 |
 | 移动端可用性 | 已完成 | 小屏改用可读的节点列表，表单保持完整 |
-| 自动化质量门 | 已完成 | 本地/CI 共用入口覆盖 rustfmt、Clippy、29 个 Rust 测试、迁移、全部隔离 HTTP、Chromium 和生产镜像 |
+| 自动化质量门 | 已完成 | 本地/CI 共用入口覆盖 rustfmt、Clippy、46 个 Rust 测试、10 个迁移、全部隔离 HTTP、Git/OCI/Chromium 和生产镜像 |
 | 目标枝干与 Session | v0.1 已完成 | BranchProposal、单写者、暂停、拟合并、退回/下一 Session 和 Contribution 回流 |
-| 中央插件与环境 | v0.1 已完成 | 固定 Manifest/指纹、Session 隔离绑定与 Mock Broker；真实 Runner 待实现 |
+| 中央插件与环境 | v0.2 部分实现 | Ed25519 签名安装、固定 OCI/入口、Rust/Python/C++/Playwright Worker、Git CAS 与冲突版本隔离已完成；持续 ToolLease 调度待 BP-06 |
 | Session 文件输入 | v0.1 已完成 | 分段、SHA-256、安全 inbox、产物引用和候选冻结 |
 | 目标枝干工作台 | 可验收原型 | 可替换车道投影；Chromium 桌面/390px 表单、上传与审核闭环通过 |
 | 生产容器基线 | v0.1 已完成 | 非 root、只读根文件系统、固定工具链构建和隔离健康/迁移验收；尚非公开部署方案 |

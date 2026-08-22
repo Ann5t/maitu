@@ -85,6 +85,8 @@ pub struct RunnerJobSpec {
     pub base_commit: String,
     pub base_workspace_snapshot: String,
     pub runtime_digest: String,
+    #[serde(default)]
+    pub runtime_entry_digest: Option<String>,
     pub input_mount: String,
     pub output_mount: String,
     pub result_mount: String,
@@ -106,6 +108,8 @@ impl RunnerJobSpec {
 #[serde(rename_all = "camelCase")]
 pub struct RunnerIsolationAttestation {
     pub runtime_digest: String,
+    #[serde(default)]
+    pub runtime_entry_digest: Option<String>,
     pub network_isolated: bool,
     pub visible_network_interfaces: Vec<String>,
     pub no_new_privileges: bool,

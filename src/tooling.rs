@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, future::Future};
 
 use chrono::{DateTime, Utc};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -62,7 +63,13 @@ pub struct ResourcePolicy {
     pub cpu_millis: u32,
     pub memory_mi_b: u32,
     pub disk_mi_b: u32,
+    #[serde(default = "default_plugin_pids")]
+    pub pids: u32,
     pub timeout_seconds: u32,
+    #[serde(default = "default_plugin_log_bytes")]
+    pub stdout_bytes: u64,
+    #[serde(default = "default_plugin_log_bytes")]
+    pub stderr_bytes: u64,
 }
 
 impl Default for ResourcePolicy {
@@ -71,7 +78,10 @@ impl Default for ResourcePolicy {
             cpu_millis: 1_000,
             memory_mi_b: 256,
             disk_mi_b: 256,
+            pids: default_plugin_pids(),
             timeout_seconds: 30,
+            stdout_bytes: default_plugin_log_bytes(),
+            stderr_bytes: default_plugin_log_bytes(),
         }
     }
 }
@@ -143,6 +153,17 @@ impl PluginManifestDraft {
         self.runtime.content_digest =
             validate_sha256_id("Runtime 摘要", self.runtime.content_digest)?;
         self.runtime.entrypoint = required_text("Runtime 入口", self.runtime.entrypoint, 200)?;
+        if self.runtime.kind == "oci"
+            && (!self.runtime.entrypoint.starts_with("/runtime/")
+                || self.runtime.entrypoint.contains("..")
+                || self.runtime.entrypoint.contains('\\')
+                || self.runtime.entrypoint.contains('\0'))
+        {
+            return Err(AppError::bad_request(
+                "invalid_plugin_runtime",
+                "OCI Runtime 入口必须是安全的 /runtime/ 绝对路径",
+            ));
+        }
         for asset in &mut self.assets {
             asset.path = normalize_relative_path("插件 Asset", std::mem::take(&mut asset.path))?;
             asset.content_digest =
@@ -176,6 +197,31 @@ impl PluginManifestDraft {
 }
 
 impl PluginManifest {
+    pub fn verify_seal(self) -> AppResult<Self> {
+        let expected = PluginManifestDraft {
+            schema_version: self.schema_version,
+            plugin_id: self.plugin_id.clone(),
+            version: self.version.clone(),
+            display_name: self.display_name.clone(),
+            description: self.description.clone(),
+            capabilities: self.capabilities.clone(),
+            permissions: self.permissions.clone(),
+            tools: self.tools.clone(),
+            skill: self.skill.clone(),
+            runtime: self.runtime.clone(),
+            assets: self.assets.clone(),
+            resource_hints: self.resource_hints.clone(),
+        }
+        .seal()?;
+        if expected != self {
+            return Err(AppError::bad_request(
+                "plugin_manifest_digest_mismatch",
+                "PluginManifest 不是服务器规范化后的准确密封内容",
+            ));
+        }
+        Ok(self)
+    }
+
     pub fn resolved_ref(&self) -> ResolvedPluginRef {
         ResolvedPluginRef {
             plugin_id: self.plugin_id.clone(),
@@ -190,6 +236,8 @@ impl PluginManifest {
             display_name: self.display_name.clone(),
             description: self.description.clone(),
             capabilities: self.capabilities.clone(),
+            installed: false,
+            publisher_id: None,
         }
     }
 }
@@ -238,6 +286,296 @@ pub struct PluginCatalogEntry {
     pub display_name: String,
     pub description: String,
     pub capabilities: Vec<String>,
+    pub installed: bool,
+    pub publisher_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSelfTest {
+    pub schema_version: u32,
+    pub status: String,
+    pub runner_digest: String,
+    pub runtime_entry_digest: String,
+    #[serde(default = "empty_object")]
+    pub checks: Value,
+}
+
+impl PluginSelfTest {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        if self.schema_version != 1 || self.status != "passed" || !self.checks.is_object() {
+            return Err(AppError::bad_request(
+                "plugin_self_test_failed",
+                "插件安装只接受 schemaVersion 1、passed 且结构化的自检证明",
+            ));
+        }
+        self.runner_digest = validate_sha256_id("Runner 摘要", self.runner_digest)?;
+        self.runtime_entry_digest =
+            validate_sha256_id("Runtime 入口摘要", self.runtime_entry_digest)?;
+        Ok(self)
+    }
+
+    pub fn digest(&self) -> AppResult<String> {
+        canonical_json_sha256(self)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallStatement {
+    pub schema_version: u32,
+    pub publisher_id: String,
+    pub plugin: ResolvedPluginRef,
+    pub runtime_kind: String,
+    pub runtime_image_digest: String,
+    pub runtime_entrypoint: String,
+    pub runtime_entry_digest: String,
+    pub runner_digest: String,
+    pub self_test_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPublisherDraft {
+    pub publisher_id: String,
+    pub display_name: String,
+    pub public_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallStatementRequest {
+    pub manifest: PluginManifest,
+    pub publisher_id: String,
+    pub self_test: PluginSelfTest,
+}
+
+impl PluginInstallStatementRequest {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        self.manifest = self.manifest.verify_seal()?;
+        self.publisher_id = normalize_publisher_id(self.publisher_id)?;
+        self.self_test = self.self_test.normalize()?;
+        if self.manifest.runtime.kind != "oci" {
+            return Err(AppError::bad_request(
+                "invalid_plugin_runtime",
+                "安装声明只接受由 OCI 摘要固定的真实 Runtime",
+            ));
+        }
+        Ok(self)
+    }
+
+    pub fn statement(&self) -> AppResult<PluginInstallStatement> {
+        Ok(PluginInstallStatement {
+            schema_version: 1,
+            publisher_id: self.publisher_id.clone(),
+            plugin: self.manifest.resolved_ref(),
+            runtime_kind: self.manifest.runtime.kind.clone(),
+            runtime_image_digest: self.manifest.runtime.content_digest.clone(),
+            runtime_entrypoint: self.manifest.runtime.entrypoint.clone(),
+            runtime_entry_digest: self.self_test.runtime_entry_digest.clone(),
+            runner_digest: self.self_test.runner_digest.clone(),
+            self_test_digest: self.self_test.digest()?,
+        })
+    }
+
+    pub fn statement_digest(&self) -> AppResult<String> {
+        canonical_json_sha256(&self.statement()?)
+    }
+}
+
+impl PluginPublisherDraft {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        self.publisher_id = normalize_publisher_id(self.publisher_id)?;
+        self.display_name = required_text("发布者显示名称", self.display_name, 160)?;
+        let key = decode_fixed_hex::<32>("发布者公钥", &self.public_key)?;
+        VerifyingKey::from_bytes(&key).map_err(|_| {
+            AppError::bad_request("invalid_publisher_key", "发布者 Ed25519 公钥不合法")
+        })?;
+        self.public_key = hex::encode(key);
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedPluginInstallRequest {
+    pub manifest: PluginManifest,
+    pub publisher_id: String,
+    pub signature: String,
+    pub self_test: PluginSelfTest,
+}
+
+impl SignedPluginInstallRequest {
+    pub fn normalize(mut self) -> AppResult<Self> {
+        self.manifest = self.manifest.verify_seal()?;
+        self.publisher_id = normalize_publisher_id(self.publisher_id)?;
+        self.signature = normalize_signature(self.signature)?;
+        self.self_test = self.self_test.normalize()?;
+        if self.manifest.runtime.kind != "oci" {
+            return Err(AppError::bad_request(
+                "invalid_plugin_runtime",
+                "签名安装只接受由 OCI 摘要固定的真实 Runtime",
+            ));
+        }
+        Ok(self)
+    }
+
+    pub fn statement(&self) -> AppResult<PluginInstallStatement> {
+        Ok(PluginInstallStatement {
+            schema_version: 1,
+            publisher_id: self.publisher_id.clone(),
+            plugin: self.manifest.resolved_ref(),
+            runtime_kind: self.manifest.runtime.kind.clone(),
+            runtime_image_digest: self.manifest.runtime.content_digest.clone(),
+            runtime_entrypoint: self.manifest.runtime.entrypoint.clone(),
+            runtime_entry_digest: self.self_test.runtime_entry_digest.clone(),
+            runner_digest: self.self_test.runner_digest.clone(),
+            self_test_digest: self.self_test.digest()?,
+        })
+    }
+
+    pub fn statement_digest(&self) -> AppResult<String> {
+        canonical_json_sha256(&self.statement()?)
+    }
+}
+
+pub fn verify_install_signature(
+    public_key_hex: &str,
+    signature_hex: &str,
+    statement_digest: &str,
+) -> AppResult<()> {
+    let public_key = decode_fixed_hex::<32>("发布者公钥", public_key_hex)?;
+    let signature_bytes = decode_fixed_hex::<64>("插件签名", signature_hex)?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key)
+        .map_err(|_| AppError::bad_request("invalid_publisher_key", "发布者 Ed25519 公钥不合法"))?;
+    let signature = Signature::from_bytes(&signature_bytes);
+    verifying_key
+        .verify(statement_digest.as_bytes(), &signature)
+        .map_err(|_| AppError::forbidden("invalid_plugin_signature", "插件安装签名验证失败"))
+}
+
+pub fn validate_tool_input_schema(schema: &Value, input: &Value) -> AppResult<()> {
+    let schema = schema.as_object().ok_or_else(|| {
+        AppError::bad_request("invalid_tool_schema", "工具输入 schema 必须是 JSON 对象")
+    })?;
+    if schema.is_empty() {
+        return Ok(());
+    }
+    if schema.get("type").and_then(Value::as_str) != Some("object") {
+        return Err(AppError::bad_request(
+            "unsupported_tool_schema",
+            "真实插件当前只接受根类型为 object 的受限 JSON Schema",
+        ));
+    }
+    let input = input.as_object().ok_or_else(|| {
+        AppError::bad_request("tool_input_schema_mismatch", "工具输入必须是 JSON 对象")
+    })?;
+    if let Some(required) = schema.get("required") {
+        let required = required.as_array().ok_or_else(|| {
+            AppError::bad_request("invalid_tool_schema", "required 必须是字符串数组")
+        })?;
+        for key in required {
+            let key = key.as_str().ok_or_else(|| {
+                AppError::bad_request("invalid_tool_schema", "required 必须是字符串数组")
+            })?;
+            if !input.contains_key(key) {
+                return Err(AppError::bad_request(
+                    "tool_input_schema_mismatch",
+                    format!("工具输入缺少必填字段 {key}"),
+                ));
+            }
+        }
+    }
+    let properties = schema
+        .get("properties")
+        .map(|value| {
+            value.as_object().ok_or_else(|| {
+                AppError::bad_request("invalid_tool_schema", "properties 必须是对象")
+            })
+        })
+        .transpose()?
+        .cloned()
+        .unwrap_or_default();
+    if schema.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
+        for key in input.keys() {
+            if !properties.contains_key(key) {
+                return Err(AppError::bad_request(
+                    "tool_input_schema_mismatch",
+                    format!("工具输入含有未声明字段 {key}"),
+                ));
+            }
+        }
+    }
+    for (key, value) in input {
+        let Some(property) = properties.get(key) else {
+            continue;
+        };
+        validate_schema_property(key, property, value)?;
+    }
+    Ok(())
+}
+
+fn validate_schema_property(key: &str, schema: &Value, value: &Value) -> AppResult<()> {
+    let schema = schema
+        .as_object()
+        .ok_or_else(|| AppError::bad_request("invalid_tool_schema", "字段 schema 必须是对象"))?;
+    let expected = schema
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::bad_request("invalid_tool_schema", "字段 schema 缺少 type"))?;
+    let matches = match expected {
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        _ => {
+            return Err(AppError::bad_request(
+                "unsupported_tool_schema",
+                format!("字段 {key} 使用了未支持的 schema type"),
+            ));
+        }
+    };
+    if !matches {
+        return Err(AppError::bad_request(
+            "tool_input_schema_mismatch",
+            format!("工具输入字段 {key} 类型不匹配"),
+        ));
+    }
+    if let Some(max_length) = schema.get("maxLength").and_then(Value::as_u64)
+        && value
+            .as_str()
+            .is_some_and(|value| value.chars().count() as u64 > max_length)
+    {
+        return Err(AppError::bad_request(
+            "tool_input_schema_mismatch",
+            format!("工具输入字段 {key} 超过长度限制"),
+        ));
+    }
+    if let Some(allowed) = schema.get("enum").and_then(Value::as_array)
+        && !allowed.contains(value)
+    {
+        return Err(AppError::bad_request(
+            "tool_input_schema_mismatch",
+            format!("工具输入字段 {key} 不在允许枚举中"),
+        ));
+    }
+    if let Some(values) = value.as_array() {
+        if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64)
+            && values.len() as u64 > max_items
+        {
+            return Err(AppError::bad_request(
+                "tool_input_schema_mismatch",
+                format!("工具输入字段 {key} 条目过多"),
+            ));
+        }
+        if let Some(item_schema) = schema.get("items") {
+            for item in values {
+                validate_schema_property(key, item_schema, item)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -716,8 +1054,14 @@ fn validate_resource_policy(policy: &ResourcePolicy) -> AppResult<()> {
     if policy.cpu_millis == 0
         || policy.memory_mi_b == 0
         || policy.disk_mi_b == 0
+        || policy.pids == 0
         || policy.timeout_seconds == 0
+        || policy.stdout_bytes == 0
+        || policy.stderr_bytes == 0
         || policy.timeout_seconds > 86_400
+        || policy.pids > 1_024
+        || policy.stdout_bytes > 16 * 1024 * 1024
+        || policy.stderr_bytes > 16 * 1024 * 1024
     {
         return Err(AppError::bad_request(
             "invalid_resource_policy",
@@ -725,6 +1069,53 @@ fn validate_resource_policy(policy: &ResourcePolicy) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn default_plugin_pids() -> u32 {
+    64
+}
+
+fn default_plugin_log_bytes() -> u64 {
+    64 * 1024
+}
+
+pub(crate) fn normalize_publisher_id(value: String) -> AppResult<String> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty()
+        || value.len() > 160
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'_')
+        })
+        || !value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+    {
+        return Err(AppError::bad_request(
+            "invalid_publisher_id",
+            "发布者 ID 必须是稳定的小写命名空间",
+        ));
+    }
+    Ok(value)
+}
+
+fn normalize_signature(value: String) -> AppResult<String> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.len() != 128 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(AppError::bad_request(
+            "invalid_plugin_signature",
+            "插件签名必须是 64 字节 Ed25519 十六进制值",
+        ));
+    }
+    Ok(value)
+}
+
+fn decode_fixed_hex<const N: usize>(label: &str, value: &str) -> AppResult<[u8; N]> {
+    let bytes = hex::decode(value)
+        .map_err(|_| AppError::bad_request("invalid_hex", format!("{label}不是规范十六进制")))?;
+    bytes
+        .try_into()
+        .map_err(|_| AppError::bad_request("invalid_hex_length", format!("{label}长度不正确")))
 }
 
 fn normalize_map(label: &str, values: &mut BTreeMap<String, String>) -> AppResult<()> {
@@ -871,6 +1262,8 @@ fn lease_transition_error(status: ToolLeaseStatus, action: &str) -> AppError {
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::{Signer, SigningKey};
+
     use super::*;
 
     fn environment(plugin: ResolvedPluginRef, lock_hash: &str) -> EnvironmentManifest {
@@ -993,5 +1386,103 @@ mod tests {
             ToolLeaseStatus::Active.heartbeat(false).unwrap_err().code(),
             "lease_expired"
         );
+    }
+
+    #[test]
+    fn signed_install_statement_binds_runtime_entry_and_runner() {
+        let mut draft = reference_mock_plugin("1.0.0").unwrap();
+        draft.plugin_id = "fudian.tools.signed-test".into();
+        draft.runtime = PluginRuntime {
+            kind: "oci".into(),
+            content_digest: format!("sha256:{}", "1".repeat(64)),
+            entrypoint: "/runtime/fudian-tool-runtime".into(),
+        };
+        let manifest = PluginManifestDraft {
+            schema_version: draft.schema_version,
+            plugin_id: draft.plugin_id,
+            version: draft.version,
+            display_name: draft.display_name,
+            description: draft.description,
+            capabilities: draft.capabilities,
+            permissions: draft.permissions,
+            tools: draft.tools,
+            skill: draft.skill,
+            runtime: draft.runtime,
+            assets: draft.assets,
+            resource_hints: draft.resource_hints,
+        }
+        .seal()
+        .unwrap();
+        let request = PluginInstallStatementRequest {
+            manifest,
+            publisher_id: "fudian.test".into(),
+            self_test: PluginSelfTest {
+                schema_version: 1,
+                status: "passed".into(),
+                runner_digest: format!("sha256:{}", "2".repeat(64)),
+                runtime_entry_digest: format!("sha256:{}", "3".repeat(64)),
+                checks: json!({ "smoke": true }),
+            },
+        }
+        .normalize()
+        .unwrap();
+        let digest = request.statement_digest().unwrap();
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let signature = signing_key.sign(digest.as_bytes());
+        verify_install_signature(
+            &hex::encode(signing_key.verifying_key().to_bytes()),
+            &hex::encode(signature.to_bytes()),
+            &digest,
+        )
+        .unwrap();
+        assert_eq!(
+            request.statement().unwrap().runtime_entry_digest,
+            format!("sha256:{}", "3".repeat(64))
+        );
+        assert_eq!(
+            request.statement().unwrap().runner_digest,
+            format!("sha256:{}", "2".repeat(64))
+        );
+        assert_eq!(
+            verify_install_signature(
+                &hex::encode(signing_key.verifying_key().to_bytes()),
+                &hex::encode(signature.to_bytes()),
+                &format!("sha256:{}", "4".repeat(64)),
+            )
+            .unwrap_err()
+            .code(),
+            "invalid_plugin_signature"
+        );
+    }
+
+    #[test]
+    fn limited_tool_schema_rejects_missing_extra_and_wrong_type() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "sourcePath": { "type": "string", "maxLength": 20 },
+                "language": { "type": "string", "enum": ["c", "cpp"] }
+            },
+            "required": ["sourcePath", "language"],
+            "additionalProperties": false
+        });
+        validate_tool_input_schema(
+            &schema,
+            &json!({ "sourcePath": "src/main.cpp", "language": "cpp" }),
+        )
+        .unwrap();
+        for input in [
+            json!({ "sourcePath": "src/main.cpp" }),
+            json!({ "sourcePath": "src/main.cpp", "language": "rust" }),
+            json!({ "sourcePath": 42, "language": "cpp" }),
+            json!({ "sourcePath": "src/main.cpp", "language": "cpp", "secret": true }),
+        ] {
+            assert_eq!(
+                validate_tool_input_schema(&schema, &input)
+                    .unwrap_err()
+                    .code(),
+                "tool_input_schema_mismatch"
+            );
+        }
     }
 }

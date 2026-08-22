@@ -37,6 +37,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0009_workspace_runner.sql",
         include_str!("../migrations/0009_workspace_runner.sql"),
     ),
+    (
+        "0010_signed_real_plugins.sql",
+        include_str!("../migrations/0010_signed_real_plugins.sql"),
+    ),
 ];
 
 pub async fn run(pool: &PgPool) -> Result<(), sqlx::Error> {

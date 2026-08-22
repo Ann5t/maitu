@@ -172,6 +172,9 @@ fn validate_spec_shape(spec: &RunnerJobSpec) -> anyhow::Result<()> {
     if spec.command.program != RUNNER_PROGRAM && !spec.command.program.starts_with("/runtime/") {
         bail!("runtime program is outside the immutable runtime mount");
     }
+    if spec.runtime_entry_digest.is_some() && !spec.command.program.starts_with("/runtime/") {
+        bail!("runtime entry digest requires an immutable /runtime program");
+    }
     if spec.capabilities.network != "denied"
         || !spec.capabilities.external_writes.is_empty()
         || !spec.capabilities.account_references.is_empty()
@@ -281,6 +284,7 @@ fn inspect_isolation(spec: &RunnerJobSpec) -> anyhow::Result<RunnerIsolationAtte
     sorted_interfaces.sort();
     Ok(RunnerIsolationAttestation {
         runtime_digest: executable_digest()?,
+        runtime_entry_digest: runtime_entry_digest(spec)?,
         network_isolated: sorted_interfaces.iter().all(|name| name == "lo"),
         visible_network_interfaces: sorted_interfaces,
         no_new_privileges,
@@ -300,6 +304,23 @@ fn executable_digest() -> anyhow::Result<String> {
     let executable = env::current_exe().context("locate Runner executable")?;
     let bytes = fs::read(executable).context("hash Runner executable")?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn runtime_entry_digest(spec: &RunnerJobSpec) -> anyhow::Result<Option<String>> {
+    let Some(expected) = &spec.runtime_entry_digest else {
+        return Ok(None);
+    };
+    let path = Path::new(&spec.command.program);
+    let metadata = fs::symlink_metadata(path).context("inspect runtime entry")?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("runtime entry is not an immutable regular file");
+    }
+    let bytes = fs::read(path).context("hash runtime entry")?;
+    let observed = format!("sha256:{}", hex::encode(Sha256::digest(bytes)));
+    if &observed != expected {
+        bail!("runtime entry digest does not match the signed installation");
+    }
+    Ok(Some(observed))
 }
 
 fn isolation_satisfies_spec(

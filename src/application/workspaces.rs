@@ -994,6 +994,7 @@ pub async fn prepare_runner_job(
         base_commit: inspection.head_commit.clone(),
         base_workspace_snapshot: inspection.workspace_snapshot.clone(),
         runtime_digest: config.runner_runtime_digest.clone(),
+        runtime_entry_digest: request.runtime_entry_digest.clone(),
         input_mount: "/workspace/input".to_owned(),
         output_mount: "/workspace/output".to_owned(),
         result_mount: "/workspace/result".to_owned(),
@@ -1793,6 +1794,7 @@ fn validate_runner_result(
     if result.status != "policy_denied" {
         let isolation = &result.isolation;
         if isolation.runtime_digest != job.runtime_digest
+            || isolation.runtime_entry_digest != spec.runtime_entry_digest
             || !isolation.network_isolated
             || isolation
                 .visible_network_interfaces

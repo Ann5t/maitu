@@ -28,7 +28,10 @@ use crate::{
     error::{AppError, AppResult},
     idea_domain::{AttachIdeaSourceQuery, IdeaCommandRequest},
     input_artifacts::{BeginInputArtifact, ChunkQuery, FinishInputArtifact, ImportInputArtifact},
-    tooling::{EnvironmentManifest, PluginManifestDraft, PluginSelector},
+    tooling::{
+        EnvironmentManifest, PluginInstallStatementRequest, PluginManifestDraft,
+        PluginPublisherDraft, PluginSelector, SignedPluginInstallRequest,
+    },
     workspace::{FailRunnerJobRequest, FinalizeRunnerJobRequest, PrepareRunnerJobRequest},
 };
 
@@ -1314,12 +1317,70 @@ pub async fn api_register_plugin(
     Ok((StatusCode::CREATED, Json(serde_json::to_value(manifest)?)))
 }
 
+pub async fn api_seal_plugin(Json(draft): Json<PluginManifestDraft>) -> AppResult<Json<Value>> {
+    Ok(Json(serde_json::to_value(plugins::seal_plugin(draft)?)?))
+}
+
+pub async fn api_register_plugin_publisher(
+    State(state): State<Arc<AppState>>,
+    Json(draft): Json<PluginPublisherDraft>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let publisher = plugins::register_publisher(&state.pool, draft).await?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(publisher)?)))
+}
+
+pub async fn api_revoke_plugin_publisher(
+    State(state): State<Arc<AppState>>,
+    Path(publisher_id): Path<String>,
+    Json(request): Json<plugins::RevokePluginPublisherRequest>,
+) -> AppResult<Json<Value>> {
+    let publisher = plugins::revoke_plugin_publisher(&state.pool, &publisher_id, request).await?;
+    Ok(Json(serde_json::to_value(publisher)?))
+}
+
+pub async fn api_plugin_install_statement(
+    Json(request): Json<PluginInstallStatementRequest>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(plugins::preview_install_statement(request)?))
+}
+
+pub async fn api_install_signed_plugin(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SignedPluginInstallRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let installation =
+        plugins::install_signed_plugin(&state.pool, &state.config.runner_runtime_digest, request)
+            .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(installation)?),
+    ))
+}
+
+pub async fn api_revoke_plugin_installation(
+    State(state): State<Arc<AppState>>,
+    Path(installation_id): Path<Uuid>,
+    Json(request): Json<plugins::RevokePluginInstallationRequest>,
+) -> AppResult<Json<Value>> {
+    let installation =
+        plugins::revoke_plugin_installation(&state.pool, installation_id, request).await?;
+    Ok(Json(serde_json::to_value(installation)?))
+}
+
 pub async fn api_plugin_detail(
     State(state): State<Arc<AppState>>,
     Path((plugin_id, version)): Path<(String, String)>,
 ) -> AppResult<Json<Value>> {
     let manifest = plugins::get_plugin(&state.pool, &plugin_id, &version).await?;
     Ok(Json(serde_json::to_value(manifest)?))
+}
+
+pub async fn api_plugin_install_proof(
+    State(state): State<Arc<AppState>>,
+    Path((plugin_id, version)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let detail = plugins::get_plugin_detail(&state.pool, &plugin_id, &version).await?;
+    Ok(Json(serde_json::to_value(detail)?))
 }
 
 pub async fn api_resolve_plugin(
@@ -1364,6 +1425,46 @@ pub async fn api_execute_tool(
     Json(request): Json<plugins::ExecuteToolRequest>,
 ) -> AppResult<Json<Value>> {
     let response = plugins::execute_tool(&state.pool, project_id, session_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_create_plugin_install_request(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<plugins::CreatePluginInstallRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let record =
+        plugins::create_plugin_install_request(&state.pool, project_id, session_id, request)
+            .await?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(record)?)))
+}
+
+pub async fn api_prepare_real_tool(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<plugins::PrepareRealToolRequest>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let response =
+        plugins::prepare_real_tool(&state.pool, &state.config, project_id, session_id, request)
+            .await?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(response)?)))
+}
+
+pub async fn api_finalize_real_tool(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id, execution_id, job_id)): Path<(Uuid, Uuid, Uuid, Uuid)>,
+    Json(request): Json<plugins::FinalizeRealToolRequest>,
+) -> AppResult<Json<Value>> {
+    let response = plugins::finalize_real_tool(
+        &state.pool,
+        &state.config,
+        project_id,
+        session_id,
+        execution_id,
+        job_id,
+        request,
+    )
+    .await?;
     Ok(Json(serde_json::to_value(response)?))
 }
 

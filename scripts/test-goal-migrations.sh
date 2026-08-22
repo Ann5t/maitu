@@ -57,6 +57,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null 2>&1
 # The compiled migration runner records applied files, but the SQL itself also remains safe to
 # replay during recovery checks.
 docker exec -i "$migration_container" \
@@ -85,10 +88,16 @@ docker exec -i "$migration_container" \
   < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null 2>&1
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null 2>&1
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/goal_core_constraints.sql" >/dev/null
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
   < "$migration_repo_root/tests/sql/idea_project_constraints.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d fresh \
+  < "$migration_repo_root/tests/sql/plugin_constraints.sql" >/dev/null
 
 docker exec "$migration_container" createdb -U fudian_test legacy
 docker exec -i "$migration_container" \
@@ -129,6 +138,9 @@ docker exec -i "$migration_container" \
 docker exec -i "$migration_container" \
   psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
   < "$migration_repo_root/migrations/0009_workspace_runner.sql" >/dev/null
+docker exec -i "$migration_container" \
+  psql -v ON_ERROR_STOP=1 -U fudian_test -d legacy \
+  < "$migration_repo_root/migrations/0010_signed_real_plugins.sql" >/dev/null
 
 migration_counts_after="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -145,7 +157,8 @@ migration_tooling_table_count="$(docker exec "$migration_container" \
   "SELECT count(*) FROM information_schema.tables
    WHERE table_schema = 'public' AND table_name IN (
      'plugin_packages', 'environment_manifests', 'session_environment_bindings',
-     'tool_calls', 'tool_leases'
+     'tool_calls', 'tool_leases', 'plugin_publishers', 'plugin_installations',
+     'plugin_install_requests', 'tool_execution_requests'
    )")"
 migration_input_table_count="$(docker exec "$migration_container" \
   psql -U fudian_test -d legacy -Atc \
@@ -179,8 +192,8 @@ if [[ "$migration_goal_table_count" != 28 ]]; then
   echo "expected 28 goal tables, found $migration_goal_table_count" >&2
   exit 1
 fi
-if [[ "$migration_tooling_table_count" != 5 ]]; then
-  echo "expected 5 tooling tables, found $migration_tooling_table_count" >&2
+if [[ "$migration_tooling_table_count" != 9 ]]; then
+  echo "expected 9 tooling tables, found $migration_tooling_table_count" >&2
   exit 1
 fi
 if [[ "$migration_input_table_count" != 2 ]]; then

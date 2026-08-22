@@ -132,6 +132,27 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/v1/plugins",
             get(handlers::api_plugin_catalog).post(handlers::api_register_plugin),
         )
+        .route("/api/v1/plugins/seal", post(handlers::api_seal_plugin))
+        .route(
+            "/api/v1/plugins/install-statement",
+            post(handlers::api_plugin_install_statement),
+        )
+        .route(
+            "/api/v1/plugins/install",
+            post(handlers::api_install_signed_plugin),
+        )
+        .route(
+            "/api/v1/plugin-publishers",
+            post(handlers::api_register_plugin_publisher),
+        )
+        .route(
+            "/api/v1/plugin-publishers/{publisher_id}/revoke",
+            post(handlers::api_revoke_plugin_publisher),
+        )
+        .route(
+            "/api/v1/plugin-installations/{installation_id}/revoke",
+            post(handlers::api_revoke_plugin_installation),
+        )
         .route(
             "/api/v1/plugins/resolve",
             post(handlers::api_resolve_plugin),
@@ -139,6 +160,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/plugins/{plugin_id}/{version}",
             get(handlers::api_plugin_detail),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/{version}/install-proof",
+            get(handlers::api_plugin_install_proof),
         )
         .route(
             "/api/v1/environments",
@@ -155,6 +180,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/projects/{project_id}/sessions/{session_id}/tool-calls",
             post(handlers::api_execute_tool),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/plugin-install-requests",
+            post(handlers::api_create_plugin_install_request),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/tool-executions",
+            post(handlers::api_prepare_real_tool),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/tool-executions/{execution_id}/runner-jobs/{job_id}/finalize",
+            post(handlers::api_finalize_real_tool),
         )
         .route(
             "/api/v1/projects/{project_id}/sessions/{session_id}/inputs",
