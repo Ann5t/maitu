@@ -859,7 +859,7 @@ mod tests {
         GoalContractDraft {
             desired_outcome: "做出多个可体验原型，由用户判断方向".into(),
             hard_constraints: vec!["不公开部署".into()],
-            subjective_preferences: vec!["接近旧 Fudian 的克制纸张感".into()],
+            subjective_preferences: vec!["克制、清晰的纸张感".into()],
             unknowns: vec!["图和工作台的最佳比例".into()],
             non_goals: vec!["本轮不锁定最终布局".into()],
             validation_plan: vec!["在 390px 与桌面宽度运行原型".into()],

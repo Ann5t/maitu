@@ -80,7 +80,7 @@ done
 python3 -c 'import json,sys
 health=json.load(open(sys.argv[1], encoding="utf-8"))
 assert health["ok"] is True
-assert health["name"] == "fudian-rust"' "$runtime_tmp/health.json"
+assert health["name"] == "fudian"' "$runtime_tmp/health.json"
 
 [[ "$(docker exec "$runtime_app" id -u)" == 1000 ]]
 [[ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$runtime_app")" == true ]]

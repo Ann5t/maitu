@@ -1,10 +1,10 @@
-# 浮点 · Rust 重写版
+# 浮点（Fudian）
 
-这是从现有 Docker 镜像、PostgreSQL 数据和产物卷重新建立的 Rust 全栈版本。它保留 `fudian-nextgen` 已经形成的项目模型，同时把界面重新收束到桌面版 `fudian` 的视觉语言：纸张感背景、酸绿色强调、固定侧栏、紧凑卡片和以项目脉络为中心的工作区。
+这是 Fudian 的第一版产品实现，采用 Rust 全栈和服务端渲染。仓库中的历史镜像、数据库结构与界面资料只作为数据兼容、取证和设计参考，不定义任何更早的产品版本。
 
 当前版本不依赖 Node.js、npm 或前端构建链。HTML 由 Rust 服务端渲染，少量原生 JavaScript 只负责主题切换、提交反馈和图谱定位；关闭 JavaScript 后核心表单仍可使用。
 
-从旧 Docker 镜像找回的源码已独立封存并校验，见 [Docker 源码取证归档](recovery/README.md)；它不参与新版本构建。
+从历史 Docker 镜像找回的源码已独立封存并校验，见 [Docker 源码取证归档](recovery/README.md)；它不参与第一版构建。
 
 ## 已实现
 
@@ -14,7 +14,7 @@
 - 项目启动说明的生成、哈希存储、审阅和批准
 - 项目 DAG：开分支、记录带类型的贡献、暂停、选择性合流
 - 图谱、契约、产物和历史四个项目视图
-- 与现有 `fudian-nextgen` PostgreSQL 表和 Docker 产物卷兼容
+- 与已有 PostgreSQL 表和 Docker 产物卷兼容
 - HTML 表单与 JSON API 两套入口，共用同一应用服务和事务逻辑
 - 不可变目标契约修订、逐字段来源与人工接受/拒绝，以及有预算和收敛边界的探索型目标
 - 结构化 Evidence、候选冻结、撤回、停止和保留原结论的终态归档
@@ -36,7 +36,7 @@
 APP_PORT=3001 make start
 ```
 
-打开 `http://localhost:3001`。这个 Compose 项目名仍是 `fudian-nextgen`，会复用已有的：
+打开 `http://localhost:3001`。Compose 内部沿用数据兼容标识 `fudian-nextgen`（它不是产品版本名），会复用已有的：
 
 - `fudian_nextgen_postgres_data`
 - `fudian_nextgen_artifacts`
@@ -66,7 +66,7 @@ make check
 ./scripts/quality-gate.sh
 ```
 
-它会构建固定 Rust 开发镜像，在一次性 PostgreSQL 中运行迁移及全部 HTTP 闭环，用固定 Playwright/Chromium 验证桌面、平板和手机工作台，并验证非 root 发行镜像、HTTPS/认证、签名 Skill/资源渐进披露、受控 ToolLease、存储调和、安全 Compose、旧版备份到空目标恢复、12→14 升级和应用回退。数据库和浏览器现场都是隔离的，不连接 Compose 中的真实数据卷；Cargo、npm 仅复用中央缓存卷。
+它会构建固定 Rust 开发镜像，在一次性 PostgreSQL 中运行迁移及全部 HTTP 闭环，用固定 Playwright/Chromium 验证桌面、平板和手机工作台，并验证非 root 发行镜像、HTTPS/认证、签名 Skill/资源渐进披露、受控 ToolLease、存储调和、安全 Compose、历史数据备份到空目标恢复、12→14 升级和应用回退。数据库和浏览器现场都是隔离的，不连接 Compose 中的真实数据卷；Cargo、npm 仅复用中央缓存卷。
 
 仓库内的 `.github/workflows/ci.yml` 在 push、pull request 或手动触发时运行同一入口。它只有源码读取权限，不发布镜像、不部署，也不持久化 Git 凭据。
 
@@ -125,6 +125,7 @@ assets/                      CSS、渐进增强脚本和图标
 | 方法 | 路由 | 用途 |
 | --- | --- | --- |
 | `GET` | `/` | 项目总览 |
+| `GET` | `/settings` | AI 真实接入状态、联网能力、明暗外观与账号设置 |
 | `GET` | `/ideas` | 想法时间流或关系投影 |
 | `GET` | `/ideas/:id` | 想法版本、关系与立项工作区 |
 | `GET/POST` | `/api/v1/ideas` | 想法摘要与幂等创建 |

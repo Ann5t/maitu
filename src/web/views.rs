@@ -117,6 +117,130 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
     layout(title, view, content)
 }
 
+pub fn settings(security_required: bool) -> Markup {
+    let content = html! {
+        header class="page-head settings-head" {
+            div {
+                span class="eyebrow" { "PREFERENCES" }
+                h1 { "设置" }
+                p { "管理 AI、联网能力、外观与账号。未接入的能力会如实标明。" }
+            }
+        }
+
+        nav class="settings-tabs" aria-label="设置分类" {
+            a href="#ai" { "AI 配置" }
+            a href="#search" { "联网搜索" }
+            a href="#appearance" { "外观" }
+            a href="#account" { "账号" }
+        }
+
+        div class="settings-stack" {
+            section class="settings-panel" id="ai" aria-labelledby="settings-ai-title" {
+                header class="settings-panel__head" {
+                    span class="settings-icon" aria-hidden="true" { "✦" }
+                    div {
+                        h2 id="settings-ai-title" { "AI 配置" }
+                        p { "模型服务与 Agent 能力分配" }
+                    }
+                    span class="settings-state settings-state--empty" { "未接入" }
+                }
+                div class="settings-truth" role="status" {
+                    strong { "当前没有真实 AI 在运行" }
+                    p {
+                        "界面中的“工作 Agent”和“独立审核 AI”目前只是目标枝干里的角色与调度协议。"
+                        "系统没有保存模型供应商、API Key，也没有连接 ChatGPT 或 Codex。"
+                    }
+                }
+                dl class="settings-status-grid" {
+                    div { dt { "模型服务" } dd { "未连接" } }
+                    div { dt { "访问凭据" } dd { "未保存" } }
+                    div { dt { "能力分配" } dd { "0 项" } }
+                }
+                div class="settings-step-grid" aria-label="AI 接入顺序" {
+                    article {
+                        span { "1" }
+                        div { strong { "连接模型服务" } p { "选择供应商并提交密钥；密钥只进入专用凭据存储。" } }
+                    }
+                    article {
+                        span { "2" }
+                        div { strong { "测试真实连接" } p { "只有一次实际调用成功后，配置才允许保存。" } }
+                    }
+                    article {
+                        span { "3" }
+                        div { strong { "分配模型能力" } p { "把已验证模型分别交给工作、审核、视觉等角色。" } }
+                    }
+                }
+                p class="settings-note" { "这些配置入口会和版本化 Tool Pack、权限审计一起实现；现在不提供没有后端作用的假表单。" }
+            }
+
+            section class="settings-panel" id="search" aria-labelledby="settings-search-title" {
+                header class="settings-panel__head" {
+                    span class="settings-icon settings-icon--search" aria-hidden="true" { "⌕" }
+                    div {
+                        h2 id="settings-search-title" { "联网搜索" }
+                        p { "供 Agent 按目标调用的搜索服务" }
+                    }
+                    span class="settings-state settings-state--empty" { "未配置" }
+                }
+                div class="settings-provider-row" {
+                    div { strong { "搜索供应商" } span { "尚未选择" } }
+                    div { strong { "API Key" } span { "尚未保存" } }
+                    div { strong { "调用规则" } span { "按 Session 授权" } }
+                }
+                p class="settings-note" { "计划采用“选择服务 → 测试搜索 → 保存配置”的流程；测试不通过时不能保存。" }
+            }
+
+            section class="settings-panel" id="appearance" aria-labelledby="settings-appearance-title" {
+                header class="settings-panel__head" {
+                    span class="settings-icon settings-icon--appearance" aria-hidden="true" { "◐" }
+                    div {
+                        h2 id="settings-appearance-title" { "外观" }
+                        p { "选择当前设备上的显示方式" }
+                    }
+                }
+                div class="appearance-options" role="group" aria-label="颜色主题" {
+                    button type="button" data-theme-set="light" aria-pressed="false" {
+                        span aria-hidden="true" { "☀" }
+                        div { strong { "浅色" } small { "明亮纸张背景" } }
+                    }
+                    button type="button" data-theme-set="dark" aria-pressed="false" {
+                        span aria-hidden="true" { "☾" }
+                        div { strong { "深色" } small { "弱光环境使用" } }
+                    }
+                }
+                p class="settings-note" { "选择会保存在这台设备的浏览器中，不影响其他设备。" }
+            }
+
+            section class="settings-panel" id="account" aria-labelledby="settings-account-title" {
+                header class="settings-panel__head" {
+                    span class="settings-icon settings-icon--account" aria-hidden="true" { "◎" }
+                    div {
+                        h2 id="settings-account-title" { "账号与访问" }
+                        p { "当前部署的登录与安全状态" }
+                    }
+                    @if security_required {
+                        span class="settings-state settings-state--ready" { "已启用登录" }
+                    } @else {
+                        span class="settings-state settings-state--local" { "本机模式" }
+                    }
+                }
+                @if security_required {
+                    div class="settings-account-action" {
+                        div { strong { "登录密码" } p { "修改当前单用户账号的密码。" } }
+                        a class="button button--secondary" href="/account/password" { "修改密码" }
+                    }
+                } @else {
+                    div class="settings-truth settings-truth--neutral" {
+                        strong { "当前未启用登录" }
+                        p { "这个实例只绑定本机地址，用于当前审查。对服务器或公网开放前必须启用登录与 HTTPS。" }
+                    }
+                }
+            }
+        }
+    };
+    layout("设置", "settings", content)
+}
+
 pub fn ideas(ideas: &[IdeaSummary], links: &[IdeaLinkView], query: &IdeaPageQuery) -> Markup {
     let view = if query.view.as_deref() == Some("map") {
         "map"
@@ -3606,11 +3730,13 @@ fn sidebar(active: &str) -> Markup {
                 a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
             }
             div class="sidebar__bottom" {
-                div class="rust-badge" { span { "R" } div { strong { "Rust edition" } small { "可恢复单体" } } }
-                button class="theme-toggle" type="button" data-theme-toggle="" aria-label="切换浅色或深色模式" {
-                    span class="theme-toggle__dark" { "☾" }
-                    span class="theme-toggle__light" { "☀" }
-                    b { "切换主题" }
+                a class=(if active == "settings" { "settings-link is-active" } else { "settings-link" }) href="/settings" {
+                    span aria-hidden="true" { "⚙" }
+                    b { "设置" }
+                }
+                div class="theme-switch" role="group" aria-label="颜色主题" {
+                    button type="button" data-theme-set="light" aria-pressed="false" { span aria-hidden="true" { "☀" } "浅色" }
+                    button type="button" data-theme-set="dark" aria-pressed="false" { span aria-hidden="true" { "☾" } "深色" }
                 }
             }
         }
@@ -3625,7 +3751,7 @@ fn mobile_nav(active: &str) -> Markup {
             a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { span { "◌" } b { "待处理" } }
             a class="mobile-nav__new" href="/ideas/new" { span { "+" } b { "记录" } }
             a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
-            button type="button" data-theme-toggle="" { span { "◐" } b { "主题" } }
+            a class=(if active == "settings" { "is-active" } else { "" }) href="/settings" { span { "⚙" } b { "设置" } }
         }
     }
 }
@@ -3802,5 +3928,16 @@ mod tests {
         assert_eq!(safe_color("#c8f36c"), "#c8f36c");
         assert_eq!(safe_color("red;display:none"), "#91b546");
         assert!(safe_uri(Some("javascript:alert(1)")).is_none());
+    }
+
+    #[test]
+    fn settings_is_honest_about_ai_and_has_explicit_themes() {
+        let rendered = settings(false).into_string();
+        assert!(rendered.contains("当前没有真实 AI 在运行"));
+        assert!(rendered.contains("没有连接 ChatGPT 或 Codex"));
+        assert!(rendered.contains("data-theme-set=\"light\""));
+        assert!(rendered.contains("data-theme-set=\"dark\""));
+        assert!(!rendered.contains("Rust edition"));
+        assert!(!rendered.contains("可恢复单体"));
     }
 }

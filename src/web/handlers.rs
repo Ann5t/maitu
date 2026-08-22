@@ -218,6 +218,10 @@ pub async fn dashboard(
     Ok(views::dashboard(&projects, query.view.as_deref()))
 }
 
+pub async fn settings_page(State(state): State<Arc<AppState>>) -> Markup {
+    views::settings(state.config.security.required())
+}
+
 pub async fn ideas_page(
     State(state): State<Arc<AppState>>,
     Query(query): Query<IdeaPageQuery>,
@@ -997,7 +1001,7 @@ pub async fn api_health(State(state): State<Arc<AppState>>) -> AppResult<Json<Va
         .await?;
     Ok(Json(json!({
         "ok": true,
-        "name": "fudian-rust",
+        "name": "fudian",
         "time": Utc::now(),
     })))
 }

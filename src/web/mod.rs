@@ -69,6 +69,7 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(security::tool_proxy_path),
         )
         .route("/", get(handlers::dashboard))
+        .route("/settings", get(handlers::settings_page))
         .route("/ideas", get(handlers::ideas_page))
         .route("/ideas/new", get(handlers::new_idea_page))
         .route("/ideas/{idea_id}", get(handlers::idea_page))

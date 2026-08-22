@@ -1,9 +1,16 @@
 (() => {
   const root = document.documentElement;
+  const syncThemeControls = () => {
+    document.querySelectorAll("[data-theme-set]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.themeSet === root.dataset.theme));
+    });
+  };
   const applyTheme = (theme) => {
+    if (theme !== "light" && theme !== "dark") return;
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
     try { localStorage.setItem("fudian-theme", theme); } catch (_) {}
+    syncThemeControls();
   };
 
   document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
@@ -11,6 +18,11 @@
       applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
     });
   });
+
+  document.querySelectorAll("[data-theme-set]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeSet));
+  });
+  syncThemeControls();
 
   document.querySelectorAll("form:not([data-input-upload]):not([data-idea-source-upload]):not([data-idea-capture])").forEach((form) => {
     form.addEventListener("submit", () => {

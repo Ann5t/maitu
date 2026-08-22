@@ -79,6 +79,14 @@ for workbench_attempt in $(seq 1 60); do
   sleep 1
 done
 
+settings_html="$(curl -fsS "$workbench_base/settings")"
+grep -q '<h1>设置</h1>' <<< "$settings_html"
+grep -q '当前没有真实 AI 在运行' <<< "$settings_html"
+grep -q '没有连接 ChatGPT 或 Codex' <<< "$settings_html"
+grep -q 'data-theme-set="light"' <<< "$settings_html"
+grep -q 'data-theme-set="dark"' <<< "$settings_html"
+! grep -q 'Rust edition\|可恢复单体' <<< "$settings_html"
+
 curl -fsS -o /dev/null -D "$workbench_tmp/create.headers" \
   --data-urlencode 'intent=<script>不能进入页面</script>：完成工作台闭环' \
   "$workbench_base/projects"

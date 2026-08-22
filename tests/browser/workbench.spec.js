@@ -291,3 +291,35 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   expect(workbenchBox.x + workbenchBox.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-mobile.png`, fullPage: true });
 });
+
+test('settings reports real AI status and persists explicit theme choice', async ({ page }) => {
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
+  await expect(page.getByText('当前没有真实 AI 在运行')).toBeVisible();
+  await expect(page.getByText(/没有连接 ChatGPT 或 Codex/)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Rust edition');
+  await expect(page.locator('body')).not.toContainText('可恢复单体');
+  expect(await renderedFontSize(page.locator('.settings-state'))).toBeGreaterThanOrEqual(12);
+  expect(await renderedFontSize(page.locator('.settings-step-grid p'))).toBeGreaterThanOrEqual(12);
+
+  const appearance = page.locator('#appearance');
+  await appearance.locator('[data-theme-set="dark"]').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(appearance.locator('[data-theme-set="dark"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.theme-switch [data-theme-set="dark"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => localStorage.getItem('fudian-theme'))).toBe('dark');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/settings-desktop-dark.png`, fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.locator('.mobile-nav a[href="/settings"]')).toBeVisible();
+  await expect(page.locator('.mobile-nav a[href="/settings"]')).toHaveClass(/is-active/);
+  await appearance.locator('[data-theme-set="light"]').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/settings-mobile-light.png`, fullPage: true });
+});
