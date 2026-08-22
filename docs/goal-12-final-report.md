@@ -40,6 +40,8 @@ BP-10 后首次总门只在入口发现一处 rustfmt 折行差异；格式化�
 
 三尺寸安全现场见 [`private-desktop.png`](screenshots/private-desktop.png)、[`private-tablet.png`](screenshots/private-tablet.png) 和 [`private-mobile.png`](screenshots/private-mobile.png)。
 
+完成度反证审计没有把“门已变绿”直接当成 12 项完成证明，而是重新从产品基线逐项核对了可运行路径、直接测试、人工判断、已知风险和恢复边界。权威映射已回填到 [`design-12-aspects.md` 的逐项完成证据账本](design-12-aspects.md#逐项完成证据账本)；审计同时修正了矩阵中上一轮大图数字、BP-01 历史状态，并补入 BP-10。仍未取得的 5 项用户判断没有被审计文字替代。
+
 ## 真实现场保护
 
 最终审计与 Goal 启动基线一致：

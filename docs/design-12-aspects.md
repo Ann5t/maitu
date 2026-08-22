@@ -37,6 +37,25 @@
 | 11 | Git 图 + 工作现场式多设备前端 | 待用户判断 | `goal-worksite-v2` 已覆盖真实 Git/文件/行动/工具/插件/审核现场，三尺寸、键盘、无障碍与 100/300 大图预算均已验证 | 机器缺口已关闭；用户尚未在真实任务中接受整体层级、密度和暂停/拟合并表达 | 布局、字号、密度、暂停/合并视觉 |
 | 12 | 私有部署、认证与安全运维 | 待用户判断 | 单 owner/恢复码/会话、CSRF/Origin、持久限速、可信代理、ToolLease 代理、HTTPS、安全 Compose、v2 恢复和应用回退均已验证 | 无候选实现缺口；真实域名/私人网络、CA、防火墙、异地备份及旧 DB `55432` 维护需用户授权 | 私人网络或公网域名，以及真实维护窗口 |
 
+## 逐项完成证据账本
+
+本表把“设计结论、可运行实现、验收证据、已知风险、恢复边界”固定到同一处。自动测试通过只能关闭机器条件；标为“待用户判断”的项目仍不能由这张表替用户接受。
+
+| # | 直接实现与自动化证据 | 人工证据状态 | 已知风险 | 可恢复边界 |
+| --- | --- | --- | --- | --- |
+| 1 | `0005/0006` 增量迁移；[`test-ideas-http.sh`](../scripts/test-ideas-http.sh)、[`ideas.spec.js`](../tests/browser/ideas.spec.js)、[`test-inputs-http.sh`](../scripts/test-inputs-http.sh) | 两级空间语义已确定；默认投影、旧直建入口迁移和真实手感待用户判断 | 投影过早固化，或兼容入口绕过来源 Proposal | Idea/Revision/Origin 不可变；立项事务失败不产生半个 Project；投影不写领域事实，可切换或退回 |
+| 2 | `0002/0007/0009/0011`；[`test-goal-migrations.sh`](../scripts/test-goal-migrations.sh)、[`test-goal-http.sh`](../scripts/test-goal-http.sh)、[`test-workspace-runner-http.sh`](../scripts/test-workspace-runner-http.sh) | 用户已接受“一目标一枝干、Session 是枝干节点” | 新旧 DAG/ActionRun 被错误混解，或崩溃制造伪 Session | 全部为增量表；旧 fixture 前后计数不变；Lease 恢复仍留在原 Session |
+| 3 | `0007`；[`test-goal-http.sh`](../scripts/test-goal-http.sh)、[`workbench.spec.js`](../tests/browser/workbench.spec.js) | 用户已接受诚实未知、最低充分明确度和契约渐进演化 | AI 伪造精确度或静默降低验收条件 | 契约版本不可变；候选可拒绝，旧接受版本保留；方向变化先暂停等待判断 |
+| 4 | `0011/0012`；[`test-scheduler-http.sh`](../scripts/test-scheduler-http.sh)、[`test-review-integration-http.sh`](../scripts/test-review-integration-http.sh) | 用户已接受“未达成继续/拆分，达成才拟合并”和用户终审 | Git、数据库与上下文跨存储中途失败，或父 ref 并发移动 | 冻结候选、fencing、Git CAS、幂等 Integration reconcile；不唯一时形成 Attention 而非猜测 |
+| 5 | `0008`；[`test-context-http.sh`](../scripts/test-context-http.sh) | 用户已接受按需、渐进式披露 | 摘要遗漏硬约束，或外部资料污染指令 | 契约/权限信封不可折叠；权威目录和全文保留；派生索引可重建，读取留摘要审计 |
+| 6 | `0009`；[`test-workspace-runner-http.sh`](../scripts/test-workspace-runner-http.sh) | 用户已接受枝干内固定权限、单写者和拆分后并行 | 容器逃逸、旁路写入、资源耗尽；Docker daemon 仍是平台信任边界 | Runner 无 Socket/home/网络能力且只读输入；输出层校验后 CAS 写回；Lease 可撤销，超限安全暂停 |
+| 7 | `0010/0011/0014`；[`test-plugin-images.sh`](../scripts/test-plugin-images.sh)、[`test-real-plugins-http.sh`](../scripts/test-real-plugins-http.sh)、[`test-tooling-http.sh`](../scripts/test-tooling-http.sh) | 统一插件语义已确定；发现、Skill 披露和运行现场手感待用户判断 | 发布者密钥失陷、撤销、版本冲突；付费/授权软件不可假装可用 | 签名与资源摘要固定，EnvironmentManifest 不可变且隔离；撤销后拒绝新调用；ToolLease 到期清理；缺插件只建安装请求 |
+| 8 | `0004/0013`；[`test-inputs-http.sh`](../scripts/test-inputs-http.sh)、[`test-storage-reconciliation.sh`](../scripts/test-storage-reconciliation.sh)、[`test-backup-recovery.sh`](../scripts/test-backup-recovery.sh) | 存储边界已确定；复制/引用默认值、异地位置与频率待用户判断 | 对象缺失/摘要不符、孤儿误删、备份不可恢复 | 内容寻址与跨存储日志；稳定扫描后只进可逆 quarantine；v2 只恢复到带标签空目标并做完整校验 |
+| 9 | `0011`；[`test-scheduler-http.sh`](../scripts/test-scheduler-http.sh) | 用户已要求暂停后必须通知；站内闭环已满足 | 重复投递、迟到 Worker、未知外部副作用被盲重试；站外适配器未配置 | 持久队列/事件、Lease/fencing 和幂等键；仅 safe 自动重试，unknown/unsafe 暂停；站外缺失明确记 `suppressed` |
+| 10 | `0012`；[`quality-gate.sh`](../scripts/quality-gate.sh)、[`test-review-integration-http.sh`](../scripts/test-review-integration-http.sh) | 用户终审语义已接受；具体 AI provider 未锁定且本阶段未获私人凭据授权 | 审核者与工作 Agent 不独立、模型漏检，或测试结果与候选漂移 | 独立 Worker 身份、只读冻结现场、候选/环境/报告摘要绑定；AI 只建议；未配置真实 provider 时不得伪装已调用，最终仍由用户决定 |
+| 11 | [`test-workbench-http.sh`](../scripts/test-workbench-http.sh)、[`test-workbench-browser.sh`](../scripts/test-workbench-browser.sh)、[`test-workbench-large.sh`](../scripts/test-workbench-large.sh) | 机器可读性和性能门通过；整体层级、密度及事件表达待用户实际使用判断 | 自动截图通过但真实工作仍难读；大图数据继续增长 | UI 只是可替换投影，不改领域状态；Session 01 反例与旧提交保留，可退回后建立下一 Session 继续 |
+| 12 | `0013`；[`test-security-https.sh`](../scripts/test-security-https.sh)、[`test-secure-compose.sh`](../scripts/test-secure-compose.sh)、[`test-backup-recovery.sh`](../scripts/test-backup-recovery.sh) | 私有/公开模板均可运行；真实网络、CA、异地备份和维护窗口待用户授权 | 代理/密钥误配、公开端口、迁移失败；遗留 PostgreSQL `55432` 仍公开映射 | 默认私有模板仅回环 HTTPS 且数据库无端口；文件 secret、备份前置、空目标恢复和旧应用回退；真实现场授权前只读不改 |
+
 ## 1. 产品定位与两级空间
 
 必须同时满足：
@@ -250,7 +269,7 @@ BP-08 候选（[`workbench-v2.md`](workbench-v2.md)）：
 - 工作现场直接显示真实 Git workspace、输入/Runner 文件、ActionRun payload/result 与事件、ToolCall/ToolLease endpoint、Evidence、Contribution、通知和物理 Integration 阶段；
 - 插件目录按需披露准确版本、能力、工具、权限、Runtime、签名发布者与撤销状态；安装表单只创建幂等请求，不提供未签名安装捷径；
 - 1440/820/390 Chromium、最小字号/对比度、44px 核心触控、Tab/方向键/Enter、减少动画和无页面横向溢出已自动验证；
-- 隔离 `100 GoalBranch / 300 Session / 20 Proposal` 大图在完整质量门中实测 TTFB 中位数 `88.531ms`、DOMContentLoaded `349.5ms`、筛选 `47.3ms`，均在契约预算内；
+- 隔离 `100 GoalBranch / 300 Session / 20 Proposal` 大图在最新完整质量门中实测 TTFB 中位数 `86.227ms`、DOMContentLoaded `241.9ms`、筛选 `18.3ms`，均在契约预算内；
 - Session 01 的 `6–10px` 反例继续保留为退回记录。机器必要条件已经满足，但用户尚未实际接受候选，所以状态仍是“待用户判断”。
 
 ## 12. 私有部署与安全运维
@@ -279,7 +298,7 @@ BP-09 技术候选记录（[`private-deployment-v1.md`](private-deployment-v1.md
 | BranchProposal | 覆盖方面 | 依赖 | 合并前证据 |
 | --- | --- | --- | --- |
 | BP-11A 可读性修正 | 11 | 当前 v0.1 | Chromium 字号/对比度/三尺寸 + 用户判断 |
-| BP-01 想法到项目（执行中） | 1、3、11 | 核心领域 | 领域/迁移/HTTP/浏览器 + 用户判断 |
+| BP-01 想法到项目（机器门完成，待用户判断） | 1、3、11 | 核心领域 | 领域/迁移/HTTP/浏览器已通过；默认投影与手感待用户判断 |
 | BP-02 契约与领域补全（逻辑闭环完成） | 2、3、4、8、10 | v0.1 | 契约/来源/Evidence/并发/撤回/停止 E2E；物理父整合归 BP-07 |
 | BP-03 上下文与来源（逻辑闭环完成） | 5、8 | BP-02 | 长上下文、来源追溯和重建测试已通过；Git 来源继续由 BP-04 接入 |
 | BP-04 worktree Runner（逻辑闭环完成） | 6、8 | BP-02 | Git 竞态、隔离、资源、删除与逃逸测试全部通过 |
@@ -288,5 +307,6 @@ BP-09 技术候选记录（[`private-deployment-v1.md`](private-deployment-v1.md
 | BP-07 证据与审核闭环（逻辑闭环完成） | 4、10 | BP-03–06 | 冻结 commit/环境、独立只读复验、完整/部分父整合、冲突/CAS/崩溃恢复及根目标人工终结均已验证 |
 | BP-08 完整多设备工作台（机器门完成，待用户判断） | 11 | BP-01–07 | 100/300 大图、键盘、三尺寸、性能均通过；用户判断未替代 |
 | BP-09 私有部署安全（机器门完成） | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS、调和、安全 Compose、恢复/升级/回退及总质量门均通过 |
+| BP-10 插件资源与 Session 披露（机器门完成，待用户判断） | 7、5、10 | BP-05、BP-06、BP-09 | 签名 Skill/reference、精确 EnvironmentManifest、按需读取/审计、撤销和真实 OCI 流程均通过；插件现场手感待用户判断 |
 
 每个 BP 未达成时继续当前 Session；需要并行或独立目标时才创建子枝干。每次拟合并都必须记录冻结候选和独立复验；用户未接受前只保留候选，不自行合入 `main`。
