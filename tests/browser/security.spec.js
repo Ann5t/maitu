@@ -41,7 +41,7 @@ for (const [name, viewport] of sizes) {
     expect(session).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Strict', path: '/' });
     expect(csrf).toMatchObject({ secure: true, httpOnly: false, sameSite: 'Strict', path: '/' });
     await page.goto(`/projects/${projectId}?view=graph`);
-    await expect(page.locator('body')).toContainText('目标工作台');
+    await expect(page.locator('#goal-workbench')).toBeVisible();
     const overflow = await page.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
       viewport: window.innerWidth,

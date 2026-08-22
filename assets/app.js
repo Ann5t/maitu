@@ -1,5 +1,13 @@
 (() => {
   const root = document.documentElement;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const updateWithTransition = (update) => {
+    if (reducedMotion.matches || typeof document.startViewTransition !== "function") {
+      update();
+      return null;
+    }
+    return document.startViewTransition(update);
+  };
   const syncThemeControls = () => {
     document.querySelectorAll("[data-theme-set]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.themeSet === root.dataset.theme));
@@ -7,10 +15,12 @@
   };
   const applyTheme = (theme) => {
     if (theme !== "light" && theme !== "dark") return;
-    root.dataset.theme = theme;
-    root.style.colorScheme = theme;
-    try { localStorage.setItem("fudian-theme", theme); } catch (_) {}
-    syncThemeControls();
+    updateWithTransition(() => {
+      root.dataset.theme = theme;
+      root.style.colorScheme = theme;
+      try { localStorage.setItem("fudian-theme", theme); } catch (_) {}
+      syncThemeControls();
+    });
   };
 
   document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
@@ -43,6 +53,35 @@
     textarea.addEventListener("input", resize);
   });
 
+  document.querySelectorAll("details").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (!details.open || reducedMotion.matches) return;
+      [...details.children].slice(1).forEach((element, index) => {
+        element.animate(
+          [
+            { opacity: 0, transform: "translateY(-5px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          { duration: 150, delay: Math.min(index * 16, 64), easing: "cubic-bezier(.2,.75,.25,1)" },
+        );
+      });
+    });
+  });
+
+  const closeFloatingDetails = (event) => {
+    document.querySelectorAll(".goal-filter-menu[open], .project-more[open]").forEach((details) => {
+      if (!details.contains(event.target)) details.removeAttribute("open");
+    });
+  };
+  document.addEventListener("pointerdown", closeFloatingDetails);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll(".goal-filter-menu[open], .project-more[open]").forEach((details) => {
+      details.removeAttribute("open");
+      details.querySelector(":scope > summary")?.focus();
+    });
+  });
+
   const graph = document.querySelector("[data-graph-scroll]");
   const selected = graph?.querySelector("[data-selected='true']");
   if (graph && selected && window.innerWidth > 620) {
@@ -73,6 +112,8 @@
     const search = goalCommandBar.querySelector("[data-goal-search]");
     const result = goalCommandBar.querySelector("[data-goal-filter-result]");
     const filterButtons = [...goalCommandBar.querySelectorAll("[data-goal-filter]")];
+    const filterMenu = goalCommandBar.querySelector("[data-goal-filter-menu]");
+    const filterLabel = goalCommandBar.querySelector("[data-goal-filter-label]");
     const focusCurrent = goalCommandBar.querySelector("[data-goal-focus-current]");
     let activeFilter = "all";
 
@@ -94,7 +135,7 @@
         lane.hidden = !visible;
         if (visible) visibleCount += 1;
       }
-      if (result) result.textContent = `${visibleCount} / ${lanes.length} 条目标`;
+      if (result) result.textContent = `${visibleCount} / ${lanes.length}`;
     };
 
     search?.addEventListener("input", applyGoalFilter);
@@ -106,7 +147,11 @@
           item.classList.toggle("is-active", active);
           item.setAttribute("aria-pressed", String(active));
         }
+        if (filterLabel) {
+          filterLabel.textContent = activeFilter === "all" ? "筛选" : button.dataset.filterLabel || "筛选";
+        }
         applyGoalFilter();
+        filterMenu?.removeAttribute("open");
       });
     }
 
@@ -118,6 +163,7 @@
         item.classList.toggle("is-active", active);
         item.setAttribute("aria-pressed", String(active));
       }
+      if (filterLabel) filterLabel.textContent = "筛选";
       applyGoalFilter();
       const current = goalMap.querySelector("[data-selected='true']");
       if (!current) return;
@@ -141,6 +187,50 @@
       event.preventDefault();
       nodes[nextIndex].focus({ preventScroll: true });
       nodes[nextIndex].scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    });
+  }
+
+  const worksiteRoot = document.querySelector("[data-worksite-root]");
+  const worksiteSwitch = worksiteRoot?.querySelector("[data-worksite-view-switch]");
+  if (worksiteRoot && worksiteSwitch) {
+    const buttons = [...worksiteSwitch.querySelectorAll("[data-worksite-view]")];
+    const groups = [...worksiteRoot.querySelectorAll("[data-worksite-group]")];
+    const activateWorksiteView = (view, moveFocus = false) => {
+      if (!["scene", "result", "detail"].includes(view)) return;
+      const update = () => {
+        worksiteRoot.dataset.worksiteViewActive = view;
+        for (const button of buttons) {
+          const active = button.dataset.worksiteView === view;
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-pressed", String(active));
+        }
+        for (const group of groups) group.hidden = group.dataset.worksiteGroup !== view;
+      };
+      const transition = updateWithTransition(update);
+      if (!transition && !reducedMotion.matches) {
+        groups.filter((group) => !group.hidden).forEach((group, index) => {
+          group.animate(
+            [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
+            { duration: 180, delay: Math.min(index * 18, 72), easing: "cubic-bezier(.2,.75,.25,1)" },
+          );
+        });
+      }
+      if (moveFocus) buttons.find((button) => button.dataset.worksiteView === view)?.focus();
+    };
+    for (const button of buttons) {
+      button.addEventListener("click", () => activateWorksiteView(button.dataset.worksiteView, true));
+    }
+    const viewForHash = () => {
+      if (["#worksite-results", "#worksite-review"].includes(location.hash)) return "result";
+      if (["#worksite-plugins", "#worksite-contract", "#worksite-context"].includes(location.hash)) return "detail";
+      if (["#worksite-files", "#worksite-actions", "#worksite-tools"].includes(location.hash)) return "scene";
+      return null;
+    };
+    const hashedView = viewForHash();
+    if (hashedView) activateWorksiteView(hashedView);
+    window.addEventListener("hashchange", () => {
+      const view = viewForHash();
+      if (view) activateWorksiteView(view);
     });
   }
 

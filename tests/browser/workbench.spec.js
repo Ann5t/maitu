@@ -129,9 +129,11 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await rootContract.locator('[name="unknowns"]').fill('最终布局仍需用户凭感觉调整');
   await rootContract.getByRole('button', { name: '建立 BranchProposal 草案' }).click();
 
+  await openDetails(page.locator('.proposal-queue'));
   const proposal = page.locator('.proposal-card');
   await expect(proposal).toContainText('用表单、文件和审核闭环');
   await proposal.getByRole('button', { name: '提交审核' }).click();
+  await openDetails(page.locator('.proposal-queue'));
   const approval = page.locator('form:has(input[value="proposal.approve"])');
   await approval.locator('[name="branch_name"]').fill('Chromium 根目标');
   await approval.locator('[name="assignment"]').fill('在真实页面操作文件、产出与审核');
@@ -139,10 +141,15 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await approval.getByRole('button', { name: '批准 BranchProposal' }).click();
 
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
+  await expect(page.locator('[data-worksite-view="scene"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-worksite-view="result"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('[data-worksite-group="detail"]').first()).toBeHidden();
   await expect(page.locator('.session-worksite')).toContainText('文件与代码');
   await expect(page.locator('.session-worksite')).toContainText('工具与浏览器');
-  await expect(page.locator('.session-worksite')).toContainText('行动与运行');
+  await expect(page.locator('.session-worksite')).toContainText('行动');
+  await page.locator('[data-worksite-view="detail"]').click();
   await expect(page.locator('.plugin-worksite')).toBeVisible();
+  await expect(page.locator('[data-worksite-view="detail"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.worksite-context')).toBeVisible();
   await expect(page.locator('.worksite-context')).toContainText('永不折叠');
   await expect(page.locator('.worksite-context')).toContainText('按需披露');
@@ -154,7 +161,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('[data-goal-lane]')).toBeVisible();
   await commandBar.locator('[data-goal-search]').fill('完全不存在的目标');
   await expect(page.locator('[data-goal-lane]')).toBeHidden();
-  await expect(commandBar.locator('[data-goal-filter-result]')).toHaveText('0 / 1 条目标');
+  await expect(commandBar.locator('[data-goal-filter-result]')).toHaveText('0 / 1');
   await commandBar.locator('[data-goal-focus-current]').click();
   await expect(page.locator('.goal-session-node.is-selected')).toBeFocused();
   await page.keyboard.press('End');
@@ -169,9 +176,11 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await pluginRequest.locator('[name="capability"]').fill('presentation.build');
   await pluginRequest.locator('[name="reason"]').fill('当前目标需要生成并验证演示文稿');
   await pluginRequest.getByRole('button', { name: '记录安装请求' }).click();
+  await page.locator('[data-worksite-view="detail"]').click();
   await expect(page.locator('.plugin-request-list')).toContainText('fudian.tools.pptmaster');
   await expect(page.locator('.plugin-request-list')).toContainText('当前目标需要生成并验证演示文稿');
 
+  await page.locator('[data-worksite-view="scene"]').click();
   const upload = page.locator('[data-input-upload]');
   await upload.locator('input[type="file"]').setInputFiles({
     name: 'browser-evidence.md',
@@ -210,6 +219,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   const resume = page.locator('form:has(input[value="session.resume"])');
   await resume.locator('[name="resolution"]').fill('已阅读契约差异，继续浏览器验收');
   await resume.getByRole('button', { name: '恢复 Session' }).click();
+  await page.locator('[data-worksite-view="detail"]').click();
   await expect(page.locator('.worksite-contract')).toContainText('探索模式');
 
   await openDetails(page.locator('[data-session-actions]'));
@@ -223,7 +233,8 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await structuredEvidence.locator('[name="claim"]').fill('工作台在真实 Chromium 可操作');
   await structuredEvidence.locator('[name="observation"]').fill('契约差异批准、暂停和恢复全部由页面完成');
   await structuredEvidence.locator('[name="verification_status"]').selectOption('verified');
-  await structuredEvidence.getByRole('button', { name: '保存 Evidence' }).click();
+  await structuredEvidence.getByRole('button', { name: '保存证据' }).click();
+  await page.locator('[data-worksite-view="result"]').click();
   await expect(page.locator('.test-evidence-record')).toContainText('工作台在真实 Chromium 可操作');
 
   await openDetails(page.locator('[data-session-actions]'));
@@ -236,10 +247,10 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await contribution.locator('[name="title"]').fill('Chromium 端到端证据');
   await contribution.locator('[name="body"]').fill('桌面与移动端工作台可操作，文件已安全导入');
   await contribution.getByRole('button', { name: '保存可回流产出' }).click();
+  await page.locator('[data-worksite-view="result"]').click();
   await expect(page.locator('.contribution-stack')).toContainText('Chromium 端到端证据');
 
   expect(await renderedFontSize(page.locator('body'))).toBeGreaterThanOrEqual(16);
-  expect(await renderedFontSize(page.locator('.goal-toolbar p'))).toBeGreaterThanOrEqual(13);
   expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.worksite-head h3'))).toBeGreaterThanOrEqual(16);
   expect(await renderedFontSize(page.locator('.worksite-disclosure__summary strong'))).toBeGreaterThanOrEqual(14);
@@ -255,7 +266,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
     .filter((item) => item.size < 12));
   expect(undersizedText).toEqual([]);
   const undersizedCoreTargets = await page.locator('#goal-workbench').evaluate((root) => [
-    ...root.querySelectorAll('button, summary, .worksite-nav a, .worksite-head__controls a, .context-api-link, .worksite-record > a'),
+    ...root.querySelectorAll('button, summary, .worksite-head__controls a, .context-api-link, .worksite-record > a'),
   ].filter((element) => element.getClientRects().length > 0)
     .map((element) => ({ text: element.textContent.trim().slice(0, 50), height: element.getBoundingClientRect().height }))
     .filter((item) => item.height < 44));
@@ -278,7 +289,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await merge.locator('[name="test_evidence"]').fill('Chromium 桌面布局无溢出\n文件导入成功');
   await merge.locator('[name="self_check"]').fill('已核对目标、验证、未知与停止条件');
   await merge.getByRole('button', { name: '冻结现场并进入拟合并审核' }).click();
-  await expect(page.locator('.review-evidence-grid')).toContainText('结构化 Evidence');
+  await expect(page.locator('.review-evidence-grid')).toContainText('结构化证据');
   await expect(page.locator('.review-evidence-grid')).toContainText('工作台在真实 Chromium 可操作');
 
   const reviewGateId = await page.locator('[data-review-gate-id]').getAttribute('data-review-gate-id');
@@ -301,7 +312,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
   await expect(page.locator('.session-worksite')).toBeVisible();
-  await expect(page.locator('.worksite-context')).toContainText('完整目录');
+  await expect(page.locator('.worksite-context')).toContainText('继承上下文');
   expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.worksite-head h3'))).toBeGreaterThanOrEqual(16);
   expect(await renderedFontSize(page.locator('.mobile-nav b'))).toBeGreaterThanOrEqual(12);
@@ -317,7 +328,6 @@ test('settings reports real AI status and persists explicit theme choice', async
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
   await expect(page.getByText('AI 服务')).toBeVisible();
-  await expect(page.getByText('模型与 Agent')).toBeVisible();
   await expect(page.getByText('未连接')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Rust edition');
   await expect(page.locator('body')).not.toContainText('可恢复单体');
@@ -343,6 +353,7 @@ test('settings reports real AI status and persists explicit theme choice', async
   await expect(page.locator('.mobile-nav a[href="/settings"]')).toHaveClass(/is-active/);
   await appearance.locator('[data-theme-set="light"]').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.waitForTimeout(220);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1200);
   await page.screenshot({ path: `${screenshotDir}/settings-mobile-light.png`, fullPage: true });
@@ -351,6 +362,7 @@ test('settings reports real AI status and persists explicit theme choice', async
 test('project dashboard keeps the current work visually primary', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: '项目', level: 1 })).toBeVisible();
+  await expect(page.locator('.side-nav a[href="/?view=artifacts"]')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('WORKSPACE');
   await expect(page.locator('body')).not.toContainText('RECENT');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();

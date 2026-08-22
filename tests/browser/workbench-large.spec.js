@@ -27,15 +27,18 @@ test('100 branches and 300 sessions remain searchable, keyboard operable and res
   await expect(page.locator('.proposal-card')).toHaveCount(20);
 
   const commandBar = page.locator('[data-goal-command-bar]');
+  await commandBar.locator('[data-goal-filter-menu] > summary').click();
   await commandBar.locator('[data-goal-filter="attention"]').click();
   const attentionCount = await page.locator('[data-goal-lane]:visible').count();
   expect(attentionCount).toBeGreaterThan(0);
   expect(attentionCount).toBeLessThan(100);
 
+  await commandBar.locator('[data-goal-filter-menu] > summary').click();
   await commandBar.locator('[data-goal-filter="notification"]').click();
   const notificationCount = await page.locator('[data-goal-lane]:visible').count();
   expect(notificationCount).toBe(7);
 
+  await commandBar.locator('[data-goal-filter-menu] > summary').click();
   await commandBar.locator('[data-goal-filter="all"]').click();
   const filterMs = await page.evaluate(async () => {
     const input = document.querySelector('[data-goal-search]');
@@ -47,7 +50,7 @@ test('100 branches and 300 sessions remain searchable, keyboard operable and res
   });
   expect(filterMs).toBeLessThanOrEqual(100);
   await expect(page.locator('[data-goal-lane]:visible')).toHaveCount(1);
-  await expect(commandBar.locator('[data-goal-filter-result]')).toHaveText('1 / 100 条目标');
+  await expect(commandBar.locator('[data-goal-filter-result]')).toHaveText('1 / 100');
 
   await commandBar.locator('[data-goal-focus-current]').click();
   await expect(page.locator('.goal-session-node.is-selected')).toBeFocused();
