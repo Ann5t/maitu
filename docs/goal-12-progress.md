@@ -28,11 +28,11 @@
 | 4 | 执行循环 | 完成 | BP-07 已补齐冻结候选、独立审核、选择性父整合、CAS、冲突暂停与崩溃恢复 |
 | 5 | 上下文与记忆 | 完成 | BP-03 精确快照、来源目录与按需披露已通过完整质量门 |
 | 6 | worktree 与隔离 | 完成 | BP-04 全部机器门和既定用户权限语义通过 |
-| 7 | 中央插件 | 部分实现 | 一次性/持续 OCI 工具均完成；BP-08/BP-09 补安装、运行现场与代理 UI |
+| 7 | 中央插件 | 部分实现 | 一次性/持续 OCI 与按需插件/运行现场 UI 完成；BP-09 补认证 endpoint proxy 和保留策略 |
 | 8 | 数据与恢复 | 部分实现 | Git CAS/操作日志完成；BP-09 补 reconcile 与完整恢复演练 |
 | 9 | 后台执行 | 完成 | BP-06 队列、Lease/fencing、恢复、取消、暂停和通知矩阵已通过 |
 | 10 | 证据与审核 | 完成 | BP-07 已验证准确 commit/环境绑定、独立只读复验、父契约复验及用户唯一终审权 |
-| 11 | 多设备工作台 | 待用户判断 | BP-11A Session 02 |
+| 11 | 多设备工作台 | 待用户判断 | BP-08 机器门完成；等待用户实际体验 `goal-worksite-v2` |
 | 12 | 私有部署 | 部分实现 | BP-09 待开始 |
 
 ## 运行日志
@@ -145,3 +145,21 @@
 - 第一次完整门在最后的发行镜像检查发现迁移计数断言仍写死为 11；服务本身已正常启动。断言更新为 12 后，发行镜像专项和完整 `scripts/quality-gate.sh` 均从头通过：48 个 Rust 测试（46 个主程序、2 个库测试）、12 个迁移、SQL 负约束、全部 HTTP/Git/Runner/调度/OCI/故障恢复、Chromium 三尺寸及非 root 只读 runtime；
 - 最终只读复核真实库仍为 `3:8:23:2`、迁移登记仍为原 4 条；两个 Artifact 的数据库摘要与物理文件逐项一致，生产应用 `bebb50d…` 和数据库 `482ccdee…` 的完整 ID/启动时间未变；无一次性测试容器或网络残留，既有 `0.0.0.0:55432` 风险仍未擅自处理；
 - 第 4、10 项的必要闭环满足并标为完成。审核/暂停的视觉密度继续由第 11 项让用户判断；备份、回退与部署恢复继续属于第 8、12 项，未被 BP-07 冒充完成。
+
+### 2026-08-22 20:36 +08:00
+
+- BP-08 将旧车道详情推进为 `goal-worksite-v2`：指挥摘要与筛选统一投影运行、Attention、ActionRun、ReviewGate、Integration 和 Notification；父子枝干按稳定前序排列，Session 以 URL 深链并支持方向键/Enter；
+- 选中现场从权威记录展示 Git workspace、输入与 Runner 文件、ActionRun payload/result 和事件、ToolCall、ToolLease/endpoint、Evidence、Contribution、Notification、ReviewGate 及物理 Integration 阶段；没有事实时明确为空；
+- 中央插件目录按需披露准确版本、能力/工具、安装或撤销状态、Runtime、权限和签名发布者；网页提交 PPTMaster 安装请求后刷新仍可见，但没有绕过签名安装的入口；
+- 第一次 100 枝干/300 Session 大图审查发现 20 个 Proposal 遮挡主图、手机现场被长图推远；改为多 Proposal 默认折叠、移动图固定滚动窗口并自动定位当前 Session 后重测通过；
+- 最近一次隔离基准包含 20 Proposal、20 ReviewGate、10 Integration、14 ActionRun、9 判断暂停和 7 未读通知：TTFB 三次为 `162.946/138.443/61.858ms`（中位 `138.443ms`），DOMContentLoaded `309.4ms`，筛选 `22.7ms`；
+- 普通 HTTP 闭环、Chromium 1440/820/390、字号/对比度、44px 核心触控、键盘、减少动画、深链和无横向溢出已通过；Rustfmt、Clippy 和 48 个 Rust 测试也已通过。完整一键门和真实现场只读复核仍待本 BP 提交前执行；
+- 第 11 项只能保持“待用户判断”：机器门不能替用户接受布局、密度、暂停/拟合并表达或想法空间默认投影。
+
+### BP-08 提交前终检
+
+- 完整 `scripts/quality-gate.sh` 在修正一条仍匹配旧标题的 Idea HTTP 断言后重新从头通过：Rustfmt、Clippy `-D warnings`、48 个 Rust 测试、12 个迁移、全部隔离 HTTP/Git/Runner/调度/签名 OCI/审核集成流程、Chromium 三尺寸和非 root 只读发行镜像；
+- 100 枝干/300 Session 完整门实测 TTFB 中位数 `88.531ms`、`DOMContentLoaded` `349.5ms`、筛选 `47.3ms`，均低于 `1500/2500/100ms` 预算；
+- 真实生产库只读复核仍为 `3:8:23:2`，`schema_migrations` 仍只有原 4 条；两个 Artifact 的数据库摘要 `f6bc647…` / `2038951…` 与卷内文件实际 SHA-256 逐项一致；
+- 生产应用 `bebb50d…`、数据库 `482ccdee…` 的完整容器 ID、启动时间与端口不变；运行中只有原生产与隔离 review 两组容器，无一次性测试容器或网络残留；
+- BP-08 机器验收闭环完成，但第 11 项仍保持“待用户判断”，不用测试数字替代人的真实体验。

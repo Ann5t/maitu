@@ -49,6 +49,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/projects/{project_id}/goal-commands",
             post(handlers::goal_command_form),
         )
+        .route(
+            "/projects/{project_id}/sessions/{session_id}/plugin-install-requests",
+            post(handlers::plugin_install_request_form),
+        )
         .route("/artifacts/{artifact_id}", get(handlers::artifact_download))
         .route("/api/health", get(handlers::api_health))
         .route(

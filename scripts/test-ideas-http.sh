@@ -270,6 +270,6 @@ assert len(s["branches"]) == 0' "$goal_snapshot"
 
 curl -fsS "$idea_http_base/ideas?view=map" | grep -q '关系图'
 curl -fsS "$idea_http_base/ideas/$idea_one" | grep -q 'ProjectProposal'
-curl -fsS "$idea_http_base/projects/$project_id?tab=goals" | grep -q '目标枝干工作台'
+curl -fsS "$idea_http_base/projects/$project_id?tab=goals" | grep -q '目标图与 Agent 工作现场'
 
 echo "idea → ProjectProposal → Project HTTP flow passed with immutable provenance"

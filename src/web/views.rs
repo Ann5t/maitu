@@ -978,30 +978,105 @@ fn goal_workbench(
         .iter()
         .filter(|item| item.status == "open")
         .count();
+    let running_sessions = snapshot
+        .sessions
+        .iter()
+        .filter(|item| item.status == "running")
+        .count();
+    let active_actions = activity
+        .action_runs
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status.as_str(),
+                "queued" | "running" | "waiting" | "cancellation_requested"
+            )
+        })
+        .count();
+    let unread_notifications = activity
+        .notifications
+        .iter()
+        .filter(|item| item.status == "unread")
+        .count();
+    let review_or_integration = snapshot
+        .review_gates
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status.as_str(),
+                "pending_ai_review" | "pending_human_review"
+            )
+        })
+        .count()
+        + snapshot
+            .integrations
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.git_integration_status.as_str(),
+                    "pending" | "preparing" | "validating" | "applying" | "conflicted"
+                )
+            })
+            .count();
+    let lane_signals = GoalLaneSignals::build(snapshot, activity);
 
     html! {
         section id="goal-workbench" class="goal-workbench"
             data-projection-version=(PROJECTION_VERSION) {
             header class="goal-toolbar" {
-                div {
+                div class="goal-toolbar__intro" {
                     span class="eyebrow" { "GOAL BRANCH WORKBENCH · PROJECTION " (PROJECTION_VERSION) }
-                    h2 { "目标枝干工作台" }
-                    p { "一条枝干承载一个目标；圆点卡片代表一次 Agent Session。图只是可替换投影，审核语义保存在领域记录中。" }
+                    h2 { "目标图与 Agent 工作现场" }
+                    p { "先看谁在推进、哪里需要你；再走进任一 Session，查看文件、浏览器、工具、测试与审核。图只是可替换投影。" }
                 }
-                div class="goal-toolbar__stats" aria-label="目标枝干概览" {
-                    span { b { (snapshot.branches.len()) } "目标" }
-                    span { b { (snapshot.sessions.len()) } "Session" }
-                    span class=(if open_attention > 0 { "has-attention" } else { "" }) {
-                        b { (open_attention) } "待判断"
+                div class="command-summary" aria-label="项目当前指挥摘要" {
+                    span class="command-summary__item command-summary__item--running" {
+                        b { (running_sessions) } "正在工作"
+                    }
+                    span class=(format!("command-summary__item{}", if open_attention > 0 { " has-attention" } else { "" })) {
+                        b { (open_attention) } "需要你"
+                    }
+                    span class="command-summary__item" { b { (active_actions) } "后台行动" }
+                    span class="command-summary__item" { b { (review_or_integration) } "审核 / 集成" }
+                    span class=(format!("command-summary__item{}", if unread_notifications > 0 { " has-attention" } else { "" })) {
+                        b { (unread_notifications) } "未读通知"
+                    }
+                }
+            }
+
+            @if !projection.lanes.is_empty() {
+                nav class="goal-command-bar" aria-label="目标图筛选与定位" data-goal-command-bar {
+                    label class="goal-search" {
+                        span class="sr-only" { "搜索目标或 Session" }
+                        span aria-hidden="true" { "⌕" }
+                        input type="search" placeholder="搜索目标、任务或 Agent" autocomplete="off" data-goal-search;
+                    }
+                    div class="goal-filter-group" role="group" aria-label="筛选目标枝干" {
+                        button type="button" class="is-active" data-goal-filter="all" aria-pressed="true" { "全部" }
+                        button type="button" data-goal-filter="active" aria-pressed="false" { "推进中" }
+                        button type="button" data-goal-filter="attention" aria-pressed="false" { "需要我" }
+                        button type="button" data-goal-filter="review" aria-pressed="false" { "审核 / 集成" }
+                        button type="button" data-goal-filter="notification" aria-pressed="false" { "未读通知" }
+                        button type="button" data-goal-filter="terminal" aria-pressed="false" { "已收尾" }
+                    }
+                    button class="goal-focus-current" type="button" data-goal-focus-current { "回到当前现场" }
+                    output class="goal-filter-result" data-goal-filter-result aria-live="polite" {
+                        (snapshot.branches.len()) " / " (snapshot.branches.len()) " 条目标"
                     }
                 }
             }
 
             @if !open_proposals.is_empty() {
-                section class="proposal-queue" aria-label="待决定的 BranchProposal" {
-                    div class="proposal-queue__heading" {
-                        span class="eyebrow" { "BRANCH PROPOSALS" }
-                        strong { (open_proposals.len()) " 项分枝提案等待推进" }
+                details class="proposal-queue" aria-label="待决定的 BranchProposal"
+                    open[open_proposals.len() <= 4] {
+                    summary class="proposal-queue__heading" {
+                        span {
+                            span class="eyebrow" { "BRANCH PROPOSALS" }
+                            strong { (open_proposals.len()) " 项分枝提案等待推进" }
+                        }
+                        small {
+                            @if open_proposals.len() <= 4 { "收起提案" } @else { "按需展开，不遮住目标图" }
+                        }
                     }
                     div class="proposal-queue__cards" {
                         @for proposal in open_proposals {
@@ -1032,7 +1107,7 @@ fn goal_workbench(
                         div class="goal-map__scroll" data-goal-map-scroll {
                             ol class="goal-lanes" {
                                 @for lane in &projection.lanes {
-                                    (goal_lane(snapshot, lane, projection.selected_session_id))
+                                    (goal_lane(snapshot, lane, projection.selected_session_id, &lane_signals))
                                 }
                             }
                         }
@@ -1058,21 +1133,77 @@ fn goal_lane(
     snapshot: &GoalGraphSnapshot,
     lane: &GoalLane,
     selected_session_id: Option<Uuid>,
+    signals: &GoalLaneSignals<'_>,
 ) -> Markup {
-    let open_attention = snapshot
-        .attention_items
+    let open_attention = signals
+        .attention_by_branch
+        .get(&lane.branch_id)
+        .copied()
+        .unwrap_or_default();
+    let has_review = lane.session_ids.iter().any(|session_id| {
+        signals
+            .review_status_by_session
+            .get(session_id)
+            .is_some_and(|status| matches!(*status, "pending_ai_review" | "pending_human_review"))
+            || signals
+                .integration_status_by_session
+                .get(session_id)
+                .is_some_and(|status| {
+                    matches!(
+                        *status,
+                        "pending" | "preparing" | "validating" | "applying" | "conflicted"
+                    )
+                })
+    });
+    let has_active = lane.session_ids.iter().any(|session_id| {
+        signals
+            .sessions_by_id
+            .get(session_id)
+            .is_some_and(|session| session.status == "running")
+            || signals.active_action_by_session.contains_key(session_id)
+    });
+    let has_notification = signals
+        .notification_by_branch
+        .get(&lane.branch_id)
+        .copied()
+        .unwrap_or_default()
+        > 0;
+    let terminal = matches!(
+        lane.status.as_str(),
+        "integrated" | "completed" | "stopped" | "archived"
+    );
+    let search_text = lane
+        .session_ids
         .iter()
-        .filter(|item| item.goal_branch_id == Some(lane.branch_id) && item.status == "open")
-        .count();
+        .filter_map(|id| signals.sessions_by_id.get(id))
+        .fold(lane.name.clone(), |mut text, session| {
+            text.push(' ');
+            text.push_str(&session.assignment);
+            if let Some(agent) = &session.agent_identity {
+                text.push(' ');
+                text.push_str(agent);
+            }
+            text
+        });
     html! {
         li class=(format!("goal-lane goal-lane--{}", goal_status_tone(&lane.status)))
             style=(format!("--goal-depth:{}", lane.depth))
-            data-branch-id=(lane.branch_id) {
+            data-branch-id=(lane.branch_id)
+            data-goal-lane
+            data-search=(search_text)
+            data-active=(has_active)
+            data-attention=(open_attention > 0)
+            data-review=(has_review)
+            data-notification=(has_notification)
+            data-terminal=(terminal) {
             div class="goal-lane__identity" {
                 span class="goal-lane__fork" aria-hidden="true" { "⌁" }
                 div {
                     small {
-                        @if lane.parent_branch_id.is_some() { "子目标" } @else { "根目标" }
+                        @if let Some(parent_id) = lane.parent_branch_id {
+                            "子目标 · 来自 "
+                            (goal_short_title(signals.branch_name_by_id.get(&parent_id).copied().unwrap_or("未知父目标"), 16))
+                        } @else { "根目标" }
                     }
                     strong { (&lane.name) }
                 }
@@ -1085,15 +1216,18 @@ fn goal_lane(
             }
             div class="goal-session-chain" {
                 @for session_id in &lane.session_ids {
-                    @if let Some(session) = snapshot.sessions.iter().find(|item| item.id == *session_id) {
-                        @let contribution_count = snapshot.contributions.iter().filter(|item| item.session_id == session.id).count();
-                        @let gate = snapshot.review_gates.iter().rev().find(|item| item.session_id == session.id);
+                    @if let Some(session) = signals.sessions_by_id.get(session_id) {
+                        @let contribution_count = signals.contribution_count_by_session.get(&session.id).copied().unwrap_or_default();
+                        @let gate_status = signals.review_status_by_session.get(&session.id).copied();
+                        @let action_status = signals.active_action_by_session.get(&session.id).copied();
+                        @let integration_status = signals.integration_status_by_session.get(&session.id).copied();
                         a class=(format!("goal-session-node goal-session-node--{}{}{}",
                                 goal_status_tone(&session.status),
                                 if Some(session.id) == selected_session_id { " is-selected" } else { "" },
                                 if lane.head_session_id == session.id { " is-head" } else { "" }))
                             data-session-id=(session.id)
                             data-selected=(if Some(session.id) == selected_session_id { "true" } else { "false" })
+                            aria-current=(if Some(session.id) == selected_session_id { "page" } else { "false" })
                             href=(format!("/projects/{}?tab=goals&session={}#goal-workbench", snapshot.project.id, session.id)) {
                             i class="goal-session-node__dot" aria-hidden="true" {}
                             span class="goal-session-node__copy" {
@@ -1106,12 +1240,103 @@ fn goal_lane(
                             }
                             span class="goal-session-node__signals" {
                                 @if contribution_count > 0 { b { (contribution_count) " 产出" } }
-                                @if let Some(gate) = gate { b { (review_status_label(&gate.status)) } }
+                                @if let Some(status) = action_status { b { (scheduler_status_label(status)) } }
+                                @if let Some(status) = gate_status { b { (review_status_label(status)) } }
+                                @if let Some(status) = integration_status { b { (integration_status_label(status)) } }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+struct GoalLaneSignals<'a> {
+    sessions_by_id: HashMap<Uuid, &'a GoalSessionRecord>,
+    branch_name_by_id: HashMap<Uuid, &'a str>,
+    contribution_count_by_session: HashMap<Uuid, usize>,
+    attention_by_branch: HashMap<Uuid, usize>,
+    notification_by_branch: HashMap<Uuid, usize>,
+    review_status_by_session: HashMap<Uuid, &'a str>,
+    integration_status_by_session: HashMap<Uuid, &'a str>,
+    active_action_by_session: HashMap<Uuid, &'a str>,
+}
+
+impl<'a> GoalLaneSignals<'a> {
+    fn build(snapshot: &'a GoalGraphSnapshot, activity: &'a WorkbenchActivity) -> Self {
+        let sessions_by_id = snapshot
+            .sessions
+            .iter()
+            .map(|session| (session.id, session))
+            .collect();
+        let branch_name_by_id = snapshot
+            .branches
+            .iter()
+            .map(|branch| (branch.id, branch.name.as_str()))
+            .collect();
+        let mut contribution_count_by_session = HashMap::new();
+        for contribution in &snapshot.contributions {
+            *contribution_count_by_session
+                .entry(contribution.session_id)
+                .or_insert(0) += 1;
+        }
+        let mut attention_by_branch = HashMap::new();
+        for attention in snapshot
+            .attention_items
+            .iter()
+            .filter(|item| item.status == "open")
+        {
+            if let Some(branch_id) = attention.goal_branch_id {
+                *attention_by_branch.entry(branch_id).or_insert(0) += 1;
+            }
+        }
+        let mut notification_by_branch = HashMap::new();
+        for notification in activity
+            .notifications
+            .iter()
+            .filter(|item| item.status == "unread")
+        {
+            if let Some(branch_id) = notification.goal_branch_id {
+                *notification_by_branch.entry(branch_id).or_insert(0) += 1;
+            }
+        }
+        let mut review_status_by_session = HashMap::new();
+        for gate in &snapshot.review_gates {
+            review_status_by_session.insert(gate.session_id, gate.status.as_str());
+        }
+        let gate_sessions = snapshot
+            .review_gates
+            .iter()
+            .map(|gate| (gate.id, gate.session_id))
+            .collect::<HashMap<_, _>>();
+        let mut integration_status_by_session = HashMap::new();
+        for integration in &snapshot.integrations {
+            if let Some(session_id) = gate_sessions.get(&integration.review_gate_id) {
+                integration_status_by_session
+                    .insert(*session_id, integration.git_integration_status.as_str());
+            }
+        }
+        let mut active_action_by_session = HashMap::new();
+        for action in &activity.action_runs {
+            if matches!(
+                action.status.as_str(),
+                "queued" | "running" | "waiting" | "cancellation_requested"
+            ) {
+                active_action_by_session
+                    .entry(action.session_id)
+                    .or_insert(action.status.as_str());
+            }
+        }
+        Self {
+            sessions_by_id,
+            branch_name_by_id,
+            contribution_count_by_session,
+            attention_by_branch,
+            notification_by_branch,
+            review_status_by_session,
+            integration_status_by_session,
+            active_action_by_session,
         }
     }
 }
@@ -1324,6 +1549,49 @@ fn session_worksite(
         .iter()
         .filter(|item| item.session_id == session.id)
         .collect::<Vec<_>>();
+    let tool_leases = activity
+        .tool_leases
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let action_runs = activity
+        .action_runs
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let action_ids = action_runs
+        .iter()
+        .map(|item| item.id)
+        .collect::<HashSet<_>>();
+    let action_events = activity
+        .action_events
+        .iter()
+        .filter(|item| action_ids.contains(&item.action_run_id))
+        .collect::<Vec<_>>();
+    let runner_jobs = activity
+        .runner_jobs
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let mut seen_runner_paths = HashSet::new();
+    let runner_files = activity
+        .runner_files
+        .iter()
+        .filter(|item| item.session_id == session.id && seen_runner_paths.insert(&item.path))
+        .collect::<Vec<_>>();
+    let workspace = activity
+        .workspaces
+        .iter()
+        .find(|item| item.goal_branch_id == session.goal_branch_id);
+    let notifications = activity
+        .notifications
+        .iter()
+        .filter(|item| {
+            item.session_id == Some(session.id)
+                || (item.session_id.is_none()
+                    && item.goal_branch_id == Some(session.goal_branch_id))
+        })
+        .collect::<Vec<_>>();
     let environment = activity
         .environments
         .iter()
@@ -1364,8 +1632,13 @@ fn session_worksite(
                 span class="eyebrow" { "AGENT SESSION WORKSITE" }
                 h3 { "Session " (format!("{:02}", session.session_number)) }
             }
-            span class=(format!("goal-state goal-state--{}", goal_status_tone(&session.status))) {
-                (goal_status_label(&session.status))
+            div class="worksite-head__controls" {
+                span class=(format!("goal-state goal-state--{}", goal_status_tone(&session.status))) {
+                    (goal_status_label(&session.status))
+                }
+                a href=(format!("/projects/{}?tab=goals&session={}#goal-workbench", snapshot.project.id, session.id)) {
+                    "刷新现场"
+                }
             }
         }
         p class="worksite-assignment" { (&session.assignment) }
@@ -1379,6 +1652,33 @@ fn session_worksite(
                         (&environment.environment_fingerprint[..environment.environment_fingerprint.len().min(15)]) "…"
                     }
                 } @else { "未绑定" }
+            }
+        }
+
+        nav class="worksite-nav" aria-label="Session 工作现场分区" {
+            a href="#worksite-files" { "文件 / 代码" }
+            a href="#worksite-actions" { "行动日志" }
+            a href="#worksite-tools" { "工具 / 浏览器" }
+            a href="#worksite-plugins" { "插件环境" }
+            a href="#worksite-results" { "产出" }
+            a href="#worksite-review" { "审核 / 集成" }
+        }
+
+        @if let Some(workspace) = workspace {
+            section class="workspace-console" aria-label="Git 工作现场" {
+                div class="workspace-console__branch" {
+                    span aria-hidden="true" { "⑂" }
+                    div {
+                        small { "GIT WORKTREE" }
+                        strong { (&workspace.git_branch_name) }
+                    }
+                }
+                dl {
+                    div { dt { "现场" } dd { (workspace_status_label(&workspace.status)) } }
+                    div { dt { "HEAD" } dd { code { (short_digest(workspace.head_commit.as_deref())) } } }
+                    div { dt { "Tree" } dd { code { (short_digest(workspace.tree_id.as_deref())) } } }
+                    div { dt { "写入" } dd { (if workspace.dirty { "存在未登记改动" } else { "安全快照" }) } }
+                }
             }
         }
 
@@ -1460,12 +1760,23 @@ fn session_worksite(
             }
         }
 
+        @for item in notifications.iter().filter(|item| item.status == "unread") {
+            article class=(format!("notification-card notification-card--{}", item.severity)) role="status" {
+                header {
+                    span { "通知 · " (notification_severity_label(&item.severity)) }
+                    time { (format_date_time(item.created_at)) }
+                }
+                strong { (&item.title) }
+                p { (&item.summary) }
+            }
+        }
+
         div class="worksite-sections" {
-            section class="worksite-section" data-worksite-files {
-                header { span class="eyebrow" { "FILES / ARTIFACTS" } b { (inputs.len()) } }
-                h4 { "文件与产物" }
-                @if inputs.is_empty() {
-                    p class="worksite-empty-copy" { "尚无输入文件。手机和电脑上传都会先进入受限暂存区。" }
+            section id="worksite-files" class="worksite-section worksite-section--explorer" data-worksite-files {
+                header { span class="eyebrow" { "EXPLORER · INPUTS / OUTPUTS" } b { (inputs.len() + runner_files.len()) } }
+                h4 { "文件与代码现场" }
+                @if inputs.is_empty() && runner_files.is_empty() {
+                    p class="worksite-empty-copy" { "尚无输入或 Runner 输出。手机和电脑导入都会先校验，再进入当前 worktree 或不可变产物引用。" }
                 }
                 div class="worksite-records" {
                     @for input in &inputs {
@@ -1482,6 +1793,22 @@ fn session_worksite(
                             }
                         }
                     }
+                    @for file in &runner_files {
+                        article class="worksite-record worksite-record--code" data-runner-file=(file.path.as_str()) {
+                            span class="worksite-record__icon" { (file_kind_icon(&file.path)) }
+                            div {
+                                strong title=(file.path.as_str()) { (&file.path) }
+                                small {
+                                    (file.size_bytes) " B · " (runner_status_label(&file.runner_status))
+                                    @if file.executable { " · 可执行" }
+                                }
+                                code title=(file.sha256.as_str()) { (short_digest(Some(&file.sha256))) }
+                            }
+                            @if let Some(commit) = &file.candidate_commit {
+                                span class="file-commit" title=(commit.as_str()) { (short_digest(Some(commit))) }
+                            }
+                        }
+                    }
                 }
                 @if session.status == "running" {
                     form class="session-upload" data-input-upload
@@ -1494,11 +1821,79 @@ fn session_worksite(
                 }
             }
 
-            section class="worksite-section" data-worksite-tools {
-                header { span class="eyebrow" { "TOOLS / BROWSER / TESTS" } b { (tool_calls.len() + evidence.len()) } }
-                h4 { "工具行动与测试证据" }
-                @if tool_calls.is_empty() && evidence.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
-                    p class="worksite-empty-copy" { "尚无工具或测试记录。未来 Playwright 浏览器会以插件 ToolCall 出现在这里。" }
+            section id="worksite-actions" class="worksite-section" data-worksite-actions {
+                header { span class="eyebrow" { "ACTION RUNS / RUNNER" } b { (action_runs.len() + runner_jobs.len()) } }
+                h4 { "Agent 行动与运行日志" }
+                @if action_runs.is_empty() && runner_jobs.is_empty() {
+                    p class="worksite-empty-copy" { "这个 Session 尚未排队后台行动或 Runner 作业。" }
+                }
+                div class="worksite-records" {
+                    @for action in &action_runs {
+                        article class=(format!("action-run-record action-run-record--{}", goal_status_tone(&action.status))) {
+                            header {
+                                strong { (action_capability_label(&action.capability)) }
+                                span class=(format!("goal-state goal-state--{}", goal_status_tone(&action.status))) {
+                                    (scheduler_status_label(&action.status))
+                                }
+                            }
+                            p { (action_kind_label(&action.kind)) " · 尝试 " (action.attempt_count) "/" (action.max_attempts) }
+                            @if let Some(error) = &action.last_error_summary { small { (error) } }
+                            details class="action-run-detail" {
+                                summary { "查看输入与结果" }
+                                b { "Payload" }
+                                pre { code { (pretty_json(&action.payload.0)) } }
+                                @if let Some(result) = &action.result {
+                                    b { "Result" }
+                                    pre { code { (pretty_json(&result.0)) } }
+                                }
+                            }
+                        }
+                    }
+                    @for job in &runner_jobs {
+                        article class="runner-record" {
+                            div {
+                                span class="runner-record__icon" { "›_" }
+                                div {
+                                    strong { "Runner Job" }
+                                    small { (runner_status_label(&job.status)) " · " (format_date_time(job.created_at)) }
+                                }
+                            }
+                            @if let Some(commit) = &job.candidate_commit {
+                                code title=(commit.as_str()) { "commit " (short_digest(Some(commit))) }
+                            }
+                            details class="action-run-detail" {
+                                summary { "查看 Runner spec / result" }
+                                b { "Spec" }
+                                pre { code { (pretty_json(&job.spec.0)) } }
+                                @if let Some(result) = &job.result {
+                                    b { "Result" }
+                                    pre { code { (pretty_json(&result.0)) } }
+                                }
+                            }
+                        }
+                    }
+                }
+                @if !action_events.is_empty() {
+                    details class="action-event-log" {
+                        summary { "查看 " (action_events.len()) " 条不可变行动事件" }
+                        ol {
+                            @for event in action_events.iter().take(30) {
+                                li {
+                                    time { (format_date_time(event.created_at)) }
+                                    span { (action_event_label(&event.event_type)) }
+                                    small title=(pretty_json(&event.detail.0)) { (&event.actor_type) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            section id="worksite-tools" class="worksite-section" data-worksite-tools {
+                header { span class="eyebrow" { "TOOLS / BROWSER / LEASES" } b { (tool_calls.len() + tool_leases.len()) } }
+                h4 { "工具与浏览器现场" }
+                @if tool_calls.is_empty() && tool_leases.is_empty() {
+                    p class="worksite-empty-copy" { "尚无工具调用或持续现场；安装后的 Playwright、Rust、Python、C/C++ 都通过同一协议出现在这里。" }
                 }
                 div class="worksite-records" {
                     @for call in tool_calls {
@@ -1508,6 +1903,37 @@ fn session_worksite(
                             small { (format_date_time(call.completed_at)) }
                         }
                     }
+                    @for lease in &tool_leases {
+                        article class="tool-lease-record" {
+                            header {
+                                div { span aria-hidden="true" { "◉" } strong { (&lease.tool_name) } }
+                                span class=(format!("goal-state goal-state--{}", goal_status_tone(&lease.status))) {
+                                    (tool_lease_status_label(&lease.status))
+                                }
+                            }
+                            p { (&lease.plugin_id) "@" (&lease.plugin_version) " · " (lease.cleanup_status.as_str()) }
+                            @if !lease.endpoint_refs.0.is_empty() {
+                                div class="endpoint-list" {
+                                    @for endpoint in &lease.endpoint_refs.0 {
+                                        code { (endpoint) }
+                                    }
+                                }
+                            }
+                            @if let Some(heartbeat) = lease.last_heartbeat_at {
+                                small { "最后心跳 " (format_date_time(heartbeat)) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            section class="worksite-section" data-worksite-tests {
+                header { span class="eyebrow" { "TESTS / EVIDENCE" } b { (evidence.len()) } }
+                h4 { "测试与反例" }
+                @if evidence.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
+                    p class="worksite-empty-copy" { "尚无结构化测试证据。测试输出必须绑定准确候选，不能只写“应该通过”。" }
+                }
+                div class="worksite-records" {
                     @for gate in &gates {
                         @for evidence in json_value_strings(&gate.test_evidence.0) {
                             article class="test-evidence-record" { span { "✓" } p { (evidence) } }
@@ -1527,7 +1953,9 @@ fn session_worksite(
             }
         }
 
-        section class="worksite-section worksite-section--wide" data-worksite-contributions {
+        (plugin_worksite(snapshot, activity, session))
+
+        section id="worksite-results" class="worksite-section worksite-section--wide" data-worksite-contributions {
             header { span class="eyebrow" { "CONTRIBUTIONS" } b { (contributions.len()) } }
             h4 { "本 Session 留下的可回流产出" }
             @if contributions.is_empty() {
@@ -1544,11 +1972,132 @@ fn session_worksite(
             }
         }
 
-        @for gate in &gates {
-            (review_gate_panel(snapshot, session, gate))
+        div id="worksite-review" {
+            @for gate in &gates {
+                (review_gate_panel(snapshot, session, gate))
+            }
         }
 
         (session_action_panel(snapshot, session, contract, &contributions))
+    }
+}
+
+fn plugin_worksite(
+    snapshot: &GoalGraphSnapshot,
+    activity: &WorkbenchActivity,
+    session: &GoalSessionRecord,
+) -> Markup {
+    let requests = activity
+        .plugin_install_requests
+        .iter()
+        .filter(|item| item.session_id == session.id)
+        .collect::<Vec<_>>();
+    let installed_count = activity
+        .plugin_catalog
+        .iter()
+        .filter(|item| item.installed)
+        .count();
+    html! {
+        section id="worksite-plugins" class="worksite-section worksite-section--wide plugin-worksite" data-worksite-plugins {
+            header {
+                span class="eyebrow" { "CENTRAL PLUGINS · PROGRESSIVE DISCLOSURE" }
+                b { (installed_count) "/" (activity.plugin_catalog.len()) }
+            }
+            h4 { "当前 Session 可发现的工具环境" }
+            p class="plugin-worksite__intro" {
+                "这里只保存版本与能力绑定；编译器、浏览器和依赖留在中央只读 Runtime，不复制进每个 worktree。"
+            }
+            @if !requests.is_empty() {
+                div class="plugin-request-list" aria-label="本 Session 的插件安装请求" {
+                    @for request in &requests {
+                        article {
+                            div {
+                                strong { (&request.plugin_id) " " (&request.version_requirement) }
+                                span class=(format!("goal-state goal-state--{}", goal_status_tone(&request.status))) {
+                                    (plugin_request_status_label(&request.status))
+                                }
+                            }
+                            p { (&request.capability) " · " (&request.reason) }
+                            small { (format_date_time(request.created_at)) }
+                        }
+                    }
+                }
+            }
+            div class="plugin-catalog-grid" {
+                @for plugin in &activity.plugin_catalog {
+                    details class=(format!("plugin-card{}", if plugin.installed { " is-installed" } else { "" }))
+                        data-plugin-id=(plugin.manifest.plugin_id.as_str()) {
+                        summary {
+                            span class="plugin-card__mark" aria-hidden="true" {
+                                (plugin.manifest.display_name.chars().next().unwrap_or('P'))
+                            }
+                            span class="plugin-card__title" {
+                                strong { (&plugin.manifest.display_name) }
+                                small { (&plugin.manifest.plugin_id) "@" (&plugin.manifest.version) }
+                            }
+                            span class=(format!("goal-state goal-state--{}", if plugin.installed { "active" } else { "muted" })) {
+                                (plugin_install_status_label(&plugin.installation_status))
+                            }
+                        }
+                        div class="plugin-card__body" {
+                            p { (&plugin.manifest.description) }
+                            div class="plugin-capabilities" {
+                                @for capability in &plugin.manifest.capabilities {
+                                    span { (capability) }
+                                }
+                            }
+                            div class="plugin-tool-list" {
+                                @for tool in &plugin.manifest.tools {
+                                    article {
+                                        div {
+                                            strong { (&tool.name) }
+                                            @if tool.persistent.is_some() { span { "持续现场" } }
+                                        }
+                                        p { (&tool.description) }
+                                        small { "幂等：" (&tool.idempotency) }
+                                    }
+                                }
+                            }
+                            details class="plugin-security-details" {
+                                summary { "查看版本、Runtime 与权限边界" }
+                                dl {
+                                    dt { "内容摘要" } dd { code { (&plugin.manifest.content_digest) } }
+                                    dt { "Runtime" } dd { (&plugin.manifest.runtime.kind) " · " (&plugin.manifest.runtime.entrypoint) }
+                                    dt { "网络" } dd { (&plugin.manifest.permissions.network) }
+                                    dt { "工作区读取" } dd { (plugin.manifest.permissions.workspace_read.join(", ")) }
+                                    dt { "工作区写入" } dd { (plugin.manifest.permissions.workspace_write.join(", ")) }
+                                    dt { "外部写入" } dd { (if plugin.manifest.permissions.external_writes { "允许（仍受能力适配器约束）" } else { "拒绝" }) }
+                                    dt { "发布者" } dd { (plugin.publisher_id.as_deref().unwrap_or("内置 / 尚未签名安装")) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            @if session.status == "running" {
+                details class="plugin-request-form" {
+                    summary { "+ 当前目录没有所需能力？提交中央安装请求" }
+                    form class="goal-form" method="post"
+                        action=(format!("/projects/{}/sessions/{}/plugin-install-requests", snapshot.project.id, session.id)) {
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                        label { "插件 ID"
+                            input name="plugin_id" list="worksite-plugin-ids" required placeholder="例如 pptmaster";
+                        }
+                        datalist id="worksite-plugin-ids" {
+                            @for plugin in &activity.plugin_catalog {
+                                option value=(plugin.manifest.plugin_id.as_str()) {}
+                            }
+                        }
+                        div class="goal-form-columns" {
+                            label { "准确版本" input name="version_requirement" required placeholder="例如 1.0.0"; }
+                            label { "需要的能力" input name="capability" required placeholder="例如 slides.render"; }
+                        }
+                        label { "为什么当前目标需要它" textarea name="reason" rows="2" required {} }
+                        button class="button button--secondary button--small" type="submit" { "记录安装请求" }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1635,6 +2184,10 @@ fn compact_json(value: Option<&serde_json::Value>) -> String {
     }
 }
 
+fn pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
 fn contract_field_label(field: &str) -> &'static str {
     match field {
         "desiredOutcome" => "目标结果",
@@ -1717,6 +2270,10 @@ fn review_gate_panel(
                 .find(|item| item.id == link.evidence_id)
         })
         .collect::<Vec<_>>();
+    let integration = snapshot
+        .integrations
+        .iter()
+        .find(|item| item.review_gate_id == gate.id);
     html! {
         section class=(format!("review-panel review-panel--{}", goal_status_tone(&gate.status)))
             data-review-gate-id=(gate.id) {
@@ -1735,6 +2292,41 @@ fn review_gate_panel(
                 article class="review-decision-record" {
                     header { b { (review_actor_label(&decision.actor_role)) } span { (review_decision_label(&decision.decision)) } }
                     p { (&decision.rationale) }
+                }
+            }
+            @if let Some(integration) = integration {
+                section class=(format!("integration-progress integration-progress--{}", goal_status_tone(&integration.git_integration_status)))
+                    data-integration-id=(integration.id) {
+                    header {
+                        div {
+                            span class="eyebrow" { "PHYSICAL GIT INTEGRATION" }
+                            strong { (integration_status_label(&integration.git_integration_status)) }
+                        }
+                        span { (if integration.kind == "partial" { "部分接受" } else { "完整接受" }) }
+                    }
+                    p { (&integration.summary) }
+                    ol aria-label="物理集成进度" {
+                        @for (phase, label) in [
+                            ("pending", "等待 Worker"),
+                            ("preparing", "隔离应用"),
+                            ("validating", "父契约复验"),
+                            ("applying", "Git CAS 发布"),
+                            ("applied", "父现场确认"),
+                        ] {
+                            li class=(format!("is-{}", integration_phase_state(&integration.git_integration_status, phase))) {
+                                span aria-hidden="true" {}
+                                b { (label) }
+                            }
+                        }
+                    }
+                    dl class="integration-bindings" {
+                        dt { "源 HEAD" } dd { code { (short_digest(integration.source_head_commit.as_deref())) } }
+                        dt { "父基线" } dd { code { (short_digest(integration.expected_target_head_commit.as_deref())) } }
+                        dt { "候选" } dd { code { (short_digest(integration.candidate_commit.as_deref())) } }
+                    }
+                    @if let Some(error) = &integration.last_error_summary {
+                        p class="integration-error" { b { "已安全暂停：" } (error) }
+                    }
                 }
             }
             @if gate.status == "pending_ai_review" {
@@ -2212,9 +2804,13 @@ fn goal_status_tone(status: &str) -> &str {
         | "review_pending"
         | "awaiting_merge_review"
         | "pending_ai_review"
-        | "pending_human_review" => "waiting",
-        "exception_paused" | "review_rejected" | "rejected" | "failed" => "danger",
-        "manual_paused" | "stopped" | "archived" | "cancelled" => "muted",
+        | "pending_human_review"
+        | "pending"
+        | "queued"
+        | "requested" => "waiting",
+        "exception_paused" | "review_rejected" | "rejected" | "failed" | "conflicted"
+        | "policy_denied" | "workspace_conflict" | "revoked" => "danger",
+        "manual_paused" | "stopped" | "archived" | "cancelled" | "released" | "expired" => "muted",
         _ => "shaping",
     }
 }
@@ -2263,7 +2859,200 @@ fn attention_kind_label(kind: &str) -> &str {
         "exception" => "异常处理",
         "manual_pause" => "手动暂停",
         "merge_review" => "拟合并审核",
+        "integration_conflict" => "父枝干集成冲突",
+        "action_run_failure" => "后台行动失败",
+        "contract_review" => "契约修订判断",
+        "child_result_ready" => "子目标结果待整合",
         _ => kind,
+    }
+}
+
+fn scheduler_status_label(status: &str) -> &str {
+    match status {
+        "queued" => "已排队",
+        "running" => "Worker 正在执行",
+        "waiting" => "暂停待处理",
+        "cancellation_requested" => "正在取消",
+        "succeeded" => "已完成",
+        "failed" => "失败",
+        "cancelled" => "已取消",
+        _ => status,
+    }
+}
+
+fn runner_status_label(status: &str) -> &str {
+    match status {
+        "prepared" => "已准备",
+        "running" => "执行中",
+        "applying" => "正在写回",
+        "succeeded" => "已写回",
+        "failed" => "失败",
+        "timed_out" => "超时",
+        "policy_denied" => "策略拒绝",
+        "workspace_conflict" => "现场冲突",
+        "cancelled" => "已取消",
+        _ => status,
+    }
+}
+
+fn workspace_status_label(status: &str) -> &str {
+    match status {
+        "provisioning" => "正在创建",
+        "ready" => "可写",
+        "applying" => "正在应用候选",
+        "frozen" => "候选已冻结",
+        "error" => "异常暂停",
+        "retired" => "已收尾",
+        _ => status,
+    }
+}
+
+fn action_kind_label(kind: &str) -> &str {
+    match kind {
+        "agent_step" => "Agent 步骤",
+        "runner_job" => "Runner 作业",
+        "tool_lease" => "持续工具",
+        "review" => "独立审核",
+        "integration" => "父枝干集成",
+        "maintenance" => "维护行动",
+        _ => kind,
+    }
+}
+
+fn action_capability_label(capability: &str) -> &str {
+    match capability {
+        "review.goal_candidate.v1" => "独立复验候选",
+        "integration.goal_candidate.v1" => "验证并集成父枝干",
+        "tool.cleanup.v1" => "清理持续工具现场",
+        _ => capability,
+    }
+}
+
+fn action_event_label(event: &str) -> &str {
+    match event {
+        "action.enqueued" => "行动已排队",
+        "action.claimed" => "Worker 已领取",
+        "action.heartbeat" => "Worker 心跳",
+        "action.succeeded" => "行动完成",
+        "action.failed" => "行动失败",
+        "action.waiting" => "行动暂停",
+        "action.requeued" => "行动重新排队",
+        "action.cancel_requested" => "收到取消请求",
+        "action.cancelled" => "行动已取消",
+        _ => event,
+    }
+}
+
+fn tool_lease_status_label(status: &str) -> &str {
+    match status {
+        "requested" => "等待启动",
+        "active" => "现场在线",
+        "expired" => "已失联",
+        "released" => "已释放",
+        "failed" => "启动失败",
+        "cancelled" => "已取消",
+        _ => status,
+    }
+}
+
+fn plugin_request_status_label(status: &str) -> &str {
+    match status {
+        "requested" => "等待中央安装",
+        "available" => "已可用",
+        "rejected" => "未获批准",
+        _ => status,
+    }
+}
+
+fn plugin_install_status_label(status: &str) -> &str {
+    match status {
+        "built_in" => "内置可用",
+        "installed" => "签名安装",
+        "revoked" => "已撤销",
+        "not_installed" => "目录可见",
+        _ => status,
+    }
+}
+
+fn notification_severity_label(severity: &str) -> &str {
+    match severity {
+        "info" => "信息",
+        "warning" => "需要留意",
+        "critical" => "需要立即处理",
+        _ => severity,
+    }
+}
+
+fn integration_status_label(status: &str) -> &str {
+    match status {
+        "not_attempted" => "未开始物理集成",
+        "pending" => "等待集成 Worker",
+        "preparing" => "隔离应用中",
+        "validating" => "父契约复验中",
+        "applying" => "Git CAS 发布中",
+        "applied" => "已进入父现场",
+        "conflicted" => "冲突，父现场未改动",
+        "failed" => "失败，已安全暂停",
+        _ => status,
+    }
+}
+
+fn integration_phase_state(status: &str, phase: &str) -> &'static str {
+    if matches!(status, "conflicted" | "failed") {
+        return match phase {
+            "pending" | "preparing" | "validating" => "done",
+            "applying" => "error",
+            _ => "pending",
+        };
+    }
+    let rank = |value: &str| match value {
+        "pending" => 0,
+        "preparing" => 1,
+        "validating" => 2,
+        "applying" => 3,
+        "applied" => 4,
+        _ => -1,
+    };
+    let current = rank(status);
+    let expected = rank(phase);
+    if current < 0 || expected > current {
+        "pending"
+    } else if status == "applied" || expected < current {
+        "done"
+    } else {
+        "current"
+    }
+}
+
+fn short_digest(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return "未绑定".to_owned();
+    };
+    let visible = value.strip_prefix("sha256:").unwrap_or(value);
+    if visible.chars().count() <= 12 {
+        visible.to_owned()
+    } else {
+        format!("{}…", visible.chars().take(12).collect::<String>())
+    }
+}
+
+fn file_kind_icon(path: &str) -> &'static str {
+    match path
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "rs" => "Rs",
+        "py" => "Py",
+        "c" | "h" => "C",
+        "cc" | "cpp" | "cxx" | "hpp" => "C+",
+        "js" | "mjs" | "ts" => "JS",
+        "html" | "css" => "<>",
+        "md" | "txt" => "¶",
+        "json" | "toml" | "yaml" | "yml" => "{}",
+        _ => "·/",
     }
 }
 

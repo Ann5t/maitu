@@ -201,6 +201,15 @@ pub struct GoalCommandForm {
     pub new_evidence: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PluginInstallRequestForm {
+    pub client_request_id: Uuid,
+    pub plugin_id: String,
+    pub version_requirement: String,
+    pub capability: String,
+    pub reason: String,
+}
+
 pub async fn dashboard(
     State(state): State<Arc<AppState>>,
     Query(query): Query<DashboardQuery>,
@@ -547,6 +556,37 @@ pub async fn goal_command_form(
         Err(error) => Err(error),
     };
     redirect_goal_result(project_id, result, session_hint)
+}
+
+pub async fn plugin_install_request_form(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Form(form): Form<PluginInstallRequestForm>,
+) -> Response {
+    let result = plugins::create_plugin_install_request(
+        &state.pool,
+        project_id,
+        session_id,
+        plugins::CreatePluginInstallRequest {
+            client_request_id: form.client_request_id,
+            plugin_id: form.plugin_id,
+            version_requirement: form.version_requirement,
+            capability: form.capability,
+            reason: form.reason,
+        },
+    )
+    .await;
+    let location = match result {
+        Ok(_) => format!(
+            "/projects/{project_id}?tab=goals&notice={}&session={session_id}#worksite-plugins",
+            urlencoding::encode("插件安装请求已记录；签名安装完成前不会假装可用"),
+        ),
+        Err(error) => format!(
+            "/projects/{project_id}?tab=goals&error={}&session={session_id}#worksite-plugins",
+            urlencoding::encode(&error.public_message()),
+        ),
+    };
+    Redirect::to(&location).into_response()
 }
 
 fn goal_form_payload(form: &GoalCommandForm) -> AppResult<Value> {

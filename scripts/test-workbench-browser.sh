@@ -72,6 +72,7 @@ docker run --rm --init --ipc=host --network "$browser_network" \
   '
 
 test -s "$browser_screenshot_dir/goal-workbench-desktop.png"
+test -s "$browser_screenshot_dir/goal-workbench-tablet.png"
 test -s "$browser_screenshot_dir/goal-workbench-mobile.png"
 test -s "$browser_screenshot_dir/ideas-map-desktop.png"
 test -s "$browser_screenshot_dir/ideas-map-tablet.png"

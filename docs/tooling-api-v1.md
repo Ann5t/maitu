@@ -94,7 +94,7 @@ Broker 验证 Session 为 running、环境 binding/指纹一致、插件准确�
 
 创建只允许 Manifest 中带 `persistent` 描述的签名 OCI 工具，且固定准确镜像、入口、Runner、EnvironmentManifest 和干净 workspace snapshot。当前内置适配器只接受断网静态预览等隔离控制面；联网、私人账号和外部写在没有专用适配器时拒绝。
 
-应用不挂载 Docker Socket。受信 launcher 以返回的准确镜像 ID、只读 worktree、只读根、固定 UID、无 capability、`no-new-privileges` 和资源上限启动进程。Web 容器被杀并重建后，未到期 Worker 可用原 ActionLease/fencing 继续；Worker 丢失时持续进程不会盲目重启，而是令 ToolLease 过期、Session 暂停并要求清理确认。测试实现的内部 endpoint 不等于最终用户代理；运行现场 UI、日志/Trace 保留和认证后的 endpoint proxy 归 BP-08/BP-09。
+应用不挂载 Docker Socket。受信 launcher 以返回的准确镜像 ID、只读 worktree、只读根、固定 UID、无 capability、`no-new-privileges` 和资源上限启动进程。Web 容器被杀并重建后，未到期 Worker 可用原 ActionLease/fencing 继续；Worker 丢失时持续进程不会盲目重启，而是令 ToolLease 过期、Session 暂停并要求清理确认。BP-08 已把 ToolCall、ToolLease、心跳和 endpoint 引用投影到工作现场；测试实现的内部 endpoint 不等于最终用户代理，日志/Trace 保留和认证后的 endpoint proxy 归 BP-09。
 
 ## 当前权限边界
 

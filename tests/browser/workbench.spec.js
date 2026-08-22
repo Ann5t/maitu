@@ -113,7 +113,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.getByLabel('项目意图').fill('用 Chromium 验证目标枝干工作台');
   await page.getByRole('button', { name: '形成项目起点' }).click();
   await expect(page.locator('#goal-workbench')).toBeVisible();
-  await expect(page.locator('#goal-workbench')).toHaveAttribute('data-projection-version', 'goal-lanes-v1');
+  await expect(page.locator('#goal-workbench')).toHaveAttribute('data-projection-version', 'goal-worksite-v2');
 
   const rootContract = page.locator('[data-goal-contract-form="root"]');
   await rootContract.locator('[name="why_needed"]').fill('证明工作台可在浏览器中完整推进');
@@ -133,12 +133,37 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await approval.getByRole('button', { name: '批准 BranchProposal' }).click();
 
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
-  await expect(page.locator('.session-worksite')).toContainText('FILES / ARTIFACTS');
-  await expect(page.locator('.session-worksite')).toContainText('TOOLS / BROWSER / TESTS');
+  await expect(page.locator('.session-worksite')).toContainText('EXPLORER · INPUTS / OUTPUTS');
+  await expect(page.locator('.session-worksite')).toContainText('TOOLS / BROWSER / LEASES');
+  await expect(page.locator('.session-worksite')).toContainText('ACTION RUNS / RUNNER');
+  await expect(page.locator('.plugin-worksite')).toBeVisible();
   await expect(page.locator('.worksite-context')).toBeVisible();
   await expect(page.locator('.worksite-context')).toContainText('永不折叠');
   await expect(page.locator('.worksite-context')).toContainText('按需披露');
   await expect(page.locator('.context-api-link')).toHaveAttribute('href', /\/context$/);
+
+  const commandBar = page.locator('[data-goal-command-bar]');
+  await expect(commandBar).toBeVisible();
+  await commandBar.locator('[data-goal-search]').fill('Chromium 根目标');
+  await expect(page.locator('[data-goal-lane]')).toBeVisible();
+  await commandBar.locator('[data-goal-search]').fill('完全不存在的目标');
+  await expect(page.locator('[data-goal-lane]')).toBeHidden();
+  await expect(commandBar.locator('[data-goal-filter-result]')).toHaveText('0 / 1 条目标');
+  await commandBar.locator('[data-goal-focus-current]').click();
+  await expect(page.locator('.goal-session-node.is-selected')).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.locator('.goal-session-node.is-selected')).toBeFocused();
+  expect(await commandBar.locator('[data-goal-focus-current]').evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+
+  const pluginRequest = page.locator('.plugin-request-form');
+  await pluginRequest.locator(':scope > summary').click();
+  await pluginRequest.locator('[name="plugin_id"]').fill('fudian.tools.pptmaster');
+  await pluginRequest.locator('[name="version_requirement"]').fill('1.0.0');
+  await pluginRequest.locator('[name="capability"]').fill('presentation.build');
+  await pluginRequest.locator('[name="reason"]').fill('当前目标需要生成并验证演示文稿');
+  await pluginRequest.getByRole('button', { name: '记录安装请求' }).click();
+  await expect(page.locator('.plugin-request-list')).toContainText('fudian.tools.pptmaster');
+  await expect(page.locator('.plugin-request-list')).toContainText('当前目标需要生成并验证演示文稿');
 
   const upload = page.locator('[data-input-upload]');
   await upload.locator('input[type="file"]').setInputFiles({
@@ -209,6 +234,22 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   expect(await renderedFontSize(page.locator('.worksite-context > summary'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.context-catalog-preview strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedContrast(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(4.5);
+  const undersizedText = await page.locator('#goal-workbench').evaluate((root) => [...root.querySelectorAll('*')]
+    .filter((element) => element.getClientRects().length > 0 && !element.closest('[aria-hidden="true"]'))
+    .filter((element) => [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
+    .map((element) => ({ text: element.textContent.trim().slice(0, 80), size: Number.parseFloat(getComputedStyle(element).fontSize) }))
+    .filter((item) => item.size < 12));
+  expect(undersizedText).toEqual([]);
+  const undersizedCoreTargets = await page.locator('#goal-workbench').evaluate((root) => [
+    ...root.querySelectorAll('button, summary, .worksite-nav a, .worksite-head__controls a, .context-api-link, .worksite-record > a'),
+  ].filter((element) => element.getClientRects().length > 0)
+    .map((element) => ({ text: element.textContent.trim().slice(0, 50), height: element.getBoundingClientRect().height }))
+    .filter((item) => item.height < 44));
+  expect(undersizedCoreTargets).toEqual([]);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reducedTransitionSeconds = await page.locator('.goal-session-node').first()
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration));
+  expect(reducedTransitionSeconds).toBeLessThanOrEqual(0.001);
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-desktop.png`, fullPage: true });
@@ -228,6 +269,13 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await humanAccept.locator('[name="rationale"]').fill('用户确认这条目标枝干已达成');
   await humanAccept.getByRole('button', { name: '接受整条枝干产出' }).click();
   await expect(page.locator('.review-decision-record').filter({ hasText: '你的最终决定' })).toBeVisible();
+
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
+  await expect(page.locator('.session-worksite')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/goal-workbench-tablet.png`, fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: 'networkidle' });

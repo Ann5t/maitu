@@ -88,7 +88,7 @@ workbench_command_url="$workbench_project_url/goal-commands"
 
 workbench_html="$(curl -fsS -D "$workbench_tmp/page.headers" "$workbench_project_url")"
 grep -q 'id="goal-workbench"' <<< "$workbench_html"
-grep -q 'data-projection-version="goal-lanes-v1"' <<< "$workbench_html"
+grep -q 'data-projection-version="goal-worksite-v2"' <<< "$workbench_html"
 grep -q '先形成第一条目标枝干' <<< "$workbench_html"
 grep -q '&lt;script&gt;不能进入页面&lt;/script&gt;' <<< "$workbench_html"
 ! grep -q '<script>不能进入页面</script>' <<< "$workbench_html"
@@ -117,9 +117,22 @@ post_form "$workbench_command_url" \
   --data-urlencode 'agent_identity=workbench-worker'
 workbench_html="$(curl -fsS "$workbench_project_url?tab=goals")"
 workbench_session_id="$(html_attribute data-session-id <<< "$workbench_html")"
-grep -q 'FILES / ARTIFACTS' <<< "$workbench_html"
-grep -q 'TOOLS / BROWSER / TESTS' <<< "$workbench_html"
+grep -q 'EXPLORER · INPUTS / OUTPUTS' <<< "$workbench_html"
+grep -q 'TOOLS / BROWSER / LEASES' <<< "$workbench_html"
+grep -q 'ACTION RUNS / RUNNER' <<< "$workbench_html"
+grep -q 'CENTRAL PLUGINS · PROGRESSIVE DISCLOSURE' <<< "$workbench_html"
+grep -q 'data-goal-command-bar' <<< "$workbench_html"
 grep -q 'data-input-upload' <<< "$workbench_html"
+
+post_form "$workbench_project_url/sessions/$workbench_session_id/plugin-install-requests" \
+  --data-urlencode "client_request_id=$(new_uuid)" \
+  --data-urlencode 'plugin_id=fudian.tools.pptmaster' \
+  --data-urlencode 'version_requirement=1.0.0' \
+  --data-urlencode 'capability=presentation.build' \
+  --data-urlencode 'reason=验证网页只能记录持久安装请求，不能绕过签名安装'
+workbench_html="$(curl -fsS "$workbench_project_url?tab=goals&session=$workbench_session_id")"
+grep -q 'fudian.tools.pptmaster' <<< "$workbench_html"
+grep -q '验证网页只能记录持久安装请求' <<< "$workbench_html"
 
 post_form "$workbench_command_url" \
   --data-urlencode "client_request_id=$(new_uuid)" --data-urlencode 'action=session.request_judgment' \

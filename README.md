@@ -124,7 +124,7 @@ assets/                      CSS、渐进增强脚本和图标
 
 分段上传、内容验证、Session inbox 与冻结边界见 [Session 安全文件输入 API v1](docs/input-api-v1.md)。
 
-可操作的 Git 车道投影、Session 工作现场、桌面/手机截图与替换边界见 [目标枝干工作台投影 v1](docs/workbench-projection-v1.md)。
+可操作的 Git 图、Session 工作现场、桌面/平板/手机与 100/300 大图预算见 [工作台投影 v2](docs/workbench-v2.md)；早期取舍保留在 [投影 v1](docs/workbench-projection-v1.md)。
 
 ## 主要路由
 

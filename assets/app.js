@@ -45,13 +45,90 @@
 
   const goalMap = document.querySelector("[data-goal-map-scroll]");
   const selectedSession = goalMap?.querySelector("[data-selected='true']");
-  if (goalMap && selectedSession && window.innerWidth > 620) {
+  if (goalMap && selectedSession) {
     requestAnimationFrame(() => {
       goalMap.scrollTo({
         left: Math.max(0, selectedSession.offsetLeft - goalMap.clientWidth / 2 + selectedSession.clientWidth / 2),
         top: Math.max(0, selectedSession.offsetTop - goalMap.clientHeight / 2 + selectedSession.clientHeight / 2),
         behavior: "auto",
       });
+    });
+  }
+
+  const goalCommandBar = document.querySelector("[data-goal-command-bar]");
+  if (goalCommandBar && goalMap) {
+    const lanes = [...goalMap.querySelectorAll("[data-goal-lane]")];
+    const search = goalCommandBar.querySelector("[data-goal-search]");
+    const result = goalCommandBar.querySelector("[data-goal-filter-result]");
+    const filterButtons = [...goalCommandBar.querySelectorAll("[data-goal-filter]")];
+    const focusCurrent = goalCommandBar.querySelector("[data-goal-focus-current]");
+    let activeFilter = "all";
+
+    const matchesFilter = (lane) => {
+      if (activeFilter === "all") return true;
+      if (activeFilter === "active") return lane.dataset.active === "true";
+      if (activeFilter === "attention") return lane.dataset.attention === "true";
+      if (activeFilter === "review") return lane.dataset.review === "true";
+      if (activeFilter === "notification") return lane.dataset.notification === "true";
+      if (activeFilter === "terminal") return lane.dataset.terminal === "true";
+      return true;
+    };
+    const applyGoalFilter = () => {
+      const query = search?.value.trim().toLocaleLowerCase() || "";
+      let visibleCount = 0;
+      for (const lane of lanes) {
+        const text = (lane.dataset.search || "").toLocaleLowerCase();
+        const visible = matchesFilter(lane) && (!query || text.includes(query));
+        lane.hidden = !visible;
+        if (visible) visibleCount += 1;
+      }
+      if (result) result.textContent = `${visibleCount} / ${lanes.length} 条目标`;
+    };
+
+    search?.addEventListener("input", applyGoalFilter);
+    for (const button of filterButtons) {
+      button.addEventListener("click", () => {
+        activeFilter = button.dataset.goalFilter || "all";
+        for (const item of filterButtons) {
+          const active = item === button;
+          item.classList.toggle("is-active", active);
+          item.setAttribute("aria-pressed", String(active));
+        }
+        applyGoalFilter();
+      });
+    }
+
+    const revealCurrent = () => {
+      activeFilter = "all";
+      if (search) search.value = "";
+      for (const item of filterButtons) {
+        const active = item.dataset.goalFilter === "all";
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-pressed", String(active));
+      }
+      applyGoalFilter();
+      const current = goalMap.querySelector("[data-selected='true']");
+      if (!current) return;
+      current.focus({ preventScroll: true });
+      current.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    };
+    focusCurrent?.addEventListener("click", revealCurrent);
+    if (focusCurrent && !selectedSession) focusCurrent.disabled = true;
+
+    goalMap.addEventListener("keydown", (event) => {
+      if (!(event.target instanceof Element) || !event.target.matches(".goal-session-node")) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const nodes = [...goalMap.querySelectorAll("[data-goal-lane]:not([hidden]) .goal-session-node")];
+      const currentIndex = nodes.indexOf(event.target);
+      if (currentIndex < 0 || nodes.length === 0) return;
+      let nextIndex = currentIndex;
+      if (event.key === "Home") nextIndex = 0;
+      else if (event.key === "End") nextIndex = nodes.length - 1;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+      else nextIndex = Math.min(nodes.length - 1, currentIndex + 1);
+      event.preventDefault();
+      nodes[nextIndex].focus({ preventScroll: true });
+      nodes[nextIndex].scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
     });
   }
 
