@@ -6,6 +6,7 @@ use sqlx::{FromRow, PgPool, types::Json};
 use uuid::Uuid;
 
 use crate::{
+    application::context_memory,
     error::{AppError, AppResult},
     goal_domain::{CommandReceiptIdentity, SessionStatus},
     tooling::{
@@ -308,6 +309,22 @@ pub async fn bind_environment(
                 "Session 已固定另一个环境；依赖变化必须创建新的环境与 Session",
             ));
         }
+        let context_snapshot_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+                .bind(session_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+        if context_snapshot_id.is_none() {
+            context_memory::create_snapshot(
+                &mut transaction,
+                project_id,
+                session_id,
+                None,
+                None,
+                request.client_request_id,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         return Ok(BindEnvironmentResponse {
             replayed: true,
@@ -368,6 +385,20 @@ pub async fn bind_environment(
             "environmentManifestId": environment.id,
             "environmentFingerprint": environment.fingerprint,
         }),
+    )
+    .await?;
+    let previous_snapshot: Option<Uuid> =
+        sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+    context_memory::create_snapshot(
+        &mut transaction,
+        project_id,
+        session_id,
+        previous_snapshot,
+        previous_snapshot.map(|_| session_id),
+        request.client_request_id,
     )
     .await?;
     transaction.commit().await?;

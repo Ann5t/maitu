@@ -18,6 +18,7 @@
 - HTML 表单与 JSON API 两套入口，共用同一应用服务和事务逻辑
 - 不可变目标契约修订、逐字段来源与人工接受/拒绝，以及有预算和收敛边界的探索型目标
 - 结构化 Evidence、候选冻结、撤回、停止和保留原结论的终态归档
+- 精确父 Session 上下文快照、不可折叠契约/权限信封、完整来源目录和审计式按需披露
 - 请求幂等、输入校验、产物路径防穿越和基础安全响应头
 - 明暗主题、响应式布局和移动端项目脉络列表
 
@@ -90,6 +91,7 @@ src/application/projects.rs  项目、契约、产物用例
 src/application/ideas.rs     想法版本、关联和原子立项事务
 src/application/graph.rs     项目 DAG 与选择性合流
 src/application/goal_branches.rs  目标枝干事务与审核闭环
+src/application/context_memory.rs Session 快照、来源目录、读取审计与派生重建
 src/application/plugins.rs   插件目录、环境绑定与 Tool Broker
 src/application/inputs.rs    Session 文件输入与内容寻址导入
 src/web/handlers.rs          HTML/JSON 传输适配
@@ -111,6 +113,8 @@ assets/                      CSS、渐进增强脚本和图标
 想法版本、关系、ProjectProposal、精确来源和原子立项协议见 [想法空间与 ProjectProposal v1](docs/idea-project-domain-v1.md)。
 
 契约演进、探索模式、结构化 Evidence、候选撤回与停止/归档边界见 [目标契约、Evidence 与执行生命周期 v2](docs/core-domain-v2.md)。
+
+精确父快照、不可折叠信封、来源边、固定窗口和摘要/片段/全文读取协议见 [Session 上下文、来源与渐进式披露 v1](docs/context-memory-v1.md)。
 
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 
@@ -144,6 +148,10 @@ assets/                      CSS、渐进增强脚本和图标
 | `GET` | `/api/artifacts/:id` | 带 ETag 的产物读取 |
 | `GET` | `/api/v1/projects/:id/goal-graph` | 新目标枝干领域快照 |
 | `POST` | `/api/v1/projects/:id/goal-commands` | 幂等目标枝干命令 |
+| `GET` | `/api/v1/projects/:id/sessions/:session_id/context` | 当前不可折叠上下文与默认目录 |
+| `GET` | `/api/v1/projects/:id/sessions/:session_id/context/entries` | 检索/分页完整上下文目录 |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/context/read` | 审计式摘要、片段或全文读取 |
+| `POST` | `/api/v1/projects/:id/sessions/:session_id/context/rebuild` | 重建派生摘要与索引的新代 |
 | `GET/POST` | `/api/v1/plugins` | 渐进式插件目录与注册 |
 | `POST` | `/api/v1/environments` | 固定 EnvironmentManifest |
 | `POST` | `/api/v1/projects/:id/sessions/:session_id/tool-calls` | 无状态工具调用 |

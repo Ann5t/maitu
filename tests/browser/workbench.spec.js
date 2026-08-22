@@ -65,6 +65,10 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
   await expect(page.locator('.session-worksite')).toContainText('FILES / ARTIFACTS');
   await expect(page.locator('.session-worksite')).toContainText('TOOLS / BROWSER / TESTS');
+  await expect(page.locator('.worksite-context')).toBeVisible();
+  await expect(page.locator('.worksite-context')).toContainText('永不折叠');
+  await expect(page.locator('.worksite-context')).toContainText('按需披露');
+  await expect(page.locator('.context-api-link')).toHaveAttribute('href', /\/context$/);
 
   const upload = page.locator('[data-input-upload]');
   await upload.locator('input[type="file"]').setInputFiles({
@@ -132,6 +136,8 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   expect(await renderedFontSize(page.locator('.worksite-section > h4'))).toBeGreaterThanOrEqual(16);
   expect(await renderedFontSize(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.worksite-meta span'))).toBeGreaterThanOrEqual(12);
+  expect(await renderedFontSize(page.locator('.worksite-context > summary'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.context-catalog-preview strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedContrast(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(4.5);
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
@@ -159,6 +165,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
   await expect(page.locator('.session-worksite')).toBeVisible();
+  await expect(page.locator('.worksite-context')).toContainText('完整目录');
   expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.worksite-assignment'))).toBeGreaterThanOrEqual(16);
   expect(await renderedFontSize(page.locator('.mobile-nav b'))).toBeGreaterThanOrEqual(12);

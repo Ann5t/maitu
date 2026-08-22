@@ -30,6 +30,7 @@ docker run --rm \
 
 ./scripts/test-goal-migrations.sh
 ./scripts/test-goal-http.sh
+./scripts/test-context-http.sh
 ./scripts/test-ideas-http.sh
 ./scripts/test-tooling-http.sh
 ./scripts/test-inputs-http.sh

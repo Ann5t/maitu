@@ -97,6 +97,22 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::api_goal_command),
         )
         .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/context",
+            get(handlers::api_session_context),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/context/entries",
+            get(handlers::api_session_context_catalog),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/context/read",
+            post(handlers::api_read_session_context),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/sessions/{session_id}/context/rebuild",
+            post(handlers::api_rebuild_session_context),
+        )
+        .route(
             "/api/v1/plugins",
             get(handlers::api_plugin_catalog).post(handlers::api_register_plugin),
         )

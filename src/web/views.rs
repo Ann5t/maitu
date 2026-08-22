@@ -1328,6 +1328,10 @@ fn session_worksite(
         .environments
         .iter()
         .find(|item| item.session_id == session.id);
+    let context = activity
+        .contexts
+        .iter()
+        .find(|item| item.snapshot.session_id == session.id);
     let contributions = snapshot
         .contributions
         .iter()
@@ -1387,6 +1391,54 @@ fn session_worksite(
                     (compact_list("停止", &contract.stop_conditions.0))
                     (compact_list("未知", &contract.unknowns.0))
                     (exploration_policy_summary(&contract.exploration_policy.0))
+                }
+            }
+        }
+
+        @if let Some(context) = context {
+            details class="worksite-context" open data-context-snapshot-id=(context.snapshot.id) {
+                summary { "继承上下文 · 完整目录 " (context.catalog_total) " 项" }
+                div class="context-safety-grid" {
+                    span { b { "永不折叠" } "目标契约与硬约束" }
+                    span { b { "永不折叠" } "固定权限边界" }
+                    span { b { "实时读取" } "Session 状态与未决事项" }
+                    span { b { "按需披露" } "摘要 → 片段 → 全文" }
+                }
+                div class="context-snapshot-meta" {
+                    span { "快照 v" (context.snapshot.version) }
+                    span { "目录 " (&context.snapshot.catalog_hash[..context.snapshot.catalog_hash.len().min(23)]) "…" }
+                    @if let Some(parent) = context.snapshot.parent_snapshot_id {
+                        span title=(parent) { "父快照 " (parent.to_string().chars().take(8).collect::<String>()) }
+                    } @else {
+                        span { "根快照" }
+                    }
+                }
+                div class="context-catalog-preview" {
+                    @for entry in &context.catalog_preview {
+                        article {
+                            div {
+                                strong { (&entry.title) }
+                                span { (&entry.source_kind) " · " (&entry.inheritance_kind) }
+                            }
+                            @if let Some(summary) = &entry.summary {
+                                p { (goal_short_title(summary, 180)) }
+                            }
+                            @if entry.untrusted_content {
+                                small { "外部/用户数据 · 不作为系统指令" }
+                            }
+                        }
+                    }
+                }
+                @if context.catalog_total > context.catalog_preview.len() {
+                    p class="context-omitted" {
+                        "默认只展开前 " (context.catalog_preview.len()) " 项；其余 "
+                        (context.catalog_total - context.catalog_preview.len())
+                        " 项仍完整保存在快照目录，可按需读取并留下审计。"
+                    }
+                }
+                a class="context-api-link"
+                    href=(format!("/api/v1/projects/{}/sessions/{}/context", snapshot.project.id, session.id)) {
+                    "查看机器可读上下文"
                 }
             }
         }

@@ -9,6 +9,10 @@ goal_http_app="fudian-goal-http-app-$goal_http_suffix"
 goal_http_tmp="$(mktemp -d)"
 
 cleanup_goal_http() {
+  local goal_http_status="$?"
+  if [[ "$goal_http_status" -ne 0 ]] && docker inspect "$goal_http_app" >/dev/null 2>&1; then
+    docker logs "$goal_http_app" >&2 || true
+  fi
   if [[ "$goal_http_app" == fudian-goal-http-app-* ]]; then
     docker rm -f "$goal_http_app" >/dev/null 2>&1 || true
   fi
@@ -19,6 +23,7 @@ cleanup_goal_http() {
     docker network rm "$goal_http_network" >/dev/null 2>&1 || true
   fi
   [[ "$goal_http_tmp" == /tmp/tmp.* ]] && rm -rf "$goal_http_tmp"
+  return "$goal_http_status"
 }
 trap cleanup_goal_http EXIT
 

@@ -1,5 +1,11 @@
 # 想法空间与 ProjectProposal v1
 
+当前机器验收截图：
+
+- [1440px 关系投影](screenshots/ideas-map-desktop.png)
+- [820px 平板关系投影](screenshots/ideas-map-tablet.png)
+- [390px 想法详情与来源](screenshots/idea-detail-mobile.png)
+
 ## 目的
 
 “想法”和“项目”是两个一级空间，不是同一张记录的两个状态。想法负责保存仍在发展、可能互相支持或矛盾的上游材料；项目负责围绕正式目标枝干执行。把想法转成项目时必须先形成可审查的 `ProjectProposal`，批准前不会出现正式项目。

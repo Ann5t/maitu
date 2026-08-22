@@ -224,6 +224,209 @@ BEGIN
 END;
 $$;
 
+INSERT INTO goal_context_entries
+  (id, project_id, origin_goal_branch_id, source_kind, source_record_id,
+   title, content_hash, importance)
+VALUES (
+  '00000000-0000-0000-0000-000000000070',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  'contract', '00000000-0000-0000-0000-000000000021',
+  '不可折叠契约',
+  'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  'essential'
+);
+
+INSERT INTO goal_context_snapshots
+  (id, project_id, goal_branch_id, session_id, version, contract_version_id,
+   required_context, required_context_hash, budget_policy, catalog_hash)
+VALUES (
+  '00000000-0000-0000-0000-000000000071',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022', 1,
+  '00000000-0000-0000-0000-000000000021',
+  '{"nonFoldable":true,"contract":{},"ancestorContracts":[],"permissions":{},"creationState":{},"unresolvedAttention":[]}',
+  'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+  '{"requiredContextUnabridged":true,"maxCatalogItems":12}',
+  'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+);
+
+INSERT INTO goal_context_snapshot_entries
+  (snapshot_id, entry_id, inheritance_kind, rank, inclusion_reason)
+VALUES (
+  '00000000-0000-0000-0000-000000000071',
+  '00000000-0000-0000-0000-000000000070',
+  'required', 0, '契约不可折叠'
+);
+
+UPDATE goal_sessions
+SET context_snapshot_id = '00000000-0000-0000-0000-000000000071'
+WHERE id = '00000000-0000-0000-0000-000000000022';
+
+INSERT INTO goal_context_derivations
+  (id, project_id, entry_id, kind, generation, generator, source_hash,
+   payload, content_hash)
+VALUES (
+  '00000000-0000-0000-0000-000000000072',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000070',
+  'summary', 1, 'constraint-test',
+  'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  '{"text":"不可折叠契约"}',
+  'sha256:1111111111111111111111111111111111111111111111111111111111111111'
+);
+
+INSERT INTO goal_context_reads
+  (id, project_id, goal_branch_id, session_id, snapshot_id, entry_id,
+   client_request_id, request_hash, disclosure_level, purpose, source_hash,
+   result_hash, result_chars, actor_type)
+VALUES (
+  '00000000-0000-0000-0000-000000000074',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022',
+  '00000000-0000-0000-0000-000000000071',
+  '00000000-0000-0000-0000-000000000070',
+  '00000000-0000-0000-0000-000000000075',
+  'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+  'summary', '验证读取审计',
+  'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+  7, 'agent'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE goal_context_entries SET title = '篡改'
+    WHERE id = '00000000-0000-0000-0000-000000000070';
+    RAISE EXCEPTION 'immutable ContextEntry accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE goal_context_snapshots SET catalog_hash =
+      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    WHERE id = '00000000-0000-0000-0000-000000000071';
+    RAISE EXCEPTION 'immutable ContextSnapshot accepted mutation';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN
+    NULL;
+  END;
+END;
+$$;
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO goal_context_entries
+      (id, project_id, origin_goal_branch_id, source_kind, source_record_id,
+       title, content_hash)
+    VALUES (
+      '00000000-0000-0000-0000-000000000076',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000020',
+      'contract', '00000000-0000-0000-0000-000000000021', '跨项目来源',
+      'sha256:4444444444444444444444444444444444444444444444444444444444444444'
+    );
+    RAISE EXCEPTION 'cross-project ContextEntry was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO goal_context_derivations
+      (id, project_id, entry_id, kind, generation, generator, source_hash,
+       payload, content_hash)
+    VALUES (
+      '00000000-0000-0000-0000-000000000077',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000070',
+      'summary', 2, 'forged',
+      'sha256:5555555555555555555555555555555555555555555555555555555555555555',
+      '{"text":"伪造"}',
+      'sha256:6666666666666666666666666666666666666666666666666666666666666666'
+    );
+    RAISE EXCEPTION 'derivation with wrong source hash was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO goal_context_entries
+  (id, project_id, origin_goal_branch_id, origin_session_id, source_kind,
+   source_record_id, title, content_hash)
+VALUES (
+  '00000000-0000-0000-0000-000000000078',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  '00000000-0000-0000-0000-000000000022',
+  'evidence', '00000000-0000-0000-0000-000000000050', '目录之外的 Evidence',
+  'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO goal_context_reads
+      (id, project_id, goal_branch_id, session_id, snapshot_id, entry_id,
+       client_request_id, request_hash, disclosure_level, purpose, source_hash,
+       result_hash, result_chars, actor_type)
+    VALUES (
+      '00000000-0000-0000-0000-000000000079',
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000020',
+      '00000000-0000-0000-0000-000000000022',
+      '00000000-0000-0000-0000-000000000071',
+      '00000000-0000-0000-0000-000000000078',
+      '00000000-0000-0000-0000-000000000080',
+      'sha256:7777777777777777777777777777777777777777777777777777777777777777',
+      'full', '非法读取目录之外的来源',
+      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'sha256:8888888888888888888888888888888888888888888888888888888888888888',
+      1, 'agent'
+    );
+    RAISE EXCEPTION 'ContextRead outside snapshot membership was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
+INSERT INTO goal_sessions
+  (id, project_id, goal_branch_id, session_number, status,
+   assignment, contract_version_id)
+VALUES (
+  '00000000-0000-0000-0000-000000000073',
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000020',
+  2, 'stopped', '验证跨 Session 指针',
+  '00000000-0000-0000-0000-000000000021'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE goal_sessions
+    SET context_snapshot_id = '00000000-0000-0000-0000-000000000071'
+    WHERE id = '00000000-0000-0000-0000-000000000073';
+    RAISE EXCEPTION 'cross-session current context pointer was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+END;
+$$;
+
 DO $$
 BEGIN
   BEGIN

@@ -1,6 +1,7 @@
 mod application;
 mod artifacts;
 mod config;
+pub mod context_memory;
 mod domain;
 mod error;
 pub mod goal_domain;

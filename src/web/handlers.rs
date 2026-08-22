@@ -14,7 +14,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    application::{goal_branches, graph, ideas, inputs, plugins, projects, workbench},
+    application::{
+        context_memory, goal_branches, graph, ideas, inputs, plugins, projects, workbench,
+    },
     artifacts::ArtifactStore,
     domain::{
         AppendProgressInput, ContributionInput, CreateBranchInput, GraphActionRequest,
@@ -1128,6 +1130,56 @@ pub async fn api_goal_command(
     Json(request): Json<goal_branches::GoalCommandRequest>,
 ) -> AppResult<Json<Value>> {
     let response = goal_branches::run_command(&state.pool, project_id, request).await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_session_context(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    let context = context_memory::get_context(&state.pool, project_id, session_id).await?;
+    Ok(Json(serde_json::to_value(context)?))
+}
+
+pub async fn api_session_context_catalog(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<context_memory::ContextCatalogQuery>,
+) -> AppResult<Json<Value>> {
+    let page =
+        context_memory::list_context_catalog(&state.pool, project_id, session_id, query).await?;
+    Ok(Json(serde_json::to_value(page)?))
+}
+
+pub async fn api_read_session_context(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<context_memory::ContextReadRequest>,
+) -> AppResult<Json<Value>> {
+    let response = context_memory::read_context(
+        &state.pool,
+        &state.config.artifact_root,
+        project_id,
+        session_id,
+        request,
+    )
+    .await?;
+    Ok(Json(serde_json::to_value(response)?))
+}
+
+pub async fn api_rebuild_session_context(
+    State(state): State<Arc<AppState>>,
+    Path((project_id, session_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<context_memory::RebuildContextRequest>,
+) -> AppResult<Json<Value>> {
+    let response = context_memory::rebuild_context(
+        &state.pool,
+        &state.config.artifact_root,
+        project_id,
+        session_id,
+        request,
+    )
+    .await?;
     Ok(Json(serde_json::to_value(response)?))
 }
 

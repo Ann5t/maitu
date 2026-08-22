@@ -4,6 +4,7 @@ use sqlx::{FromRow, PgPool, Postgres, Transaction, types::Json};
 use uuid::Uuid;
 
 use crate::{
+    application::context_memory,
     error::{AppError, AppResult},
     goal_domain::{
         BranchProposalRevisionDraft, CandidateSnapshot, CommandReceiptIdentity,
@@ -1367,6 +1368,35 @@ async fn approve_proposal(
         }),
     )
     .await?;
+    let parent_context = if let Some(parent_session_id) = proposal.parent_session_id {
+        let previous_snapshot: Option<Uuid> =
+            sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+                .bind(parent_session_id)
+                .fetch_one(&mut **transaction)
+                .await?;
+        Some(
+            context_memory::create_snapshot(
+                transaction,
+                project_id,
+                parent_session_id,
+                previous_snapshot,
+                previous_snapshot.map(|_| parent_session_id),
+                client_request_id,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    context_memory::create_snapshot(
+        transaction,
+        project_id,
+        session_id,
+        parent_context,
+        proposal.parent_session_id,
+        client_request_id,
+    )
+    .await?;
     Ok(json!({
         "proposalId": proposal.id,
         "goalBranchId": goal_branch_id,
@@ -1867,6 +1897,7 @@ async fn decide_contract_revision(
     }
 
     let mut paused_session_id = None;
+    let mut snapshot_session_id = None;
     if accept {
         let head = load_session_for_update(transaction, project_id, branch.head_session_id).await?;
         let head_status = SessionStatus::try_from(head.status.as_str())?;
@@ -1880,6 +1911,7 @@ async fn decide_contract_revision(
             ));
         }
         if head_status != SessionStatus::ReviewRejected {
+            snapshot_session_id = Some(head.id);
             let next_status = if head_status == SessionStatus::Running {
                 paused_session_id = Some(head.id);
                 SessionStatus::ManualPaused
@@ -1975,6 +2007,22 @@ async fn decide_contract_revision(
         }),
     )
     .await?;
+    if let Some(session_id) = snapshot_session_id {
+        let previous_snapshot: Option<Uuid> =
+            sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+                .bind(session_id)
+                .fetch_one(&mut **transaction)
+                .await?;
+        context_memory::create_snapshot(
+            transaction,
+            project_id,
+            session_id,
+            previous_snapshot,
+            previous_snapshot.map(|_| session_id),
+            client_request_id,
+        )
+        .await?;
+    }
     Ok(json!({
         "revisionRequestId": request.id,
         "decisionId": decision_id,
@@ -2203,6 +2251,20 @@ async fn resume_session(
         json!({ "resolution": resolution }),
     )
     .await?;
+    let previous_snapshot: Option<Uuid> =
+        sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+            .bind(session.id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    context_memory::create_snapshot(
+        transaction,
+        project_id,
+        session.id,
+        previous_snapshot,
+        previous_snapshot.map(|_| session.id),
+        client_request_id,
+    )
+    .await?;
     Ok(json!({ "sessionId": session.id, "status": status.as_str() }))
 }
 
@@ -2332,6 +2394,29 @@ async fn start_next_session(
             "previousSessionId": previous.id,
             "contractVersionId": branch.current_contract_version_id,
         }),
+    )
+    .await?;
+    let previous_snapshot: Option<Uuid> =
+        sqlx::query_scalar("SELECT context_snapshot_id FROM goal_sessions WHERE id = $1")
+            .bind(previous.id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    let previous_snapshot = context_memory::create_snapshot(
+        transaction,
+        project_id,
+        previous.id,
+        previous_snapshot,
+        previous_snapshot.map(|_| previous.id),
+        client_request_id,
+    )
+    .await?;
+    context_memory::create_snapshot(
+        transaction,
+        project_id,
+        session_id,
+        Some(previous_snapshot),
+        Some(previous.id),
+        client_request_id,
     )
     .await?;
     Ok(json!({

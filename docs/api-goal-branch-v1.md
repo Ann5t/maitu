@@ -53,6 +53,19 @@
 
 契约中的 `exploration` 支持 `delivery | exploration | hybrid`。探索/混合模式还必须提供 `budgets`、`candidateOutputs` 和 `uncertaintyReduction`；否则在 Proposal 批准或契约修订时返回 422 / `insufficient_exploration_contract`。完整语义见 [`core-domain-v2.md`](core-domain-v2.md)。
 
+## Session 上下文
+
+上下文采用独立的渐进式披露接口，完整语义见 [`context-memory-v1.md`](context-memory-v1.md)：
+
+| 方法 | 路径 | 语义 |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/:project_id/sessions/:session_id/context` | 不可折叠信封、实时状态、默认目录与遗漏数 |
+| `GET` | `.../context/entries?query=&sourceKind=&offset=&limit=` | 检索和分页完整来源目录 |
+| `POST` | `.../context/read` | 审计式读取 `summary`、`snippet` 或 `full` |
+| `POST` | `.../context/rebuild` | 从权威来源只追加派生数据新代 |
+
+按需读取和重建必须带 UUID 幂等键及准确 `snapshotId`。快照过期、目录外来源、摘要不一致或同一请求 ID 更换参数均返回 409/422，不会猜测性读取。读取审计不保存原文。
+
 ## HTML 表单适配
 
 `POST /projects/:project_id/goal-commands` 接收：
