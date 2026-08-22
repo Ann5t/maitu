@@ -101,6 +101,8 @@ assets/                      CSS、渐进增强脚本和图标
 
 “目标枝干核心 v0.1”的实现范围、完整验证、真实现场保护证据和下一 Goal 建议见 [阶段执行报告](docs/overnight-report.md)。
 
+当前覆盖全产品第一阶段的 12 个方面、每项完成定义、缺口与实施顺序，以 [12 方面总验收矩阵](docs/design-12-aspects.md) 为唯一准绳；执行状态见 [12 方面总 Goal 进度](docs/goal-12-progress.md)。
+
 本阶段可执行的状态转换、审核边界与旧模型共存规则见 [目标枝干领域与状态机](docs/goal-branch-domain.md)；中央插件、环境指纹、Tool Broker、Lease 和文件输入约束见 [中央插件、环境与文件协议](docs/tool-protocol.md)。
 
 新目标枝干纵向接口及幂等/错误语义见 [目标枝干 HTTP API v1](docs/api-goal-branch-v1.md)。
