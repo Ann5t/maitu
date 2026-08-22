@@ -58,10 +58,10 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
         ),
         _ => (
             "项目",
-            "持续保存目标、现实行动、产物与证据。",
+            "所有正在推进的事情。",
             "最近项目",
             "从一句自然语言开始",
-            "不必先选分类。说清楚你现在想推进什么，浮点会先帮你形成可修订的成果契约。",
+            "先记下你的想法，准备好时再把它变成项目。",
         ),
     };
     let active_count = projects
@@ -71,11 +71,10 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
     let content = html! {
         header class="page-head" {
             div {
-                span class="eyebrow" { "WORKSPACE" }
                 h1 { (title) }
                 p { (subtitle) }
             }
-            a class="button button--primary" href="/ideas/new" { span aria-hidden="true" { "+" } " 记录想法" }
+            a class="button button--primary" href="/ideas/new" { (ui_icon("plus")) "记录想法" }
         }
 
         section class="dashboard-strip" aria-label="工作区概览" {
@@ -83,7 +82,7 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
                 span class="pulse-mark" aria-hidden="true" {}
                 div {
                     strong { (active_count) " 个项目正在推进" }
-                    small { "下一步优先产生现实变化，而不是继续堆积建议。" }
+                    small { "从上次离开的地方继续" }
                 }
             }
             div class="dashboard-stat" { strong { (projects.len()) } span { "全部项目" } }
@@ -95,7 +94,7 @@ pub fn dashboard(projects: &[ProjectSummary], requested_view: Option<&str>) -> M
 
         section class="section-block" {
             div class="section-heading" {
-                div { span class="eyebrow" { "RECENT" } h2 { (section_title) } }
+                div { h2 { (section_title) } }
                 span class="section-count" { (visible_projects.len()) }
             }
             @if visible_projects.is_empty() {
@@ -121,118 +120,58 @@ pub fn settings(security_required: bool) -> Markup {
     let content = html! {
         header class="page-head settings-head" {
             div {
-                span class="eyebrow" { "PREFERENCES" }
                 h1 { "设置" }
-                p { "管理 AI、联网能力、外观与账号。未接入的能力会如实标明。" }
+                p { "让浮点按你的方式工作。" }
             }
         }
-
-        nav class="settings-tabs" aria-label="设置分类" {
-            a href="#ai" { "AI 配置" }
-            a href="#search" { "联网搜索" }
-            a href="#appearance" { "外观" }
-            a href="#account" { "账号" }
-        }
-
-        div class="settings-stack" {
-            section class="settings-panel" id="ai" aria-labelledby="settings-ai-title" {
-                header class="settings-panel__head" {
-                    span class="settings-icon" aria-hidden="true" { "✦" }
-                    div {
-                        h2 id="settings-ai-title" { "AI 配置" }
-                        p { "模型服务与 Agent 能力分配" }
-                    }
-                    span class="settings-state settings-state--empty" { "未接入" }
-                }
-                div class="settings-truth" role="status" {
-                    strong { "当前没有真实 AI 在运行" }
-                    p {
-                        "界面中的“工作 Agent”和“独立审核 AI”目前只是目标枝干里的角色与调度协议。"
-                        "系统没有保存模型供应商、API Key，也没有连接 ChatGPT 或 Codex。"
-                    }
-                }
-                dl class="settings-status-grid" {
-                    div { dt { "模型服务" } dd { "未连接" } }
-                    div { dt { "访问凭据" } dd { "未保存" } }
-                    div { dt { "能力分配" } dd { "0 项" } }
-                }
-                div class="settings-step-grid" aria-label="AI 接入顺序" {
-                    article {
-                        span { "1" }
-                        div { strong { "连接模型服务" } p { "选择供应商并提交密钥；密钥只进入专用凭据存储。" } }
-                    }
-                    article {
-                        span { "2" }
-                        div { strong { "测试真实连接" } p { "只有一次实际调用成功后，配置才允许保存。" } }
-                    }
-                    article {
-                        span { "3" }
-                        div { strong { "分配模型能力" } p { "把已验证模型分别交给工作、审核、视觉等角色。" } }
-                    }
-                }
-                p class="settings-note" { "这些配置入口会和版本化 Tool Pack、权限审计一起实现；现在不提供没有后端作用的假表单。" }
+        div class="settings-layout" {
+            nav class="settings-index" aria-label="设置分类" {
+                a class="is-active" href="#appearance" { (ui_icon("appearance")) span { "外观" } }
+                a href="#connections" { (ui_icon("connections")) span { "连接" } }
+                a href="#account" { (ui_icon("account")) span { "访问" } }
             }
-
-            section class="settings-panel" id="search" aria-labelledby="settings-search-title" {
-                header class="settings-panel__head" {
-                    span class="settings-icon settings-icon--search" aria-hidden="true" { "⌕" }
-                    div {
-                        h2 id="settings-search-title" { "联网搜索" }
-                        p { "供 Agent 按目标调用的搜索服务" }
-                    }
-                    span class="settings-state settings-state--empty" { "未配置" }
-                }
-                div class="settings-provider-row" {
-                    div { strong { "搜索供应商" } span { "尚未选择" } }
-                    div { strong { "API Key" } span { "尚未保存" } }
-                    div { strong { "调用规则" } span { "按 Session 授权" } }
-                }
-                p class="settings-note" { "计划采用“选择服务 → 测试搜索 → 保存配置”的流程；测试不通过时不能保存。" }
-            }
-
-            section class="settings-panel" id="appearance" aria-labelledby="settings-appearance-title" {
-                header class="settings-panel__head" {
-                    span class="settings-icon settings-icon--appearance" aria-hidden="true" { "◐" }
-                    div {
-                        h2 id="settings-appearance-title" { "外观" }
-                        p { "选择当前设备上的显示方式" }
+            div class="settings-content" {
+                section class="settings-surface" id="appearance" aria-labelledby="settings-appearance-title" {
+                    header { div { h2 id="settings-appearance-title" { "外观" } p { "颜色主题只保存在当前设备。" } } }
+                    div class="appearance-options" role="group" aria-label="颜色主题" {
+                        button type="button" data-theme-set="light" aria-pressed="false" {
+                            span class="theme-preview theme-preview--light" aria-hidden="true" { i {} i {} i {} }
+                            div { strong { "浅色" } small { "明亮、清晰" } }
+                        }
+                        button type="button" data-theme-set="dark" aria-pressed="false" {
+                            span class="theme-preview theme-preview--dark" aria-hidden="true" { i {} i {} i {} }
+                            div { strong { "深色" } small { "适合弱光" } }
+                        }
                     }
                 }
-                div class="appearance-options" role="group" aria-label="颜色主题" {
-                    button type="button" data-theme-set="light" aria-pressed="false" {
-                        span aria-hidden="true" { "☀" }
-                        div { strong { "浅色" } small { "明亮纸张背景" } }
-                    }
-                    button type="button" data-theme-set="dark" aria-pressed="false" {
-                        span aria-hidden="true" { "☾" }
-                        div { strong { "深色" } small { "弱光环境使用" } }
-                    }
-                }
-                p class="settings-note" { "选择会保存在这台设备的浏览器中，不影响其他设备。" }
-            }
-
-            section class="settings-panel" id="account" aria-labelledby="settings-account-title" {
-                header class="settings-panel__head" {
-                    span class="settings-icon settings-icon--account" aria-hidden="true" { "◎" }
-                    div {
-                        h2 id="settings-account-title" { "账号与访问" }
-                        p { "当前部署的登录与安全状态" }
-                    }
-                    @if security_required {
-                        span class="settings-state settings-state--ready" { "已启用登录" }
-                    } @else {
-                        span class="settings-state settings-state--local" { "本机模式" }
+                section class="settings-surface" id="connections" aria-labelledby="settings-connections-title" {
+                    header { div { h2 id="settings-connections-title" { "连接" } p { "外部能力的真实状态。" } } }
+                    div class="settings-rows" {
+                        div class="settings-row" {
+                            span class="settings-row__icon" { (ui_icon("spark")) }
+                            div { strong { "AI 服务" } small { "模型与 Agent" } }
+                            span class="settings-state settings-state--empty" { "未连接" }
+                        }
+                        div class="settings-row" {
+                            span class="settings-row__icon" { (ui_icon("search")) }
+                            div { strong { "联网搜索" } small { "公共网页检索" } }
+                            span class="settings-state settings-state--empty" { "未配置" }
+                        }
                     }
                 }
-                @if security_required {
-                    div class="settings-account-action" {
-                        div { strong { "登录密码" } p { "修改当前单用户账号的密码。" } }
-                        a class="button button--secondary" href="/account/password" { "修改密码" }
-                    }
-                } @else {
-                    div class="settings-truth settings-truth--neutral" {
-                        strong { "当前未启用登录" }
-                        p { "这个实例只绑定本机地址，用于当前审查。对服务器或公网开放前必须启用登录与 HTTPS。" }
+                section class="settings-surface" id="account" aria-labelledby="settings-account-title" {
+                    header { div { h2 id="settings-account-title" { "访问" } p { "这台浮点的登录状态。" } } }
+                    div class="settings-row settings-row--account" {
+                        span class="settings-row__icon" { (ui_icon("account")) }
+                        div {
+                            strong { @if security_required { "单用户登录" } @else { "本机审查模式" } }
+                            small { @if security_required { "登录保护已开启" } @else { "当前未启用登录" } }
+                        }
+                        @if security_required {
+                            a class="button button--secondary" href="/account/password" { "修改密码" }
+                        } @else {
+                            span class="settings-state settings-state--local" { "仅本机" }
+                        }
                     }
                 }
             }
@@ -242,19 +181,19 @@ pub fn settings(security_required: bool) -> Markup {
 }
 
 pub fn ideas(ideas: &[IdeaSummary], links: &[IdeaLinkView], query: &IdeaPageQuery) -> Markup {
-    let view = if query.view.as_deref() == Some("map") {
-        "map"
-    } else {
-        "stream"
+    let view = match query.view.as_deref() {
+        Some("map") => "map",
+        Some("stream") => "stream",
+        _ => "board",
     };
+    let promoted_count = ideas.iter().filter(|idea| idea.state == "promoted").count();
     let content = html! {
         header class="page-head idea-space-head" {
             div {
-                span class="eyebrow" { "UPSTREAM SPACE" }
                 h1 { "想法" }
-                p { "先保留未经整理的念头；真正立项前再形成可审查的 ProjectProposal。" }
+                p { "从一句念头，到可以开始的项目。" }
             }
-            a class="button button--primary" href="/ideas/new" { span aria-hidden="true" { "+" } " 记录想法" }
+            a class="button button--primary" href="/ideas/new" { (ui_icon("plus")) "记录想法" }
         }
         @if let Some(message) = query.notice.as_deref() {
             div class="flash flash--success" role="status" { (message) }
@@ -265,9 +204,10 @@ pub fn ideas(ideas: &[IdeaSummary], links: &[IdeaLinkView], query: &IdeaPageQuer
         section class="idea-projection-bar" aria-label="想法投影" {
             div {
                 strong { (ideas.len()) " 个想法" }
-                span { (links.len()) " 条关系；投影可以切换，内容与来源不会变。" }
+                @if promoted_count > 0 { span { (promoted_count) " 个已成为项目" } }
             }
             nav aria-label="切换想法视图" {
+                a class=(if view == "board" { "is-active" } else { "" }) href="/ideas" { "看板" }
                 a class=(if view == "stream" { "is-active" } else { "" }) href="/ideas?view=stream" { "时间流" }
                 a class=(if view == "map" { "is-active" } else { "" }) href="/ideas?view=map" { "关系图" }
             }
@@ -281,15 +221,46 @@ pub fn ideas(ideas: &[IdeaSummary], links: &[IdeaLinkView], query: &IdeaPageQuer
             }
         } @else if view == "map" {
             (idea_map(ideas, links))
-        } @else {
+        } @else if view == "stream" {
             section class="idea-stream" aria-label="想法时间流" {
                 @for idea in ideas {
                     (idea_card(idea, false))
                 }
             }
+        } @else {
+            (idea_board(ideas))
         }
     };
     layout("想法", "ideas", content)
+}
+
+fn idea_board(ideas: &[IdeaSummary]) -> Markup {
+    let columns = [
+        ("captured", "刚记录", "先留下，不急着定义"),
+        ("developing", "发展中", "正在补充和连接"),
+        ("proposed", "准备立项", "已经形成项目提案"),
+        ("promoted", "已形成项目", "进入正式目标空间"),
+    ];
+    html! {
+        section class="idea-board" aria-label="想法状态看板" {
+            @for (state, title, description) in columns {
+                @let column_ideas = ideas.iter().filter(|idea| idea.state == state).collect::<Vec<_>>();
+                section class=(format!("idea-board__column idea-board__column--{state}")) {
+                    header {
+                        div { h2 { (title) } p { (description) } }
+                        span { (column_ideas.len()) }
+                    }
+                    div class="idea-board__cards" {
+                        @if column_ideas.is_empty() {
+                            p class="idea-board__empty" { "还没有想法来到这里" }
+                        } @else {
+                            @for idea in column_ideas { (idea_card(idea, true)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn idea_map(ideas: &[IdeaSummary], links: &[IdeaLinkView]) -> Markup {
@@ -303,7 +274,7 @@ fn idea_map(ideas: &[IdeaSummary], links: &[IdeaLinkView]) -> Markup {
                 }
             }
             aside class="idea-map__relations" {
-                div class="section-heading" { div { span class="eyebrow" { "RELATIONS" } h2 { "关系索引" } } span class="section-count" { (links.len()) } }
+                div class="section-heading" { div { h2 { "关系索引" } } span class="section-count" { (links.len()) } }
                 @if links.is_empty() {
                     p class="muted-copy" { "还没有关联；打开任一想法即可补充支持、矛盾或依赖关系。" }
                 } @else {
@@ -351,7 +322,6 @@ pub fn new_idea(error: Option<&str>) -> Markup {
             a class="back-link" href="/ideas" { "← 返回想法" }
             section class="intake-card idea-intake-card" {
                 div class="intake-card__mark" { "∞" }
-                span class="eyebrow" { "CAPTURE AN IDEA" }
                 h1 { "先把脑中的东西留下来" }
                 p { "一句话就能开始。标题可留空，系统会从第一句话生成；以后每次变化都会保留版本。" }
                 @if let Some(message) = error {
@@ -366,8 +336,10 @@ pub fn new_idea(error: Option<&str>) -> Markup {
                     label for="idea-body" { "现在想到什么？" }
                     textarea id="idea-body" name="body" rows="8" autofocus
                         placeholder="例如：如果每个科研目标都能展开成可审查的独立枝干，我就能知道是技术不可行，还是还有遗漏。" {}
-                    label for="idea-file" { "也可以直接从文件、图片或语音开始（可选）" }
-                    input id="idea-file" name="file" type="file"
+                    label class="idea-file-picker" for="idea-file" {
+                        (ui_icon("plus")) span { "也可以直接从文件、图片或语音开始（可选）" }
+                    }
+                    input class="idea-file-input sr-only" id="idea-file" name="file" type="file"
                         accept="image/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
                     div class="intake-hints" {
                         span { "✦ 不要求立即立项" }
@@ -411,7 +383,7 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
         div class="idea-detail-layout" {
             main {
                 section class="idea-detail-section" {
-                    div class="section-heading" { div { span class="eyebrow" { "SOURCE MATERIALS" } h2 { "文件、图片与语音来源" } } span class="section-count" { (snapshot.sources.len()) } }
+                    div class="section-heading" { div { h2 { "文件、图片与语音" } } span class="section-count" { (snapshot.sources.len()) } }
                     @if !snapshot.sources.is_empty() {
                         div class="idea-source-grid" {
                             @for source in &snapshot.sources {
@@ -435,25 +407,31 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
                             }
                         }
                     }
-                    form class="idea-source-upload" data-idea-source-upload=""
-                        data-idea-id=(snapshot.idea.id) data-idea-revision=(snapshot.idea.current_revision) {
-                        label { "追加来源"
-                            input name="file" type="file" required
-                                accept="image/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
+                    details class="idea-composer" data-idea-source-composer="" {
+                        summary { (ui_icon("plus")) span { strong { "追加材料" } small { "复制文件、图片或语音到这个想法" } } }
+                        form class="idea-source-upload" data-idea-source-upload=""
+                            data-idea-id=(snapshot.idea.id) data-idea-revision=(snapshot.idea.current_revision) {
+                            label { "选择文件"
+                                input name="file" type="file" required
+                                    accept="image/*,audio/*,.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
+                            }
+                            label { "这份材料说明什么？（可选）" input name="note" maxlength="4000"; }
+                            button class="button button--secondary" type="submit" { "验证并附加" }
+                            output data-idea-source-status="" aria-live="polite" {}
                         }
-                        label { "这份材料说明什么？（可选）" input name="note" maxlength="4000"; }
-                        button class="button button--secondary" type="submit" { "验证并附加" }
-                        output data-idea-source-status="" aria-live="polite" {}
                     }
                 }
                 section class="idea-detail-section" {
-                    div class="section-heading" { div { span class="eyebrow" { "PROJECT PROPOSALS" } h2 { "从想法形成项目" } } span class="section-count" { (snapshot.proposals.len()) } }
+                    div class="section-heading" { div { h2 { "从想法形成项目" } } span class="section-count" { (snapshot.proposals.len()) } }
                     @if snapshot.proposals.is_empty() {
                         article class="idea-explainer" {
-                            strong { "立项不是复制粘贴" }
-                            p { "先明确现在为什么值得做、第一条根目标如何验证，以及哪些想法内容这次暂不采用。提交后仍需你批准，批准才会原子创建项目和根 BranchProposal 草案。" }
+                            strong { "准备好时，再把它变成项目" }
+                            p { "先确认为什么现在做、第一步要得到什么，以及怎样判断有效。" }
                         }
-                        (project_proposal_form(snapshot.idea.id, current, all_ideas, &[], None))
+                        details class="idea-composer idea-project-starter" {
+                            summary { (ui_icon("projects")) span { strong { "准备立项" } small { "形成一份可审查的项目提案" } } }
+                            (project_proposal_form(snapshot.idea.id, current, all_ideas, &[], None))
+                        }
                     } @else {
                         @for proposal in &snapshot.proposals {
                             (project_proposal_card(snapshot, current, all_ideas, proposal))
@@ -461,7 +439,7 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
                     }
                 }
                 section class="idea-detail-section" {
-                    div class="section-heading" { div { span class="eyebrow" { "RELATIONSHIPS" } h2 { "与其他想法的关系" } } span class="section-count" { (snapshot.links.len()) } }
+                    div class="section-heading" { div { h2 { "与其他想法的关系" } } span class="section-count" { (snapshot.links.len()) } }
                     @for link in &snapshot.links {
                         article class="idea-link-card" {
                             span { (idea_relation_label(&link.relation)) }
@@ -474,38 +452,41 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
                         }
                     }
                     @if all_ideas.iter().any(|idea| idea.id != snapshot.idea.id) {
-                        form class="idea-inline-form" method="post" action="/ideas/commands" {
-                            input type="hidden" name="client_request_id" value=(Uuid::new_v4());
-                            input type="hidden" name="subject_id" value=(snapshot.idea.id);
-                            input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
-                            input type="hidden" name="action" value="idea.link";
-                            input type="hidden" name="expected_revision" value=(snapshot.idea.current_revision);
-                            label { "关联到"
-                                select name="target_idea_ref" required {
-                                    option value="" { "选择另一个想法" }
-                                    @for idea in all_ideas.iter().filter(|idea| idea.id != snapshot.idea.id) {
-                                        option value=(format!("{}@{}", idea.id, idea.current_revision)) { (&idea.title) " · v" (idea.current_revision) }
+                        details class="idea-composer" data-idea-link-composer="" {
+                            summary { (ui_icon("connections")) span { strong { "建立关系" } small { "连接支持、矛盾、依赖或重复的想法" } } }
+                            form class="idea-inline-form" method="post" action="/ideas/commands" {
+                                input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+                                input type="hidden" name="subject_id" value=(snapshot.idea.id);
+                                input type="hidden" name="return_idea_id" value=(snapshot.idea.id);
+                                input type="hidden" name="action" value="idea.link";
+                                input type="hidden" name="expected_revision" value=(snapshot.idea.current_revision);
+                                label { "关联到"
+                                    select name="target_idea_ref" required {
+                                        option value="" { "选择另一个想法" }
+                                        @for idea in all_ideas.iter().filter(|idea| idea.id != snapshot.idea.id) {
+                                            option value=(format!("{}@{}", idea.id, idea.current_revision)) { (&idea.title) " · v" (idea.current_revision) }
+                                        }
                                     }
                                 }
-                            }
-                            label { "关系"
-                                select name="relation" required {
-                                    option value="related" { "有关联" }
-                                    option value="supports" { "支持" }
-                                    option value="contradicts" { "矛盾" }
-                                    option value="depends_on" { "依赖" }
-                                    option value="duplicates" { "重复" }
+                                label { "关系"
+                                    select name="relation" required {
+                                        option value="related" { "有关联" }
+                                        option value="supports" { "支持" }
+                                        option value="contradicts" { "矛盾" }
+                                        option value="depends_on" { "依赖" }
+                                        option value="duplicates" { "重复" }
+                                    }
                                 }
+                                label class="idea-inline-form__wide" { "为什么这样关联？" input name="rationale" required maxlength="4000"; }
+                                button class="button button--secondary" type="submit" { "保存关系" }
                             }
-                            label class="idea-inline-form__wide" { "为什么这样关联？" input name="rationale" required maxlength="4000"; }
-                            button class="button button--secondary" type="submit" { "保存关系" }
                         }
                     }
                 }
             }
             aside class="idea-history-panel" {
-                details open {
-                    summary { "继续发展这个想法" }
+                details class="idea-revision-composer" {
+                    summary { (ui_icon("ideas")) span { strong { "继续发展这个想法" } small { "保留当前版本，再写一个新版本" } } }
                     form class="idea-revision-form" method="post" action="/ideas/commands" {
                         input type="hidden" name="client_request_id" value=(Uuid::new_v4());
                         input type="hidden" name="subject_id" value=(snapshot.idea.id);
@@ -520,7 +501,7 @@ pub fn idea(snapshot: &IdeaSnapshot, all_ideas: &[IdeaSummary], query: &IdeaPage
                         button class="button button--primary" type="submit" { "保存为 v" (snapshot.idea.current_revision + 1) }
                     }
                 }
-                div class="section-heading" { div { span class="eyebrow" { "VERSIONS" } h2 { "不可覆盖的版本" } } span class="section-count" { (snapshot.revisions.len()) } }
+                div class="section-heading" { div { h2 { "历史版本" } } span class="section-count" { (snapshot.revisions.len()) } }
                 ol class="idea-version-list" {
                     @for revision in &snapshot.revisions {
                         li {
@@ -570,7 +551,7 @@ fn project_proposal_card(
         article class="project-proposal-card" data-project-proposal-id=(proposal.id) {
             header {
                 span class=(format!("proposal-state proposal-state--{}", proposal_state_tone(&proposal.status))) { (proposal_state_label(&proposal.status)) }
-                span { "ProjectProposal v" (proposal.current_revision) }
+                span { "提案 v" (proposal.current_revision) }
             }
             h3 { (&revision.title) }
             p { (&revision.why_now) }
@@ -754,7 +735,7 @@ fn project_proposal_form(
                 }
             }
             button class="button button--primary" type="submit" {
-                @if proposal.is_some() { "保存新版 ProjectProposal" } @else { "建立 ProjectProposal 草案" }
+                @if proposal.is_some() { "保存新版项目提案" } @else { "建立项目提案草案" }
             }
         }
     }
@@ -800,7 +781,6 @@ pub fn new_project(error: Option<&str>) -> Markup {
             a class="back-link" href="/" { "← 返回项目" }
             section class="intake-card" {
                 div class="intake-card__mark" { "01" }
-                span class="eyebrow" { "NEW PROJECT" }
                 h1 { "现在，你想让什么事情真正向前走？" }
                 p { "不用先整理成方案，也不用选择类型。保留你的原始表达，系统只会追问会改变推进方向的关键歧义。" }
                 @if let Some(message) = error {
@@ -1149,9 +1129,8 @@ fn goal_workbench(
             data-projection-version=(PROJECTION_VERSION) {
             header class="goal-toolbar" {
                 div class="goal-toolbar__intro" {
-                    span class="eyebrow" { "GOAL BRANCH WORKBENCH · PROJECTION " (PROJECTION_VERSION) }
-                    h2 { "目标图与 Agent 工作现场" }
-                    p { "先看谁在推进、哪里需要你；再走进任一 Session，查看文件、浏览器、工具、测试与审核。图只是可替换投影。" }
+                    h2 { "目标工作台" }
+                    p { "从目标图选择一个 Session，进入它的工作现场。" }
                 }
                 div class="command-summary" aria-label="项目当前指挥摘要" {
                     span class="command-summary__item command-summary__item--running" {
@@ -1160,10 +1139,10 @@ fn goal_workbench(
                     span class=(format!("command-summary__item{}", if open_attention > 0 { " has-attention" } else { "" })) {
                         b { (open_attention) } "需要你"
                     }
-                    span class="command-summary__item" { b { (active_actions) } "后台行动" }
-                    span class="command-summary__item" { b { (review_or_integration) } "审核 / 集成" }
-                    span class=(format!("command-summary__item{}", if unread_notifications > 0 { " has-attention" } else { "" })) {
-                        b { (unread_notifications) } "未读通知"
+                    @if active_actions > 0 { span class="command-summary__item" { b { (active_actions) } "后台行动" } }
+                    @if review_or_integration > 0 { span class="command-summary__item" { b { (review_or_integration) } "待审核" } }
+                    @if unread_notifications > 0 {
+                        span class="command-summary__item has-attention" { b { (unread_notifications) } "未读" }
                     }
                 }
             }
@@ -1749,12 +1728,24 @@ fn session_worksite(
         .iter()
         .filter(|item| item.session_id == Some(session.id))
         .collect::<Vec<_>>();
+    let has_active_action = action_runs.iter().any(|item| {
+        matches!(
+            item.status.as_str(),
+            "queued" | "running" | "waiting" | "cancellation_requested"
+        )
+    }) || runner_jobs
+        .iter()
+        .any(|item| matches!(item.status.as_str(), "queued" | "running"));
+    let has_active_tool = tool_calls
+        .iter()
+        .any(|item| matches!(item.status.as_str(), "queued" | "running"))
+        || tool_leases.iter().any(|item| item.status == "active");
 
     html! {
         header class="worksite-head" {
             div {
-                span class="eyebrow" { "AGENT SESSION WORKSITE" }
-                h3 { "Session " (format!("{:02}", session.session_number)) }
+                span class="worksite-kicker" { "SESSION " (format!("{:02}", session.session_number)) }
+                h3 { (&session.assignment) }
             }
             div class="worksite-head__controls" {
                 span class=(format!("goal-state goal-state--{}", goal_status_tone(&session.status))) {
@@ -1765,7 +1756,6 @@ fn session_worksite(
                 }
             }
         }
-        p class="worksite-assignment" { (&session.assignment) }
         div class="worksite-meta" {
             span { b { "目标" } (branch.map(|item| item.name.as_str()).unwrap_or("未知")) }
             span { b { "Agent" } (session.agent_identity.as_deref().unwrap_or("未指定")) }
@@ -1793,7 +1783,7 @@ fn session_worksite(
                 div class="workspace-console__branch" {
                     span aria-hidden="true" { "⑂" }
                     div {
-                        small { "GIT WORKTREE" }
+                        small { "当前枝干" }
                         strong { (&workspace.git_branch_name) }
                     }
                 }
@@ -1807,7 +1797,7 @@ fn session_worksite(
         }
 
         @if let Some(contract) = contract {
-            details class="worksite-contract" open {
+            details class="worksite-contract" {
                 summary { "目标契约 · 这个 Session 为什么存在" }
                 strong { (&contract.desired_outcome) }
                 div class="worksite-contract__lists" {
@@ -1820,7 +1810,7 @@ fn session_worksite(
         }
 
         @if let Some(context) = context {
-            details class="worksite-context" open data-context-snapshot-id=(context.snapshot.id) {
+            details class="worksite-context" data-context-snapshot-id=(context.snapshot.id) {
                 summary { "继承上下文 · 完整目录 " (context.catalog_total) " 项" }
                 div class="context-safety-grid" {
                     span { b { "永不折叠" } "目标契约与硬约束" }
@@ -1895,10 +1885,14 @@ fn session_worksite(
             }
         }
 
+        (session_action_panel(snapshot, session, contract))
+
         div class="worksite-sections" {
-            section id="worksite-files" class="worksite-section worksite-section--explorer" data-worksite-files {
-                header { span class="eyebrow" { "EXPLORER · INPUTS / OUTPUTS" } b { (inputs.len() + runner_files.len()) } }
-                h4 { "文件与代码现场" }
+            details id="worksite-files" class="worksite-section worksite-disclosure worksite-section--explorer" data-worksite-files open {
+                summary class="worksite-disclosure__summary" {
+                    span { (ui_icon("artifacts")) strong { "文件与代码" } small { "输入与工作成果" } }
+                    b { (inputs.len() + runner_files.len()) }
+                }
                 @if inputs.is_empty() && runner_files.is_empty() {
                     p class="worksite-empty-copy" { "尚无输入或 Runner 输出。手机和电脑导入都会先校验，再进入当前 worktree 或不可变产物引用。" }
                 }
@@ -1945,9 +1939,12 @@ fn session_worksite(
                 }
             }
 
-            section id="worksite-actions" class="worksite-section" data-worksite-actions {
-                header { span class="eyebrow" { "ACTION RUNS / RUNNER" } b { (action_runs.len() + runner_jobs.len()) } }
-                h4 { "Agent 行动与运行日志" }
+            details id="worksite-actions" class="worksite-section worksite-disclosure" data-worksite-actions
+                open[has_active_action] {
+                summary class="worksite-disclosure__summary" {
+                    span { (ui_icon("activity")) strong { "行动与运行" } small { "Agent 与 Runner 记录" } }
+                    b { (action_runs.len() + runner_jobs.len()) }
+                }
                 @if action_runs.is_empty() && runner_jobs.is_empty() {
                     p class="worksite-empty-copy" { "这个 Session 尚未排队后台行动或 Runner 作业。" }
                 }
@@ -2013,9 +2010,12 @@ fn session_worksite(
                 }
             }
 
-            section id="worksite-tools" class="worksite-section" data-worksite-tools {
-                header { span class="eyebrow" { "TOOLS / BROWSER / LEASES" } b { (tool_calls.len() + tool_leases.len()) } }
-                h4 { "工具与浏览器现场" }
+            details id="worksite-tools" class="worksite-section worksite-disclosure" data-worksite-tools
+                open[has_active_tool] {
+                summary class="worksite-disclosure__summary" {
+                    span { (ui_icon("tools")) strong { "工具与浏览器" } small { "调用与持续现场" } }
+                    b { (tool_calls.len() + tool_leases.len()) }
+                }
                 @if tool_calls.is_empty() && tool_leases.is_empty() {
                     p class="worksite-empty-copy" { "尚无工具调用或持续现场；安装后的 Playwright、Rust、Python、C/C++ 都通过同一协议出现在这里。" }
                 }
@@ -2057,9 +2057,11 @@ fn session_worksite(
                 }
             }
 
-            section class="worksite-section" data-worksite-tests {
-                header { span class="eyebrow" { "TESTS / EVIDENCE" } b { (evidence.len()) } }
-                h4 { "测试与反例" }
+            details class="worksite-section worksite-disclosure" data-worksite-tests {
+                summary class="worksite-disclosure__summary" {
+                    span { (ui_icon("tests")) strong { "测试与反例" } small { "绑定当前候选的证据" } }
+                    b { (evidence.len()) }
+                }
                 @if evidence.is_empty() && gates.iter().all(|gate| json_value_len(&gate.test_evidence.0) == 0) {
                     p class="worksite-empty-copy" { "尚无结构化测试证据。测试输出必须绑定准确候选，不能只写“应该通过”。" }
                 }
@@ -2085,9 +2087,12 @@ fn session_worksite(
 
         (plugin_worksite(snapshot, activity, session))
 
-        section id="worksite-results" class="worksite-section worksite-section--wide" data-worksite-contributions {
-            header { span class="eyebrow" { "CONTRIBUTIONS" } b { (contributions.len()) } }
-            h4 { "本 Session 留下的可回流产出" }
+        details id="worksite-results" class="worksite-section worksite-disclosure worksite-section--wide"
+            data-worksite-contributions open[!contributions.is_empty()] {
+            summary class="worksite-disclosure__summary" {
+                span { (ui_icon("contributions")) strong { "可回流产出" } small { "这个 Session 留下了什么" } }
+                b { (contributions.len()) }
+            }
             @if contributions.is_empty() {
                 p class="worksite-empty-copy" { "过程日志不会自动冒充产出；Agent 必须显式记录 Contribution。" }
             }
@@ -2108,7 +2113,6 @@ fn session_worksite(
             }
         }
 
-        (session_action_panel(snapshot, session, contract, &contributions))
     }
 }
 
@@ -2128,12 +2132,12 @@ fn plugin_worksite(
         .filter(|item| item.installed)
         .count();
     html! {
-        section id="worksite-plugins" class="worksite-section worksite-section--wide plugin-worksite" data-worksite-plugins {
-            header {
-                span class="eyebrow" { "CENTRAL PLUGINS · PROGRESSIVE DISCLOSURE" }
+        details id="worksite-plugins" class="worksite-section worksite-disclosure worksite-section--wide plugin-worksite"
+            data-worksite-plugins {
+            summary class="worksite-disclosure__summary" {
+                span { (ui_icon("plugins")) strong { "工具环境" } small { "版本、能力与安装请求" } }
                 b { (installed_count) "/" (activity.plugin_catalog.len()) }
             }
-            h4 { "当前 Session 可发现的工具环境" }
             p class="plugin-worksite__intro" {
                 "这里只保存版本与能力绑定；编译器、浏览器和依赖留在中央只读 Runtime，不复制进每个 worktree。"
             }
@@ -2537,7 +2541,6 @@ fn session_action_panel(
     snapshot: &GoalGraphSnapshot,
     session: &GoalSessionRecord,
     contract: Option<&GoalContractVersionRecord>,
-    current_contributions: &[&crate::goal_models::GoalContributionRecord],
 ) -> Markup {
     let branch = snapshot
         .branches
@@ -2588,14 +2591,14 @@ fn session_action_panel(
         && !active_child;
 
     html! {
-        section class="session-actions" data-session-actions {
-            header {
-                div { span class="eyebrow" { "SESSION CONTROL" } h4 { "推进、拆分、暂停或收尾" } }
-                small { "一条枝干同时只有这一个可写现场" }
+        details class="session-actions" data-session-actions open[session.status != "running"] {
+            summary class="session-actions__summary" {
+                span { (ui_icon("control")) strong { "推进与收尾" } small { "记录产出、拆分、暂停或发起审核" } }
+                b { (if session.status == "running" { "打开操作" } else { "需要处理" }) }
             }
             @if session.status == "running" {
                 div class="session-action-grid" {
-                    details class="session-action" open[current_contributions.is_empty()] {
+                    details class="session-action" {
                         summary { "+ 记录 Contribution" }
                         form class="goal-form" method="post" action=(format!("/projects/{}/goal-commands", snapshot.project.id)) {
                             input type="hidden" name="client_request_id" value=(Uuid::new_v4());
@@ -2715,7 +2718,7 @@ fn session_action_panel(
                             button class="button button--secondary button--small" type="submit" { "暂停" }
                         }
                     }
-                    details class="session-action session-action--merge" open[!current_contributions.is_empty()] {
+                    details class="session-action session-action--merge" {
                         summary { "→ Agent 声明整条目标枝干已达成" }
                         @if branch_contributions.is_empty() {
                             p class="worksite-empty-copy" { "至少要先记录一项 Contribution。" }
@@ -3703,6 +3706,7 @@ fn layout(title: &str, active: &str, content: Markup) -> Markup {
                 link rel="icon" href="/assets/icon.svg";
                 link rel="manifest" href="/assets/manifest.webmanifest";
                 link rel="stylesheet" href="/assets/app.css";
+                link rel="stylesheet" href="/assets/interface.css";
                 script src="/assets/theme.js" {}
                 script src="/assets/app.js" defer {}
             }
@@ -3723,20 +3727,21 @@ fn sidebar(active: &str) -> Markup {
             a class="brand" href="/" aria-label="浮点首页" {
                 (brand_mark()) strong { "浮点" }
             }
+            a class="sidebar-capture" href="/ideas/new" { (ui_icon("plus")) span { "记录想法" } }
             nav class="side-nav" aria-label="主导航" {
-                a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { span { "∿" } b { "想法" } }
-                a class=(if active == "projects" { "is-active" } else { "" }) href="/" { span { "⌘" } b { "项目" } }
-                a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { span { "◌" } b { "待处理" } }
-                a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
+                a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { (ui_icon("ideas")) b { "想法" } }
+                a class=(if active == "projects" { "is-active" } else { "" }) href="/" { (ui_icon("projects")) b { "项目" } }
+                a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { (ui_icon("attention")) b { "待处理" } }
+                a class="side-nav__secondary" href="/?view=artifacts" { (ui_icon("artifacts")) b { "产物" } }
             }
             div class="sidebar__bottom" {
                 a class=(if active == "settings" { "settings-link is-active" } else { "settings-link" }) href="/settings" {
-                    span aria-hidden="true" { "⚙" }
+                    (ui_icon("settings"))
                     b { "设置" }
                 }
                 div class="theme-switch" role="group" aria-label="颜色主题" {
-                    button type="button" data-theme-set="light" aria-pressed="false" { span aria-hidden="true" { "☀" } "浅色" }
-                    button type="button" data-theme-set="dark" aria-pressed="false" { span aria-hidden="true" { "☾" } "深色" }
+                    button type="button" data-theme-set="light" aria-label="切换为浅色" aria-pressed="false" { (ui_icon("sun")) span { "浅色" } }
+                    button type="button" data-theme-set="dark" aria-label="切换为深色" aria-pressed="false" { (ui_icon("moon")) span { "深色" } }
                 }
             }
         }
@@ -3746,12 +3751,11 @@ fn sidebar(active: &str) -> Markup {
 fn mobile_nav(active: &str) -> Markup {
     html! {
         nav class="mobile-nav" aria-label="移动端导航" {
-            a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { span { "∿" } b { "想法" } }
-            a class=(if active == "projects" { "is-active" } else { "" }) href="/" { span { "⌘" } b { "项目" } }
-            a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { span { "◌" } b { "待处理" } }
-            a class="mobile-nav__new" href="/ideas/new" { span { "+" } b { "记录" } }
-            a class=(if active == "artifacts" { "is-active" } else { "" }) href="/?view=artifacts" { span { "◇" } b { "产物" } }
-            a class=(if active == "settings" { "is-active" } else { "" }) href="/settings" { span { "⚙" } b { "设置" } }
+            a class=(if active == "ideas" { "is-active" } else { "" }) href="/ideas" { (ui_icon("ideas")) b { "想法" } }
+            a class=(if active == "projects" { "is-active" } else { "" }) href="/" { (ui_icon("projects")) b { "项目" } }
+            a class="mobile-nav__new" href="/ideas/new" { (ui_icon("plus")) b { "记录" } }
+            a class=(if active == "attention" { "is-active" } else { "" }) href="/?view=attention" { (ui_icon("attention")) b { "待处理" } }
+            a class=(if active == "settings" { "is-active" } else { "" }) href="/settings" { (ui_icon("settings")) b { "设置" } }
         }
     }
 }
@@ -3759,6 +3763,36 @@ fn mobile_nav(active: &str) -> Markup {
 fn brand_mark() -> Markup {
     html! {
         span class="brand-mark" aria-hidden="true" { i {} i {} i {} }
+    }
+}
+
+fn ui_icon(name: &str) -> Markup {
+    html! {
+        svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
+            @match name {
+                "ideas" => { path d="M9 18h6"; path d="M10 22h4"; path d="M8.2 14.5A7 7 0 1 1 15.8 14.5C14.7 15.3 14 16.2 14 18h-4c0-1.8-.7-2.7-1.8-3.5Z"; }
+                "projects" => { path d="M3.5 6.5h6l2 2h9v10.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"; path d="M3.5 10.5h17"; }
+                "attention" => { path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"; path d="M10 21h4"; }
+                "artifacts" => { path d="M6 2.5h8l4 4V21H6Z"; path d="M14 2.5V7h4"; path d="M9 12h6M9 16h6"; }
+                "settings" => { path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"; circle cx="16" cy="6" r="2"; circle cx="8" cy="12" r="2"; circle cx="13" cy="18" r="2"; }
+                "plus" => { path d="M12 5v14M5 12h14"; }
+                "sun" => { circle cx="12" cy="12" r="4"; path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"; }
+                "moon" => { path d="M20.5 15.5A9 9 0 0 1 8.5 3.5a9 9 0 1 0 12 12Z"; }
+                "appearance" => { circle cx="12" cy="12" r="8"; path d="M12 4a8 8 0 0 0 0 16Z"; }
+                "connections" => { path d="M9.5 14.5l5-5"; path d="M7.5 17.5l-1 1a3.5 3.5 0 0 1-5-5l3-3a3.5 3.5 0 0 1 5 0"; path d="M16.5 6.5l1-1a3.5 3.5 0 0 1 5 5l-3 3a3.5 3.5 0 0 1-5 0"; }
+                "account" => { circle cx="12" cy="8" r="3.5"; path d="M5 21a7 7 0 0 1 14 0"; }
+                "spark" => { path d="M12 2l1.6 5.1L19 9l-5.4 1.9L12 16l-1.6-5.1L5 9l5.4-1.9Z"; path d="M19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z"; }
+                "search" => { circle cx="10.5" cy="10.5" r="6.5"; path d="m15.5 15.5 5 5"; }
+                "activity" => { path d="M3 12h4l2.5-7 5 14 2.5-7h4"; }
+                "tools" => { path d="m14.5 6.5 3-3a4 4 0 0 1-5 5L5 16a2.1 2.1 0 0 0 3 3l7.5-7.5a4 4 0 0 1 5-5l-3 3Z"; }
+                "tests" => { path d="M9 3h6M10 3v5l-5 9a2.5 2.5 0 0 0 2.2 3.7h9.6A2.5 2.5 0 0 0 19 17l-5-9V3"; path d="M8 15h8"; }
+                "plugins" => { path d="M8 3h3v5h2V3h3v5a4 4 0 0 1-3 3.9V21h-2v-9.1A4 4 0 0 1 8 8Z"; }
+                "contributions" => { path d="M5 12h14M13 5l7 7-7 7"; }
+                "control" => { circle cx="12" cy="12" r="9"; path d="m9 12 2 2 4-5"; }
+                _ => { circle cx="12" cy="12" r="8"; }
+            }
+        }
     }
 }
 
@@ -3933,11 +3967,13 @@ mod tests {
     #[test]
     fn settings_is_honest_about_ai_and_has_explicit_themes() {
         let rendered = settings(false).into_string();
-        assert!(rendered.contains("当前没有真实 AI 在运行"));
-        assert!(rendered.contains("没有连接 ChatGPT 或 Codex"));
+        assert!(rendered.contains("AI 服务"));
+        assert!(rendered.contains("模型与 Agent"));
+        assert!(rendered.contains("未连接"));
         assert!(rendered.contains("data-theme-set=\"light\""));
         assert!(rendered.contains("data-theme-set=\"dark\""));
         assert!(!rendered.contains("Rust edition"));
         assert!(!rendered.contains("可恢复单体"));
+        assert!(!rendered.contains("当前没有真实 AI 在运行"));
     }
 }

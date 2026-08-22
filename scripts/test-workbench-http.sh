@@ -81,11 +81,13 @@ done
 
 settings_html="$(curl -fsS "$workbench_base/settings")"
 grep -q '<h1>设置</h1>' <<< "$settings_html"
-grep -q '当前没有真实 AI 在运行' <<< "$settings_html"
-grep -q '没有连接 ChatGPT 或 Codex' <<< "$settings_html"
+grep -q 'AI 服务' <<< "$settings_html"
+grep -q '模型与 Agent' <<< "$settings_html"
+grep -q '未连接' <<< "$settings_html"
 grep -q 'data-theme-set="light"' <<< "$settings_html"
 grep -q 'data-theme-set="dark"' <<< "$settings_html"
 ! grep -q 'Rust edition\|可恢复单体' <<< "$settings_html"
+! grep -q '当前没有真实 AI 在运行\|没有连接 ChatGPT 或 Codex' <<< "$settings_html"
 
 curl -fsS -o /dev/null -D "$workbench_tmp/create.headers" \
   --data-urlencode 'intent=<script>不能进入页面</script>：完成工作台闭环' \
@@ -126,10 +128,10 @@ post_form "$workbench_command_url" \
   --data-urlencode 'agent_identity=workbench-worker'
 workbench_html="$(curl -fsS "$workbench_project_url?tab=goals")"
 workbench_session_id="$(html_attribute data-session-id <<< "$workbench_html")"
-grep -q 'EXPLORER · INPUTS / OUTPUTS' <<< "$workbench_html"
-grep -q 'TOOLS / BROWSER / LEASES' <<< "$workbench_html"
-grep -q 'ACTION RUNS / RUNNER' <<< "$workbench_html"
-grep -q 'CENTRAL PLUGINS · PROGRESSIVE DISCLOSURE' <<< "$workbench_html"
+grep -q '文件与代码' <<< "$workbench_html"
+grep -q '工具与浏览器' <<< "$workbench_html"
+grep -q '行动与运行' <<< "$workbench_html"
+grep -q '工具环境' <<< "$workbench_html"
 grep -q 'data-goal-command-bar' <<< "$workbench_html"
 grep -q 'data-input-upload' <<< "$workbench_html"
 

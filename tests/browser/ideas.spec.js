@@ -13,6 +13,12 @@ async function noHorizontalOverflow(page) {
   return page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 }
 
+async function openDetails(locator) {
+  if (!(await locator.evaluate((element) => element.open))) {
+    await locator.locator(':scope > summary').click();
+  }
+}
+
 test('idea revisions, relationships and ProjectProposal promotion work on three sizes', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/ideas/new');
@@ -28,6 +34,7 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await expect(page.locator('.idea-source-card--image')).toContainText('research-board.png');
   const firstIdeaURL = page.url();
 
+  await openDetails(page.locator('.idea-revision-composer'));
   const revision = page.locator('.idea-revision-form');
   await revision.getByLabel('内容').fill('把科研目标展开成可审查的独立枝干，并在移动设备查看工作现场。');
   await revision.getByLabel('这次为什么改变？').fill('补充移动工作现场');
@@ -39,8 +46,9 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await page.getByLabel('现在想到什么？').fill('每次拟合并都冻结证据并由独立审核检查反例。');
   await page.getByRole('button', { name: '保留这个想法' }).click();
   await expect(page.getByRole('heading', { name: '证据驱动审核' })).toBeVisible();
+  await openDetails(page.locator('[data-idea-source-composer]'));
   const sourceUpload = page.locator('[data-idea-source-upload]');
-  await sourceUpload.getByLabel('追加来源').setInputFiles({
+  await sourceUpload.getByLabel('选择文件').setInputFiles({
     name: 'train-note.mp3',
     mimeType: 'application/octet-stream',
     buffer: Buffer.from('ID3\x04\x00\x00voice insight'),
@@ -52,6 +60,7 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await expect(page.locator('.idea-source-card--audio')).toContainText('train-note.mp3');
 
   await page.goto(firstIdeaURL);
+  await openDetails(page.locator('[data-idea-link-composer]'));
   await expect(page.getByLabel('关联到')).toBeVisible();
   const relatedIdeaValue = await page
     .getByLabel('关联到')
@@ -64,6 +73,7 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await page.getByRole('button', { name: '保存关系' }).click();
   await expect(page.locator('.idea-link-card')).toContainText('证据驱动审核');
 
+  await openDetails(page.locator('.idea-project-starter'));
   const proposal = page.locator('.project-proposal-form').first();
   await proposal.getByLabel('项目名称').fill('目标枝干科研工作台');
   await proposal.getByLabel('项目意图').fill('开发可在电脑、手机和平板使用的目标枝干科研工作台');
@@ -75,7 +85,7 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await proposal.getByLabel('何时回来请你凭感觉判断？').fill('完成三尺寸可操作候选后');
   await proposal.locator('.goal-form-advanced > summary').click();
   await proposal.getByLabel(/证据驱动审核/).check();
-  await proposal.getByRole('button', { name: '建立 ProjectProposal 草案' }).click();
+  await proposal.getByRole('button', { name: '建立项目提案草案' }).click();
 
   const proposalCard = page.locator('.project-proposal-card');
   await expect(proposalCard).toContainText('目标枝干科研工作台');
@@ -86,6 +96,13 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await expect(page.locator('#goal-workbench')).toBeVisible();
   await expect(page.locator('.proposal-card')).toContainText('完成可运行并可审查的目标枝干工作台');
   expect(await noHorizontalOverflow(page)).toBeTruthy();
+
+  await page.goto('/ideas');
+  await expect(page.locator('.idea-board')).toBeVisible();
+  await expect(page.locator('.idea-board__column')).toHaveCount(4);
+  await expect(page.locator('.idea-board')).toContainText('已形成项目');
+  expect(await noHorizontalOverflow(page)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/ideas-board-desktop.png`, fullPage: true });
 
   await page.goto('/ideas?view=map');
   await expect(page.locator('.idea-map')).toBeVisible();
@@ -100,9 +117,16 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   await page.screenshot({ path: `${screenshotDir}/ideas-map-tablet.png`, fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/ideas', { waitUntil: 'networkidle' });
+  await expect(page.locator('.idea-board')).toBeVisible();
+  expect(await noHorizontalOverflow(page)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1100);
+  await page.screenshot({ path: `${screenshotDir}/ideas-board-mobile.png`, fullPage: true });
+
   await page.goto(firstIdeaURL, { waitUntil: 'networkidle' });
   await expect(page.locator('.idea-detail-head')).toBeVisible();
   await expect(page.locator('.mobile-nav')).toContainText('想法');
   expect(await noHorizontalOverflow(page)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1900);
   await page.screenshot({ path: `${screenshotDir}/idea-detail-mobile.png`, fullPage: true });
 });

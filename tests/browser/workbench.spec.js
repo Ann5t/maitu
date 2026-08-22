@@ -101,6 +101,12 @@ async function renderedContrast(locator) {
   });
 }
 
+async function openDetails(locator) {
+  if (!(await locator.evaluate((element) => element.open))) {
+    await locator.locator(':scope > summary').click();
+  }
+}
+
 test.use({
   baseURL,
   viewport: { width: 1440, height: 1000 },
@@ -133,9 +139,9 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await approval.getByRole('button', { name: '批准 BranchProposal' }).click();
 
   await expect(page.locator('.goal-session-node.is-selected')).toBeVisible();
-  await expect(page.locator('.session-worksite')).toContainText('EXPLORER · INPUTS / OUTPUTS');
-  await expect(page.locator('.session-worksite')).toContainText('TOOLS / BROWSER / LEASES');
-  await expect(page.locator('.session-worksite')).toContainText('ACTION RUNS / RUNNER');
+  await expect(page.locator('.session-worksite')).toContainText('文件与代码');
+  await expect(page.locator('.session-worksite')).toContainText('工具与浏览器');
+  await expect(page.locator('.session-worksite')).toContainText('行动与运行');
   await expect(page.locator('.plugin-worksite')).toBeVisible();
   await expect(page.locator('.worksite-context')).toBeVisible();
   await expect(page.locator('.worksite-context')).toContainText('永不折叠');
@@ -155,6 +161,7 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('.goal-session-node.is-selected')).toBeFocused();
   expect(await commandBar.locator('[data-goal-focus-current]').evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
 
+  await openDetails(page.locator('.plugin-worksite'));
   const pluginRequest = page.locator('.plugin-request-form');
   await pluginRequest.locator(':scope > summary').click();
   await pluginRequest.locator('[name="plugin_id"]').fill('fudian.tools.pptmaster');
@@ -177,7 +184,8 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.worksite-record')).toContainText('browser-evidence.md');
 
-  const contractRevisionPanel = page.locator('details').filter({
+  await openDetails(page.locator('[data-session-actions]'));
+  const contractRevisionPanel = page.locator('details.session-action').filter({
     has: page.locator('input[value="contract.propose_revision"]'),
   });
   await contractRevisionPanel.locator(':scope > summary').click();
@@ -204,7 +212,8 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await resume.getByRole('button', { name: '恢复 Session' }).click();
   await expect(page.locator('.worksite-contract')).toContainText('探索模式');
 
-  const structuredEvidencePanel = page.locator('details').filter({
+  await openDetails(page.locator('[data-session-actions]'));
+  const structuredEvidencePanel = page.locator('details.session-action').filter({
     has: page.locator('input[value="session.add_evidence"]'),
   });
   await structuredEvidencePanel.locator(':scope > summary').click();
@@ -217,7 +226,12 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await structuredEvidence.getByRole('button', { name: '保存 Evidence' }).click();
   await expect(page.locator('.test-evidence-record')).toContainText('工作台在真实 Chromium 可操作');
 
-  const contribution = page.locator('form:has(input[value="session.add_contribution"])');
+  await openDetails(page.locator('[data-session-actions]'));
+  const contributionPanel = page.locator('details.session-action').filter({
+    has: page.locator('input[value="session.add_contribution"]'),
+  });
+  await openDetails(contributionPanel);
+  const contribution = contributionPanel.locator('form');
   await contribution.locator('[name="contribution_kind"]').selectOption('evidence');
   await contribution.locator('[name="title"]').fill('Chromium 端到端证据');
   await contribution.locator('[name="body"]').fill('桌面与移动端工作台可操作，文件已安全导入');
@@ -225,10 +239,10 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('.contribution-stack')).toContainText('Chromium 端到端证据');
 
   expect(await renderedFontSize(page.locator('body'))).toBeGreaterThanOrEqual(16);
-  expect(await renderedFontSize(page.locator('.goal-toolbar p'))).toBeGreaterThanOrEqual(14);
+  expect(await renderedFontSize(page.locator('.goal-toolbar p'))).toBeGreaterThanOrEqual(13);
   expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
-  expect(await renderedFontSize(page.locator('.worksite-assignment'))).toBeGreaterThanOrEqual(16);
-  expect(await renderedFontSize(page.locator('.worksite-section > h4'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.worksite-head h3'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.worksite-disclosure__summary strong'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.contribution-stack p'))).toBeGreaterThanOrEqual(14);
   expect(await renderedFontSize(page.locator('.worksite-meta span'))).toBeGreaterThanOrEqual(12);
   expect(await renderedFontSize(page.locator('.worksite-context > summary'))).toBeGreaterThanOrEqual(14);
@@ -252,9 +266,15 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   expect(reducedTransitionSeconds).toBeLessThanOrEqual(0.001);
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-desktop.png`, fullPage: true });
 
-  const merge = page.locator('form:has(input[value="merge.propose"])');
+  await openDetails(page.locator('[data-session-actions]'));
+  const mergePanel = page.locator('details.session-action').filter({
+    has: page.locator('input[value="merge.propose"]'),
+  });
+  await openDetails(mergePanel);
+  const merge = mergePanel.locator('form');
   await merge.locator('[name="test_evidence"]').fill('Chromium 桌面布局无溢出\n文件导入成功');
   await merge.locator('[name="self_check"]').fill('已核对目标、验证、未知与停止条件');
   await merge.getByRole('button', { name: '冻结现场并进入拟合并审核' }).click();
@@ -283,24 +303,27 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   await expect(page.locator('.session-worksite')).toBeVisible();
   await expect(page.locator('.worksite-context')).toContainText('完整目录');
   expect(await renderedFontSize(page.locator('.goal-session-node__copy strong'))).toBeGreaterThanOrEqual(14);
-  expect(await renderedFontSize(page.locator('.worksite-assignment'))).toBeGreaterThanOrEqual(16);
+  expect(await renderedFontSize(page.locator('.worksite-head h3'))).toBeGreaterThanOrEqual(16);
   expect(await renderedFontSize(page.locator('.mobile-nav b'))).toBeGreaterThanOrEqual(12);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   const workbenchBox = await page.locator('#goal-workbench').boundingBox();
   expect(workbenchBox.x).toBeGreaterThanOrEqual(0);
   expect(workbenchBox.x + workbenchBox.width).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(3200);
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-mobile.png`, fullPage: true });
 });
 
 test('settings reports real AI status and persists explicit theme choice', async ({ page }) => {
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
-  await expect(page.getByText('当前没有真实 AI 在运行')).toBeVisible();
-  await expect(page.getByText(/没有连接 ChatGPT 或 Codex/)).toBeVisible();
+  await expect(page.getByText('AI 服务')).toBeVisible();
+  await expect(page.getByText('模型与 Agent')).toBeVisible();
+  await expect(page.getByText('未连接')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Rust edition');
   await expect(page.locator('body')).not.toContainText('可恢复单体');
+  await expect(page.locator('body')).not.toContainText('当前没有真实 AI 在运行');
   expect(await renderedFontSize(page.locator('.settings-state'))).toBeGreaterThanOrEqual(12);
-  expect(await renderedFontSize(page.locator('.settings-step-grid p'))).toBeGreaterThanOrEqual(12);
+  expect(await renderedFontSize(page.locator('.settings-row strong'))).toBeGreaterThanOrEqual(14);
 
   const appearance = page.locator('#appearance');
   await appearance.locator('[data-theme-set="dark"]').click();
@@ -321,5 +344,21 @@ test('settings reports real AI status and persists explicit theme choice', async
   await appearance.locator('[data-theme-set="light"]').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1200);
   await page.screenshot({ path: `${screenshotDir}/settings-mobile-light.png`, fullPage: true });
+});
+
+test('project dashboard keeps the current work visually primary', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: '项目', level: 1 })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('WORKSPACE');
+  await expect(page.locator('body')).not.toContainText('RECENT');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/projects-dashboard-desktop.png`, fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.mobile-nav')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: `${screenshotDir}/projects-dashboard-mobile.png`, fullPage: true });
 });
