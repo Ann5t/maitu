@@ -55,3 +55,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标产品在所有普通文字入口复用服务器侧腾讯语音识别，转写只形成可编辑草稿且默认删除临时录音；它与 Agent 的音频理解能力相互独立，见[决策 0034](../decisions/0034-system-wide-tencent-speech-input.md)。
 
 目标项目首页是可排序的活跃项目卡片墙，卡片轮换未结束枝干的真实现状；历史项目另设入口，待处理直达来源且不再设全局成果空间，见[决策 0035](../decisions/0035-active-project-card-wall.md)。
+
+目标图使用无限画布与语义缩放：实线代表目标、圆形代表 Session、菱形代表 MergeGate，暂停附着来源，方框只做枝干或子树聚合；自动时序布局允许用户移动整条子树，见[决策 0036](../decisions/0036-semantic-zoom-goal-canvas.md)。
