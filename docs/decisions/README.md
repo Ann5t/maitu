@@ -48,5 +48,6 @@
 - [0043：运行材料默认保留并先显示空间影响](0043-retain-by-default-with-storage-estimates.md)
 - [0044：第一版只提供单项目导出导入](0044-project-export-only-no-instance-backup.md)
 - [0045：首批 AI 使用轻量个人连接](0045-lightweight-personal-ai-provider-bootstrap.md)
+- [0046：项目使用负责人连接并隔离 AI Driver](0046-project-owner-ai-usage-and-isolated-driver.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

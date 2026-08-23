@@ -75,3 +75,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标产品第一版只实现完整的单项目导出与导入，不提供整实例自动备份或恢复；当前整实例脚本仍是现有开发运维事实，不因此成为目标产品合同，见[决策 0044](../decisions/0044-project-export-only-no-instance-backup.md)。
 
 目标 AI 首批使用个人连接：Rust Agent 核心通过固定版本的轻量 Pi Provider Driver 使用 Codex 账号授权，不安装完整 Codex；GPT Image 2 使用独立的个人 API Key，之后再接入 DeepSeek 与 MiniMax，见[决策 0045](../decisions/0045-lightweight-personal-ai-provider-bootstrap.md)。
+
+项目 Agent 始终使用当前负责人的个人 AI 连接；负责人转交会在安全边界结束活动工作轮次并以新连接创建后继 Session。Codex 设备码登录和 Provider 适配运行在不挂载项目现场的共享内部 AI Driver 容器中，见[决策 0046](../decisions/0046-project-owner-ai-usage-and-isolated-driver.md)。
