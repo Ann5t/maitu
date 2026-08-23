@@ -27,5 +27,6 @@
 - [0022：MergeGate 简要展示自动证据并允许用户例外接受](0022-concise-merge-evidence-and-user-waiver.md)
 - [0023：Session 继承精简上下文并在安全边界接收消息](0023-session-context-and-safe-message-delivery.md)
 - [0024：统一工具目录复用不可变资源并隔离 Session 环境](0024-unified-tools-with-isolated-reused-environments.md)
+- [0025：管理员安装插件且 Session 固定工具版本](0025-admin-plugin-install-and-pinned-session-tools.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

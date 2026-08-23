@@ -33,3 +33,5 @@
 目标 Session 默认继承精简但不可丢失的上下文，能看到项目地图的被动摘要，并在安全动作边界接收用户消息或形成暂停检查点，见[决策 0023](../decisions/0023-session-context-and-safe-message-delivery.md)。
 
 目标工具系统在统一目录下区分插件能力与环境资源，按内容复用不可变工具和包，为每个 Session 隔离环境并允许短期热 Worker，见[决策 0024](../decisions/0024-unified-tools-with-isolated-reused-environments.md)。
+
+目标插件由管理员安装，获批 Session 可直接使用固定版本；升级不影响运行中环境，详细调用和版本占用只按需显示，见[决策 0025](../decisions/0025-admin-plugin-install-and-pinned-session-tools.md)。
