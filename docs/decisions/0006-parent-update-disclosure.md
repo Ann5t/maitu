@@ -31,5 +31,6 @@
 
 ## 相关资料
 
+- 后续决定：[成果摘要属于拟合并候选，不设独立 Contribution](0012-merge-candidate-outcome-summary.md)，通知中的成果来源改为被冻结的候选成果摘要。
 - [获批子枝干立即合入父枝干](0005-merge-approved-child-immediately.md)
 - [上下文按需披露](../product/product-design.md#9-上下文与记忆)

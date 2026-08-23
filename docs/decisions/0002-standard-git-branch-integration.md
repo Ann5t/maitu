@@ -32,6 +32,7 @@ Git 是文件、提交、diff、冲突和合并结果的权威来源。Fudian �
 
 ## 相关资料
 
-- [产品设计：成果与拟合并](../product/product-design.md#45-contributionartifactevidence)
+- 后续决定：[成果摘要属于拟合并候选，不设独立 Contribution](0012-merge-candidate-outcome-summary.md)，替代了本记录中继续保留独立 Contribution 描述对象的部分。
+- [产品设计：拟合并与退回](../product/product-design.md#53-拟合并与退回)
 - [当前选择性整合实现](../../src/application/workspaces.rs)
 - [Git merge 官方文档](https://git-scm.com/docs/git-merge)
