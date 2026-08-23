@@ -21,6 +21,7 @@ jobs:
       - name: Check out source without persisted credentials
         uses: actions/checkout@v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Run the complete isolated quality gate
