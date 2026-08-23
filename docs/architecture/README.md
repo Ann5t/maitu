@@ -29,3 +29,5 @@
 第一版的项目 GitHub 远端采用单写模式：只允许当前 Fudian 实例更新 branch，push 前验证远端未发生意外变化，见[决策 0021](../decisions/0021-fudian-is-sole-github-writer.md)。
 
 目标 MergeGate 首层只显示简短判断，Evidence 由工具链自动采集并按需展开；用户可以例外接受普通质量缺口，但不能绕过候选身份与内容完整性，见[决策 0022](../decisions/0022-concise-merge-evidence-and-user-waiver.md)。
+
+目标 Session 默认继承精简但不可丢失的上下文，能看到项目地图的被动摘要，并在安全动作边界接收用户消息或形成暂停检查点，见[决策 0023](../decisions/0023-session-context-and-safe-message-delivery.md)。
