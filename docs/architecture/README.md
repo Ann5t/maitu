@@ -19,3 +19,5 @@
 当前实现仍有独立的 Proposal 提交、审批路由和视图；目标交互改为在来源对话中持续修订并接受准确版本，见[决策 0016](../decisions/0016-inline-versioned-proposal-conversation.md)。
 
 当前 ProjectProposal 获批后只创建 Project 和根 BranchProposal 草稿；目标产品改为一次授权直接创建项目仓库、根 GoalBranch、目标说明 v1 和首个 Session，见[决策 0017](../decisions/0017-project-proposal-starts-project.md)。
+
+当前恢复能力以整实例迁移和跨存储调和为主；目标产品还要求把单个项目的 Git/Git LFS、完整 Session 对话和全部工作流状态导出成一个可校验文件，并可导入新实例，见[决策 0018](../decisions/0018-complete-project-export.md)。
