@@ -25,3 +25,5 @@
 本目录中的现有 schema 和兼容路径尚未成为正式测试基线。用户决定不保留或转换这些开发样本；目标领域模型审定后将干净重建实现，正式测试开始后才承担前向迁移和数据保留义务，见[决策 0019](../decisions/0019-pretest-clean-domain-rebuild.md)。
 
 目标产品允许新建仓库或接入已有 GitHub 仓库，不把 Fudian 内部状态写进项目目录，并默认自动推送用户已接受的默认分支更新，见[决策 0020](../decisions/0020-clean-project-repository-and-github-sync.md)。
+
+第一版的项目 GitHub 远端采用单写模式：只允许当前 Fudian 实例更新 branch，push 前验证远端未发生意外变化，见[决策 0021](../decisions/0021-fudian-is-sole-github-writer.md)。
