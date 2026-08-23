@@ -71,3 +71,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标 AI 路由在每项能力中只选择一个当前模型，Session 启动时冻结配置快照且第一版没有备用链；每次调用如实记录 Provider 能够提供的版本身份，见[决策 0042](../decisions/0042-session-pinned-ai-without-fallback.md)。
 
 目标存储把持久事实、可重建现场和临时运行材料分开计量；后两类第一版默认保留，不按年龄自动删除，用户先看到占用、可释放量和后果再主动清理，见[决策 0043](../decisions/0043-retain-by-default-with-storage-estimates.md)。
+
+目标产品第一版只实现完整的单项目导出与导入，不提供整实例自动备份或恢复；当前整实例脚本仍是现有开发运维事实，不因此成为目标产品合同，见[决策 0044](../decisions/0044-project-export-only-no-instance-backup.md)。
