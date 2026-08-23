@@ -31,3 +31,5 @@
 目标 MergeGate 首层只显示简短判断，Evidence 由工具链自动采集并按需展开；用户可以例外接受普通质量缺口，但不能绕过候选身份与内容完整性，见[决策 0022](../decisions/0022-concise-merge-evidence-and-user-waiver.md)。
 
 目标 Session 默认继承精简但不可丢失的上下文，能看到项目地图的被动摘要，并在安全动作边界接收用户消息或形成暂停检查点，见[决策 0023](../decisions/0023-session-context-and-safe-message-delivery.md)。
+
+目标工具系统在统一目录下区分插件能力与环境资源，按内容复用不可变工具和包，为每个 Session 隔离环境并允许短期热 Worker，见[决策 0024](../decisions/0024-unified-tools-with-isolated-reused-environments.md)。
