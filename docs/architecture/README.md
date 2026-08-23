@@ -77,3 +77,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标 AI 首批使用个人连接：Rust Agent 核心通过固定版本的轻量 Pi Provider Driver 使用 Codex 账号授权，不安装完整 Codex；GPT Image 2 使用独立的个人 API Key，之后再接入 DeepSeek 与 MiniMax，见[决策 0045](../decisions/0045-lightweight-personal-ai-provider-bootstrap.md)。
 
 项目 Agent 始终使用当前负责人的个人 AI 连接；负责人转交会在安全边界结束活动工作轮次并以新连接创建后继 Session。Codex 设备码登录和 Provider 适配运行在不挂载项目现场的共享内部 AI Driver 容器中，见[决策 0046](../decisions/0046-project-owner-ai-usage-and-isolated-driver.md)。
+
+Fudian 的持久事件与 `ContextSnapshot` 是 Agent 记忆权威，Provider 线程只作缓存；长上下文通过不删除原文的版本化压缩控制，模型或进程中断从最后一个完整步骤恢复，见[决策 0047](../decisions/0047-fudian-owned-agent-context-and-recovery.md)。
