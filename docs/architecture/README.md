@@ -11,3 +11,5 @@
 具体接口字段放在[接口参考](../reference/README.md)。已完成 BranchProposal 的目标契约和验收证据保存在[历史归档](../archive/README.md)，避免把过去的实施计划误当作现行架构。
 
 当前实现及本目录仍使用 `GoalContractVersion` 名称；目标产品已经决定将其视为 GoalBranch 内部的“目标说明版本”，迁移边界见[决策 0013](../decisions/0013-goal-definition-is-branch-version.md)。
+
+当前实现把 ReviewGate、ReviewDecision、Integration 和对应 ActionRun 分开持久化；目标产品把它们视为同一 MergeGate 的内部记录，见[决策 0014](../decisions/0014-single-merge-gate-aggregate.md)。

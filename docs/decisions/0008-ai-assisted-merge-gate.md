@@ -35,6 +35,7 @@ Merge Gate 固定冻结子 HEAD、父预期 HEAD、目标契约、环境和证�
 
 ## 相关资料
 
+- 后续聚合决定：[一次拟合并只对应一个 MergeGate](0014-single-merge-gate-aggregate.md)。候选、整合尝试、AI 审核和决定都是 Gate 内部记录。
 - 后续术语决定：[目标说明是 GoalBranch 的内部版本](0013-goal-definition-is-branch-version.md)。本记录中的“目标契约”对应候选冻结时的当前目标说明版本。
 - [标准 Git 整枝合并](0002-standard-git-branch-integration.md)
 - [项目文件使用 Git 与标准 Git LFS](0007-standard-git-lfs-for-project-files.md)

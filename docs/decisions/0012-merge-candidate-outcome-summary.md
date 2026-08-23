@@ -35,6 +35,7 @@
 
 ## 相关资料
 
+- [一次拟合并只对应一个 MergeGate](0014-single-merge-gate-aggregate.md)
 - [目标枝干只通过标准 Git 合并回流](0002-standard-git-branch-integration.md)
 - [持久文件只进入项目 Git 或 Git LFS](0011-retained-files-live-in-project-git.md)
 - [产品设计：候选成果摘要与 Evidence](../product/product-design.md#45-候选成果摘要与-evidence)
