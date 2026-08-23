@@ -69,3 +69,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标账号使用一次性初始化码建立首个管理员，管理员以一次性临时密码创建后续账号；每个项目只保留一名负责人，负责人停用时项目在安全点暂停并等待转交，见[决策 0041](../decisions/0041-account-bootstrap-and-single-project-owner.md)。
 
 目标 AI 路由在每项能力中只选择一个当前模型，Session 启动时冻结配置快照且第一版没有备用链；每次调用如实记录 Provider 能够提供的版本身份，见[决策 0042](../decisions/0042-session-pinned-ai-without-fallback.md)。
+
+目标存储把持久事实、可重建现场和临时运行材料分开计量；后两类第一版默认保留，不按年龄自动删除，用户先看到占用、可释放量和后果再主动清理，见[决策 0043](../decisions/0043-retain-by-default-with-storage-estimates.md)。
