@@ -41,5 +41,7 @@
 - [0036：目标图使用语义缩放画布和稳定流程形状](0036-semantic-zoom-goal-canvas.md)
 - [0037：Session 工作现场按 Agent 当前动作自动跟随](0037-action-following-session-worksite.md)
 - [0038：Leptos Web 工作台配合可补齐事件流](0038-leptos-web-workbench-and-replayable-streams.md)
+- [0039：公网 IP 仅作临时验收，正式入口切换域名](0039-temporary-public-ip-before-domain.md)
+- [0040：邮件只发送需要处理的通知](0040-actionable-email-notifications.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

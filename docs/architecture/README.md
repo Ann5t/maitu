@@ -61,3 +61,7 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标 Session 工作现场按实际文件、终端、浏览器与对话动作出现并自动跟随，用户可固定视图；实时状态通过可补齐的有序事件流恢复，手机使用单现场展开，见[决策 0037](../decisions/0037-action-following-session-worksite.md)。
 
 目标交互前端使用 Leptos/WebAssembly 并保留 Axum 显式 API；CodeMirror、xterm.js 与 ELK.js 通过固定适配层提供浏览器底层能力，SSE 负责可补齐状态流，WebSocket 只用于短期双向工具现场，见[决策 0038](../decisions/0038-leptos-web-workbench-and-replayable-streams.md)。
+
+目标部署允许先用可信的短期 IP 证书完成真实设备公网验收，随后关闭 IP 入口并切换正式域名；只有 Caddy 暴露 `80/443`，见[决策 0039](../decisions/0039-temporary-public-ip-before-domain.md)。
+
+目标站外通知首选 SMTP 邮件，只发送需要人工决定或系统无法自行恢复的状态；同一状态一次通知、24 小时后至多再提醒一次，见[决策 0040](../decisions/0040-actionable-email-notifications.md)。
