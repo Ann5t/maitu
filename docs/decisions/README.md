@@ -21,5 +21,6 @@
 - [0016：Proposal 是原对话中的版本化提案卡](0016-inline-versioned-proposal-conversation.md)
 - [0017：接受 ProjectProposal 直接启动项目](0017-project-proposal-starts-project.md)
 - [0018：单项目导出包含完整持久工作现场](0018-complete-project-export.md)
+- [0019：正式测试前按最终领域模型干净重建](0019-pretest-clean-domain-rebuild.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
