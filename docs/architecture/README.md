@@ -47,3 +47,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标调度器按服务器和 Provider 资源限制并行运行 Session，其余工作持久排队；队列默认按批准时间并允许用户提升优先级，所有项目共同受实例级 AI 用量提醒与硬上限约束，见[决策 0030](../decisions/0030-resource-aware-session-scheduling.md)。
 
 目标 AI 设置把 API 或账号登录等连接方式与模型用途分开；模型可勾选七类媒体能力，默认文字模型在同一 Session 内按需调用其他已配置能力，见[决策 0031](../decisions/0031-capability-based-ai-configuration.md)。
+
+目标产品由首个注册账号成为实例管理员，后续账号由管理员创建；想法按账号隔离，项目成员分负责人和参与者，管理员介入项目必须明确接管并审计，见[决策 0032](../decisions/0032-admin-created-accounts-and-project-roles.md)。
