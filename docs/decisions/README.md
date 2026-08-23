@@ -44,5 +44,6 @@
 - [0039：公网 IP 仅作临时验收，正式入口切换域名](0039-temporary-public-ip-before-domain.md)
 - [0040：邮件只发送需要处理的通知](0040-actionable-email-notifications.md)
 - [0041：账号一次性初始化且项目保持单一负责人](0041-account-bootstrap-and-single-project-owner.md)
+- [0042：Session 固定 AI 配置且第一版不自动换模型](0042-session-pinned-ai-without-fallback.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
