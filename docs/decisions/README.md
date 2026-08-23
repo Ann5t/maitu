@@ -18,5 +18,6 @@
 - [0013：目标说明是 GoalBranch 的内部版本](0013-goal-definition-is-branch-version.md)
 - [0014：一次拟合并只对应一个 MergeGate](0014-single-merge-gate-aggregate.md)
 - [0015：待我处理是来源状态的汇总视图](0015-attention-is-derived-view.md)
+- [0016：Proposal 是原对话中的版本化提案卡](0016-inline-versioned-proposal-conversation.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
