@@ -79,3 +79,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 项目 Agent 始终使用当前负责人的个人 AI 连接；负责人转交会在安全边界结束活动工作轮次并以新连接创建后继 Session。Codex 设备码登录和 Provider 适配运行在不挂载项目现场的共享内部 AI Driver 容器中，见[决策 0046](../decisions/0046-project-owner-ai-usage-and-isolated-driver.md)。
 
 Fudian 的持久事件与 `ContextSnapshot` 是 Agent 记忆权威，Provider 线程只作缓存；长上下文通过不删除原文的版本化压缩控制，模型或进程中断从最后一个完整步骤恢复，见[决策 0047](../decisions/0047-fudian-owned-agent-context-and-recovery.md)。
+
+第一版工具环境由 Tool Broker 组合 OCI Worker、项目原生锁文件和受控共享缓存；不同 Session 只复用不可变内容，热 Worker 只属于同一 Session 与环境指纹，见[决策 0048](../decisions/0048-oci-workers-with-native-package-backends.md)。

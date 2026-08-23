@@ -375,6 +375,8 @@ Agent 不得使用 `apt`、裸 `pip install`、`curl | sh` 等方式为自己改
 
 工具调用关系不单独形成铺满项目图的新图层。工作现场只显示当前动作及必要进度，例如“正在运行 Playwright 测试”；完成后的版本、参数、日志、耗时、输出文件和 Evidence 默认收在“运行记录”中。插件设置页才集中显示各版本占用空间、当前使用者、更新、停用与可清理状态。
 
+第一版环境后端使用 OCI Worker 与各语言原生锁文件和解析器，不建立所有生态都必须进入的 Nix 总环境。OCI 层、下载内容和按完整输入键控的安全编译结果可以跨 Session 复用；可写 home、进程、环境目录和临时构建状态不能跨 Session 共享。Rust、Python、Node、C/C++ 与 Playwright 的后端差异由 Tool Broker 隐藏，普通项目无需为进入 Fudian 改写成专用工程。
+
 ## 12. 数据、Git 与项目文件
 
 Fudian 运行时不是一个包住全部项目的“总 Git”或父仓库。每个正式 Project 拥有一个逻辑独立的托管 Git 仓库和项目级 Git LFS 命名空间；该项目的 GoalBranch 都是这个仓库中的 branch。每个项目可以绑定并推送到自己对应的 GitHub 仓库。不同项目可以共用物理存储服务，但不能通过嵌套仓库、submodule 或父级 Git 历史拼成一棵总仓库。

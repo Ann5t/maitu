@@ -42,3 +42,5 @@ Session 默认只获得插件 ID、名称和一句能力摘要。Agent 选择能
 - [产品设计：中央插件与无状态工具系统](../product/product-design.md#11-中央插件与无状态工具系统)
 - [Session 继承精简上下文并在安全边界接收消息](0023-session-context-and-safe-message-delivery.md)
 - [当前工具协议](../reference/tool-protocol.md)
+
+后续由[决策 0048](0048-oci-workers-with-native-package-backends.md)确定第一版采用 OCI Worker、原生依赖后端和受控共享缓存，不采用 Nix 总环境。
