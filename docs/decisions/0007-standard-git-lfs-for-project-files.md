@@ -35,6 +35,7 @@ Git LFS 服务的实际对象可以保存在本地文件系统、S3 或 MinIO。
 
 ## 相关资料
 
-- [产品设计：数据、Git 与产物](../product/product-design.md#12-数据git-与产物)
+- 后续决定：[持久文件只进入项目 Git 或 Git LFS](0011-retained-files-live-in-project-git.md)，替代了本记录中把长期证据和运行输出留在 Artifact 仓库的部分。
+- [产品设计：数据、Git 与项目文件](../product/product-design.md#12-数据git-与项目文件)
 - [Git LFS 官方规范](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md)
 - [Git LFS 官方说明](https://git-lfs.com/)

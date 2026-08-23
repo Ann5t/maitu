@@ -36,4 +36,4 @@ PostgreSQL 管理项目、目标、Session、审批、权限和运行状态；Gi
 
 - [目标枝干与 Git branch 一一对应](0003-goal-branch-git-identity.md)
 - [项目文件使用 Git 与标准 Git LFS](0007-standard-git-lfs-for-project-files.md)
-- [产品设计：数据、Git 与产物](../product/product-design.md#12-数据git-与产物)
+- [产品设计：数据、Git 与项目文件](../product/product-design.md#12-数据git-与项目文件)
