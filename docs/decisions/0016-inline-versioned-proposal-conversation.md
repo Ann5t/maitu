@@ -35,6 +35,7 @@ MergeGate 采用相同的“不离开现场、可以继续追问”体验，但�
 
 ## 相关资料
 
+- [接受 ProjectProposal 直接启动项目](0017-project-proposal-starts-project.md)
 - [目标说明是 GoalBranch 的内部版本](0013-goal-definition-is-branch-version.md)
 - [一次拟合并只对应一个 MergeGate](0014-single-merge-gate-aggregate.md)
 - [产品设计：Proposal 对话与 BranchProposal](../product/product-design.md#44-proposal-对话与-branchproposal)

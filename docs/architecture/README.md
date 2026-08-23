@@ -17,3 +17,5 @@
 当前实现使用独立 `goal_attention_items` 保存待处理状态；目标产品改为直接汇总 Session、目标草稿、MergeGate 和工具请求自身的等待状态，见[决策 0015](../decisions/0015-attention-is-derived-view.md)。
 
 当前实现仍有独立的 Proposal 提交、审批路由和视图；目标交互改为在来源对话中持续修订并接受准确版本，见[决策 0016](../decisions/0016-inline-versioned-proposal-conversation.md)。
+
+当前 ProjectProposal 获批后只创建 Project 和根 BranchProposal 草稿；目标产品改为一次授权直接创建项目仓库、根 GoalBranch、目标说明 v1 和首个 Session，见[决策 0017](../decisions/0017-project-proposal-starts-project.md)。
