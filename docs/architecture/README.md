@@ -65,3 +65,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标部署允许先用可信的短期 IP 证书完成真实设备公网验收，随后关闭 IP 入口并切换正式域名；只有 Caddy 暴露 `80/443`，见[决策 0039](../decisions/0039-temporary-public-ip-before-domain.md)。
 
 目标站外通知首选 SMTP 邮件，只发送需要人工决定或系统无法自行恢复的状态；同一状态一次通知、24 小时后至多再提醒一次，见[决策 0040](../decisions/0040-actionable-email-notifications.md)。
+
+目标账号使用一次性初始化码建立首个管理员，管理员以一次性临时密码创建后续账号；每个项目只保留一名负责人，负责人停用时项目在安全点暂停并等待转交，见[决策 0041](../decisions/0041-account-bootstrap-and-single-project-owner.md)。
