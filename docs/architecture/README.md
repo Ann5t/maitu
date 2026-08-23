@@ -41,3 +41,5 @@
 Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料、Assets、MCP 与专用 Runtime 按复杂度选择，见[决策 0027](../decisions/0027-minimal-native-plugin-layout.md)。
 
 目标插件只有在受控开发沙箱通过安装后才能供 Session 使用；第一版无公共市场，网络、秘密和 worktree 输入输出都由 Broker 最小授权，见[决策 0028](../decisions/0028-controlled-plugin-development-and-sandbox.md)。
+
+目标调度没有单独过夜模式：获批 Session 在服务器持续运行，等待只阻塞来源枝干，其他合格叶子继续；新分支仍必须人工批准，见[决策 0029](../decisions/0029-continuous-server-execution-with-localized-blocking.md)。
