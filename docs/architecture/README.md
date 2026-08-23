@@ -23,3 +23,5 @@
 当前恢复能力以整实例迁移和跨存储调和为主；目标产品还要求把单个项目的 Git/Git LFS、完整 Session 对话和全部工作流状态导出成一个可校验文件，并可导入新实例，见[决策 0018](../decisions/0018-complete-project-export.md)。
 
 本目录中的现有 schema 和兼容路径尚未成为正式测试基线。用户决定不保留或转换这些开发样本；目标领域模型审定后将干净重建实现，正式测试开始后才承担前向迁移和数据保留义务，见[决策 0019](../decisions/0019-pretest-clean-domain-rebuild.md)。
+
+目标产品允许新建仓库或接入已有 GitHub 仓库，不把 Fudian 内部状态写进项目目录，并默认自动推送用户已接受的默认分支更新，见[决策 0020](../decisions/0020-clean-project-repository-and-github-sync.md)。
