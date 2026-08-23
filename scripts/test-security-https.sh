@@ -183,7 +183,7 @@ docker run -d --name "$security_app" --network "$security_network" \
   --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
   --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
   --mount type=volume,src=fudian_rust_target,dst=/app/target \
-  fudian-nextgen-app:dev cargo run --locked >/dev/null
+  fudian-nextgen-app:latest cargo run --locked >/dev/null
 
 for security_attempt in $(seq 1 90); do
   if secure_curl --fail "$security_origin/api/health" >/dev/null 2>&1; then

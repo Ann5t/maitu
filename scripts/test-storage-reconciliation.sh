@@ -67,7 +67,7 @@ run_maintenance() {
     --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
     --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
     --mount type=volume,src=fudian_rust_target,dst=/app/target \
-    -w /app fudian-nextgen-app:dev \
+    -w /app fudian-nextgen-app:latest \
     cargo run --quiet --locked --bin fudian-maintenance -- "$@"
 }
 
@@ -100,7 +100,7 @@ docker run -d --name "$storage_app" --network "$storage_network" \
   --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
   --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
   --mount type=volume,src=fudian_rust_target,dst=/app/target \
-  fudian-nextgen-app:dev cargo run --quiet --locked >/dev/null
+  fudian-nextgen-app:latest cargo run --quiet --locked >/dev/null
 storage_port="$(docker port "$storage_app" 3000/tcp | sed -n 's/.*://p')"
 storage_base="http://127.0.0.1:$storage_port"
 for storage_attempt in $(seq 1 60); do
