@@ -8,5 +8,6 @@
 - [0003：目标枝干与 Git branch 一一对应](0003-goal-branch-git-identity.md)
 - [0004：只有叶子目标枝干运行工作 Agent](0004-leaf-only-agent-execution.md)
 - [0005：获批子枝干立即合入父枝干](0005-merge-approved-child-immediately.md)
+- [0006：父枝干更新按需披露给运行中的子枝干](0006-parent-update-disclosure.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
