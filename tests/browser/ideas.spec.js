@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 const baseURL = process.env.BASE_URL;
-const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/screenshots';
+const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/assets/screenshots';
 
 test.use({
   baseURL,

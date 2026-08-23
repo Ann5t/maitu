@@ -1,0 +1,314 @@
+# Fudian 第一阶段：12 方面总验收矩阵
+
+> 历史归档：本文保留当时的目标、过程或证据，不定义当前产品行为。
+
+- Goal：`01a024d6-1224-7fe1-a7f2-ea8dafd226e4`
+- 当前工作枝干：`feat/goal-branch-core-v0.1`
+- 产品语义来源：[`product-design.md`](../../../product/product-design.md)
+- 状态：执行中；本文件是 12 个方面是否真正完成的唯一总表
+
+## 使用规则
+
+这张表由 AI 维护，不要求用户填写。用户继续用自然语言表达意图和感受，系统负责把反馈落到相应方面、契约版本和验收证据中。
+
+状态只使用：
+
+- **未开始**：尚无实现；
+- **仅设计**：有明确协议但没有可运行闭环；
+- **原型**：能够演示，但边界、恢复或安全性不足；
+- **部分实现**：主要路径可运行，仍缺少列出的必要验收；
+- **待用户判断**：机器门已通过，但主观结果尚未被用户接受；
+- **完成**：本项全部必要验收通过，主观项已被用户接受或明确有理由豁免。
+
+“Goal 完成”不能由完成项的平均值代替：12 项必须全部为“完成”，或者用户对具体未完成项作出有理由、可追溯的豁免。外部账号、域名、证书或真实生产切换不在默认授权中；可以完成可部署实现与隔离演练，但真实外部操作必须暂停请求授权。
+
+## 总表
+
+| # | 方面 | 当前状态 | 已有基础 | 阻止完成的主要缺口 | 用户判断点 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 产品定位与“想法 / 项目”两级空间 | 待用户判断 | 想法版本/关系、文件/图片/语音、多来源 ProjectProposal、精确来源、原子立项及两种投影均已验证 | 旧直建兼容入口的最终迁移时机；用户尚未选择默认投影并接受手感 | 想法空间的组织方式与手感 |
+| 2 | 核心领域模型 | 完成 | 稳定聚合/状态约束、真实 Git/worktree、单写 Lease，以及同一 Session 内 ActionRun/Worker 崩溃恢复均已验证 | 无本阶段必要缺口；旧 DAG/旧 ActionRun 保持兼容且不被重解释 | 用户已明确接受“一目标一枝干、Session 为枝干节点”的语义 |
+| 3 | 目标契约与探索型目标 | 完成 | 最少表单、按需细节、不可变版本/差异/来源、人工决定、安全暂停，以及带预算/候选/收敛条件的探索/混合模式均已验证 | 无本阶段必要缺口；后续只能通过新契约版本演化，不能静默降低标准 | 用户已接受“未知可诚实保留、按需披露、灵感持续演化契约”的语义 |
+| 4 | 执行、暂停、拆分、拟合并与回流 | 完成 | 完整状态机、持久 ActionRun、冻结候选、独立复验、选择性父整合、Git CAS、冲突暂停与崩溃恢复均已验证 | 无领域闭环缺口；暂停和集成的视觉表达归第 11 项，不反向改变领域事实 | 用户已接受“未达成就继续或拆分，只有达成后才拟合并；一枝干单写”的语义 |
+| 5 | 上下文、记忆与渐进式披露 | 完成 | 精确父快照、不可折叠契约/权限信封、完整来源目录、来源边、三层按需读取审计与可重建派生索引均已验证 | 无本阶段必要缺口；Git commit 来源由 BP-04 以既定 Artifact/来源边协议补入 | 用户已接受按需/渐进式披露原则；具体视觉密度仍归第 11 项判断 |
+| 6 | 单写者、worktree、权限与 Runner 隔离 | 完成 | 真实 bare repo/branch/worktree、不可变权限和 Lease、fencing、断网无能力 Worker、资源上限、输出/删除清单及 Git CAS 均已通过攻击/竞态测试 | 联网与外部副作用适配器属于第 7 项；不存在适配器时明确拒绝，不降级放权 | 用户已接受 Session 内固定权限免逐次审核；高风险能力继续按插件适配器细化 |
+| 7 | 中央插件、Tool Broker 与版本环境 | 待用户判断 | 签名安装/撤销、摘要绑定 Skill/reference、Session 渐进披露、冲突环境、四类 OCI Worker、Git CAS、PPTMaster 请求、物理 ToolLease、保留输出/审计、同源 endpoint proxy 及按需 UI 均已验证 | 无机器必要缺口；真实付费/授权插件仍须按具体插件单独授权 | 插件发现与运行现场手感 |
+| 8 | PostgreSQL、Git、文件、产物、证据、备份恢复 | 待用户判断 | 内容寻址输入/Artifact/Evidence、Git CAS/操作日志、稳定 reconcile、可逆 quarantine、v2 全量备份、空目标恢复、12→14 升级和旧应用回退均已验证 | 无机器必要缺口；真实异地备份位置和恢复频率属于部署选择 | 文件默认复制还是引用的体验 |
+| 9 | 持久调度、ActionRun、心跳、恢复与通知 | 完成 | PostgreSQL 队列、Worker/Action Lease、心跳/fencing、安全重排、人工暂停、取消、通知/outbox 及真实 ToolLease 恢复矩阵已验证 | 无本阶段必要缺口；具体站外适配器由私有部署配置，不存在时明确 suppressed | 用户已要求“暂停后让我知道”；所有需人工介入的恢复均生成站内待处理与通知 |
+| 10 | 测试、证据、独立 AI 审核与用户验收 | 完成 | 一键质量门覆盖单元/SQL/HTTP/浏览器/Git/OCI/调度恢复；Contribution、候选、审核与集成均绑定准确 commit/环境；独立只读 Worker 和父契约复验已验证 | 部署备份/回退演练归第 8、12 项；审核信息密度归第 11 项，不降低本项事实与权限门 | 用户仍可在第 11 项调整审核摘要的展示密度；AI 只能建议、用户最终决定的语义已接受 |
+| 11 | Git 图 + 工作现场式多设备前端 | 待用户判断 | `goal-worksite-v2` 已覆盖真实 Git/文件/行动/工具/插件/审核现场，三尺寸、键盘、无障碍与 100/300 大图预算均已验证；设置与显式明暗选择进入 Session 03 | 用户已退回无业务意义的左下版本徽章；仍需实际判断设置页、整体层级、密度和暂停/拟合并表达 | 设置/主题手感、布局、字号、密度、暂停/合并视觉 |
+| 12 | 私有部署、认证与安全运维 | 待用户判断 | 单 owner/恢复码/会话、CSRF/Origin、持久限速、可信代理、ToolLease 代理、HTTPS、安全 Compose、v2 恢复和应用回退均已验证 | 无候选实现缺口；真实域名/私人网络、CA、防火墙、异地备份及旧 DB `55432` 维护需用户授权 | 私人网络或公网域名，以及真实维护窗口 |
+
+## 逐项完成证据账本
+
+本表把“设计结论、可运行实现、验收证据、已知风险、恢复边界”固定到同一处。自动测试通过只能关闭机器条件；标为“待用户判断”的项目仍不能由这张表替用户接受。
+
+| # | 直接实现与自动化证据 | 人工证据状态 | 已知风险 | 可恢复边界 |
+| --- | --- | --- | --- | --- |
+| 1 | `0005/0006` 增量迁移；[`test-ideas-http.sh`](../../../../scripts/test-ideas-http.sh)、[`ideas.spec.js`](../../../../tests/browser/ideas.spec.js)、[`test-inputs-http.sh`](../../../../scripts/test-inputs-http.sh) | 两级空间语义已确定；默认投影、旧直建入口迁移和真实手感待用户判断 | 投影过早固化，或兼容入口绕过来源 Proposal | Idea/Revision/Origin 不可变；立项事务失败不产生半个 Project；投影不写领域事实，可切换或退回 |
+| 2 | `0002/0007/0009/0011`；[`test-goal-migrations.sh`](../../../../scripts/test-goal-migrations.sh)、[`test-goal-http.sh`](../../../../scripts/test-goal-http.sh)、[`test-workspace-runner-http.sh`](../../../../scripts/test-workspace-runner-http.sh) | 用户已接受“一目标一枝干、Session 是枝干节点” | 新旧 DAG/ActionRun 被错误混解，或崩溃制造伪 Session | 全部为增量表；旧 fixture 前后计数不变；Lease 恢复仍留在原 Session |
+| 3 | `0007`；[`test-goal-http.sh`](../../../../scripts/test-goal-http.sh)、[`workbench.spec.js`](../../../../tests/browser/workbench.spec.js) | 用户已接受诚实未知、最低充分明确度和契约渐进演化 | AI 伪造精确度或静默降低验收条件 | 契约版本不可变；候选可拒绝，旧接受版本保留；方向变化先暂停等待判断 |
+| 4 | `0011/0012`；[`test-scheduler-http.sh`](../../../../scripts/test-scheduler-http.sh)、[`test-review-integration-http.sh`](../../../../scripts/test-review-integration-http.sh) | 用户已接受“未达成继续/拆分，达成才拟合并”和用户终审 | Git、数据库与上下文跨存储中途失败，或父 ref 并发移动 | 冻结候选、fencing、Git CAS、幂等 Integration reconcile；不唯一时形成 Attention 而非猜测 |
+| 5 | `0008`；[`test-context-http.sh`](../../../../scripts/test-context-http.sh) | 用户已接受按需、渐进式披露 | 摘要遗漏硬约束，或外部资料污染指令 | 契约/权限信封不可折叠；权威目录和全文保留；派生索引可重建，读取留摘要审计 |
+| 6 | `0009`；[`test-workspace-runner-http.sh`](../../../../scripts/test-workspace-runner-http.sh) | 用户已接受枝干内固定权限、单写者和拆分后并行 | 容器逃逸、旁路写入、资源耗尽；Docker daemon 仍是平台信任边界 | Runner 无 Socket/home/网络能力且只读输入；输出层校验后 CAS 写回；Lease 可撤销，超限安全暂停 |
+| 7 | `0010/0011/0014`；[`test-plugin-images.sh`](../../../../scripts/test-plugin-images.sh)、[`test-real-plugins-http.sh`](../../../../scripts/test-real-plugins-http.sh)、[`test-tooling-http.sh`](../../../../scripts/test-tooling-http.sh) | 统一插件语义已确定；发现、Skill 披露和运行现场手感待用户判断 | 发布者密钥失陷、撤销、版本冲突；付费/授权软件不可假装可用 | 签名与资源摘要固定，EnvironmentManifest 不可变且隔离；撤销后拒绝新调用；ToolLease 到期清理；缺插件只建安装请求 |
+| 8 | `0004/0013`；[`test-inputs-http.sh`](../../../../scripts/test-inputs-http.sh)、[`test-storage-reconciliation.sh`](../../../../scripts/test-storage-reconciliation.sh)、[`test-backup-recovery.sh`](../../../../scripts/test-backup-recovery.sh) | 存储边界已确定；复制/引用默认值、异地位置与频率待用户判断 | 对象缺失/摘要不符、孤儿误删、备份不可恢复 | 内容寻址与跨存储日志；稳定扫描后只进可逆 quarantine；v2 只恢复到带标签空目标并做完整校验 |
+| 9 | `0011`；[`test-scheduler-http.sh`](../../../../scripts/test-scheduler-http.sh) | 用户已要求暂停后必须通知；站内闭环已满足 | 重复投递、迟到 Worker、未知外部副作用被盲重试；站外适配器未配置 | 持久队列/事件、Lease/fencing 和幂等键；仅 safe 自动重试，unknown/unsafe 暂停；站外缺失明确记 `suppressed` |
+| 10 | `0012`；[`quality-gate.sh`](../../../../scripts/quality-gate.sh)、[`test-review-integration-http.sh`](../../../../scripts/test-review-integration-http.sh) | 用户终审语义已接受；具体 AI provider 未锁定且本阶段未获私人凭据授权 | 审核者与工作 Agent 不独立、模型漏检，或测试结果与候选漂移 | 独立 Worker 身份、只读冻结现场、候选/环境/报告摘要绑定；AI 只建议；未配置真实 provider 时不得伪装已调用，最终仍由用户决定 |
+| 11 | [`test-workbench-http.sh`](../../../../scripts/test-workbench-http.sh)、[`test-workbench-browser.sh`](../../../../scripts/test-workbench-browser.sh)、[`test-workbench-large.sh`](../../../../scripts/test-workbench-large.sh) | 机器可读性和性能门通过；整体层级、密度及事件表达待用户实际使用判断 | 自动截图通过但真实工作仍难读；大图数据继续增长 | UI 只是可替换投影，不改领域状态；Session 01 反例与旧提交保留，可退回后建立下一 Session 继续 |
+| 12 | `0013`；[`test-security-https.sh`](../../../../scripts/test-security-https.sh)、[`test-secure-compose.sh`](../../../../scripts/test-secure-compose.sh)、[`test-backup-recovery.sh`](../../../../scripts/test-backup-recovery.sh) | 私有/公开模板均可运行；真实网络、CA、异地备份和维护窗口待用户授权 | 代理/密钥误配、公开端口、迁移失败；遗留 PostgreSQL `55432` 仍公开映射 | 默认私有模板仅回环 HTTPS 且数据库无端口；文件 secret、备份前置、空目标恢复和旧应用回退；真实现场授权前只读不改 |
+
+## 1. 产品定位与两级空间
+
+必须同时满足：
+
+- “想法”和“项目”是两个稳定一级空间，想法是项目上游而不是弱化项目；
+- 想法可以从一句话、文件、图片或语音开始，允许持续发展、关联和筛选；
+- 从想法形成项目必须经过可审查 Proposal，并保留来源和未采用内容；
+- 项目空间继续以目标枝干执行为中心，不退化成笔记或聊天列表；
+- 桌面、手机和平板的创建、查看和转化闭环通过；
+- 用户实际体验后接受信息架构。
+
+当前未知：想法更适合时间流、空间画布、轻量图还是混合投影。先实现领域与两种可替换投影，再请求用户判断，不把投影写成权威语义。
+
+当前候选（`0005_ideas_and_project_proposals.sql`、`idea-project-domain-v1.md`）：
+
+- `IdeaRevision`、`IdeaLink`、`ProjectProposalRevision` 和 `ProjectOrigin` 已按精确版本冻结并禁止覆盖；
+- 提案提交执行最低充分明确度校验，允许诚实未知；人工批准在同一事务创建兼容 Project、不可变来源和根 BranchProposal 草案；
+- 文件、图片、语音可信类型嗅探、内容寻址与下载，以及多想法来源可视选择已通过隔离拒绝路径；
+- `/ideas?view=stream|map`、详情页和 JSON 命令已通过隔离 HTTP 与 1440/820/390 Chromium；
+- 机器门已满足，但用户尚未接受默认投影与手感，因此状态只能是“待用户判断”，不得标为完成。
+
+## 2. 核心领域模型
+
+必须同时满足：
+
+- Project、GoalBranch、AgentSessionNode、BranchProposal、GoalContractVersion、Contribution、Artifact、Evidence、ReviewGate、ReviewDecision 和 Event 具有稳定 ID 与约束；
+- 一目标一枝干、一枝干同一时刻单写者、Proposal 批准前无正式执行现场；
+- Session 崩溃恢复不制造新主节点，审核退回或明确重新分配才创建下一 Session；
+- 旧 DAG 数据继续可读，增量迁移不自动篡改旧语义；
+- 并发、幂等、非法状态和数据库约束均有自动测试；
+- 真实 Git/worktree 身份与领域记录一致，而不是只保存占位字段。
+
+完成记录（`0002_goal_branch_core.sql`、`0007_goal_domain_v2.sql`、`0009_workspace_runner.sql`、`0011_action_scheduler.sql`）：
+
+- Project/GoalBranch/Session/Proposal/Contract/Contribution/Artifact/Evidence/Review/Event 均具稳定身份、聚合范围和数据库状态约束；
+- Proposal 批准前没有正式可写现场；批准后真实 branch/worktree、Session head 和单写 Lease 一一对应；
+- Worker 或 Web 服务崩溃只改变同一 Session 内的 ActionRun/Lease，不生成伪造的新主节点；只有审核退回或明确重新分配才建立下一 Session；
+- 空库、旧 DAG fixture、迁移重放、并发、幂等、非法转换、真实 Git 与服务重建恢复均已自动验证；用户已明确接受核心图语义，因此本项标为完成。
+
+## 3. 目标契约与探索型目标
+
+必须同时满足：
+
+- 契约支持结果、硬约束、偏好、未知、不做事项、验证、判断时机、停止条件与期望贡献；
+- 用户只审查短摘要和关键推断，详细字段按需披露；
+- AI 推断、用户事实和外部资料明确区分来源；
+- 目标执行中只能提出契约新版本，必须展示差异并由用户批准；
+- 探索型目标允许以减少不确定性为有效结果，并有预算、原型和判断点；
+- 不能靠删减验收条件宣布完成。
+
+完成记录（`0007_goal_domain_v2.sql`、[`core-domain-v2.md`](../../../architecture/core-domain-v2.md)）：
+
+- 契约支持 `delivery | exploration | hybrid`；探索/混合模式批准前必须具备预算或边界、候选产出和不确定性收敛方式；
+- 执行中修订生成不可变候选、逐字段差异和精确来源，只有用户能接受/拒绝；接受会安全暂停运行中的 Session，必须显式恢复；
+- 页面仍先展示四类最低信息，探索字段置于按需展开区；用户此前已接受未知可诚实保留、按需披露和灵感推动契约演化的规则；
+- 单元、迁移、真实 HTTP 与 Chromium 流程已覆盖拒绝、接受、版本不漂移和探索契约持久化，因此本项标为完成。
+
+## 4. 完整执行循环
+
+必须同时满足：
+
+- 正常推进、拟分支、请求判断、异常暂停、手动暂停、恢复、拟合并、退回、部分接受、接受和停止均有合法转换；
+- 每种暂停形成持久待处理项，包含原因、安全检查点、尝试、风险、用户动作和建议；
+- 拟合并冻结 Git、环境、文件、Contribution、证据和测试；
+- 未接受候选不影响父枝干；接受只回流选中的 Contribution；
+- 实际 Git 合并、冲突处理和父目标整合复验不能被 `not_attempted` 冒充；
+- 根目标只有用户可以最终确认完成。
+
+完成记录（`0011_action_scheduler.sql`、`0012_review_integration.sql`、[`review-integration-v1.md`](../../branch-proposals/review-integration-v1.md)）：
+
+- 枝干内推进由持久 ActionRun、Lease、心跳和 fencing 驱动；正常、判断、异常、手动、取消和停止均保留准确安全点、Attention 与 Notification；
+- `merge.propose` 从干净且无 active Lease 的真实 worktree 冻结契约、Contribution、Evidence、环境、HEAD/tree/snapshot 与完整摘要，并自动排队独立 Review Worker；
+- 用户接受只创建待执行 Integration；选中代码按绑定 Runner commit 的顺序在隔离候选中选择性应用，非代码结果经明确来源边进入父上下文，父 ref 在最终验证前保持不动；
+- Integration Worker 以父契约复验后才可 CAS 发布；内容冲突、父 ref 抢先移动、worktree 漂移、验证失败和旧 fencing 均安全暂停，CAS 后数据库前崩溃可幂等恢复；
+- 只有 Git、父 worktree/snapshot、数据库和上下文全部确认后子枝干才终结，父 Session 只恢复而不自动完成；根目标仍只能由用户在独立审核后确认完成，因此本项标为完成。
+
+## 5. 上下文与记忆
+
+必须同时满足：
+
+- 子枝干从准确父 Session 快照继承上下文目录，而非复制可变全文；
+- 默认上下文永远包含目标、硬约束、权限、当前状态和未解决项；
+- 决策、Artifact、Evidence、代码和外部资料都有来源边；
+- 摘要、全文索引和检索索引可以重建，不能覆盖权威事实；
+- Agent 可以按需读取摘要、片段和全文，调用进入审计；
+- 在固定窗口预算下用真实长项目验证不会遗漏已知关键约束。
+
+完成记录（`0008_context_memory.sql`、[`context-memory-v1.md`](../../../architecture/context-memory-v1.md)）：
+
+- 分支和续接前先封存准确父 Session 快照；子快照继承完整目录并保留父快照、来源 Session 和目录哈希；
+- 当前契约、祖先契约、权限、状态与未决事项形成数据库强制的不可折叠信封，目录预算不能删去它们；
+- Contribution、Evidence、Artifact、InputArtifact、审核决定、ToolCall 和 EnvironmentManifest 以准确来源版本登记，关键关系形成不可变来源边；
+- 默认目录、可检索分页目录、摘要/片段/全文读取和只存哈希的读取审计已形成真实 API；外部/用户内容明确是不可信数据；
+- 固定 12 项窗口下以 20 项长上下文验证窗口外检索、关键父约束、重放冲突、第二代重建与数据库负向约束，因此本项标为完成。
+
+## 6. worktree、权限与隔离
+
+必须同时满足：
+
+- GoalBranch 创建和维护真实 Git branch/worktree，并记录基线、HEAD 与脏状态；
+- 同一 worktree 同时只有一个写 Lease，子目标使用独立 worktree；
+- Runner 只读父快照，只写当前输出层，原子验证后回写；
+- 不暴露宿主机用户目录、SSH、私人浏览器数据或 Docker Socket；
+- 网络、文件、外部写操作、账号、付费与部署是显式能力；
+- CPU、内存、磁盘、进程数和时间均有限额，超限形成可恢复暂停；
+- 路径逃逸、符号链接、并发写、资源耗尽和恶意插件测试通过。
+
+完成记录（`0009_workspace_runner.sql`、[`workspace-runner-v1.md`](../../branch-proposals/workspace-runner-v1.md)）：
+
+- 每个目标枝干拥有确定性 Git branch/worktree；数据库的 HEAD/tree/snapshot 与磁盘实测互相核对，初始化的空仓库也通过严格 `git fsck`；
+- 不可变 CapabilityPolicy、单写 Lease 和单调 fencing 把 Session 写权固定在唯一现场，迟到 Worker 和旁路修改都不能发布；
+- 一次性 Runner 使用断网、只读输入/根文件系统、独立输出、无 capability、无 Docker Socket/宿主 home 及 CPU/内存/磁盘/PID/时间/日志上限；
+- 输出/删除清单、大小写碰撞、符号链接和路径逃逸攻击以及 Git compare-and-swap 竞态均已实测，因此本项标为完成。
+
+## 7. 中央插件与工具环境
+
+必须同时满足：
+
+- 插件包包含带摘要的 Manifest、按需 Skill/资源、结构化 Tool、Runtime、Assets 和自检；
+- 目录先披露简要能力，选择后再加载完整说明；
+- 同名多版本、依赖冲突和 `latest` 固定摘要可复现；
+- 普通调用使用临时 Worker，持续操作使用有到期/续期/日志的 ToolLease；
+- 工具结果绑定 Session、输入快照、EnvironmentManifest、版本、日志和产物；
+- 至少用真实 Rust、Python、C/C++ 与 Playwright 插件证明统一协议；
+- PPTMaster 等未安装能力通过同一插件 SDK、兼容夹具和中央安装请求接入，不能假装本机已有授权软件。
+
+BP-05/06/08/09/10 技术候选记录（`0010_signed_real_plugins.sql`、`0011_action_scheduler.sql`、`0014_plugin_resources.sql`、[`tooling-api-v1.md`](../../../reference/tooling-api-v1.md)）：
+
+- Ed25519 安装证明把规范 Manifest、OCI 镜像 ID、入口、Runner 与自检摘要固定为不可替换版本；撤销、冲突版本和 `latest` 解析均在运行前复核；
+- Rust、双冲突 Python、C/C++ 和 Playwright/Chromium 通过同一无状态 ToolCall/Runner 协议，Session 只保留源文件与产物；PPTMaster 只生成中央安装请求，不伪造可用性；
+- 持续 ToolLease 具有到期、续期、心跳、fencing、清理和明确保留输出；权威日志摘要/事件保留在数据库，原始输出受限并随 Runner 卷备份，孤儿只经保留期和可逆 quarantine；
+- Manifest 的 Skill/reference 路径与 SHA-256 进入签名边界，安装时必须提交逐字节匹配的完整不可变资源集合；Session Worker 只取得固定环境的 Skill，其他内容按准确插件三元组和路径读取，披露进入不可变审计；
+- BP-09 不再把内部 endpoint 交给浏览器，而是提供已认证、同源、目的 CIDR/头/大小受限的代理。技术必要条件已关闭；插件发现和运行现场的主观手感仍待用户判断。
+
+## 8. 数据、Git、文件与恢复
+
+必须同时满足：
+
+- PostgreSQL 保存关系与审计，Git 保存适合版本控制的文本，内容仓库存放不可变文件；
+- InputArtifact 的上传、哈希、类型、路径、去重、引用/复制和冻结边界完整；
+- 数据库提交与对象/Git 写入使用可恢复协议，故障不会产生不可解释的半状态；
+- 孤儿分段、对象和 worktree 有保留期、只读扫描、预览和可恢复清理；
+- 全量备份包含数据库、Git、对象、环境清单和配置元数据；
+- 在一次性环境完成从备份恢复、校验、升级和回退演练；
+- 真实数据迁移前后计数、约束和内容指纹可比较。
+
+BP-03/04/09 技术候选记录（`0013_private_security_recovery.sql`、`fudian-maintenance`、`backup-v2.sh`、`restore-v2.sh`）：
+
+- PostgreSQL 权威关系、Git 文本、内容寻址对象、InputArtifact、Evidence、EnvironmentManifest 和 Runner 输出均有明确所有权、摘要与来源；跨存储 Git 操作使用阶段日志和 CAS；
+- 调和扫描从权威引用出发区分 referenced、missing、digest mismatch 与 orphan。连续扫描结果稳定，四类孤儿经过默认保留期后也只移入 run 专属 quarantine，并可哈希一致地恢复；
+- v2 备份只读归档数据库、四类卷、可构建源码、迁移摘要和脱敏部署/镜像元数据，发布前验证逐文件与总校验和；恢复脚本只接受有专用标签的空库和空卷；
+- 隔离演练已完成 BP-08 的 12 迁移数据备份、空目标恢复、Git `fsck`、对象哈希、12→14 升级及 BP-08 应用回退。真实生产现场仍只做前后只读指纹核对；默认复制/引用体验待用户判断。
+
+## 9. 后台执行与恢复
+
+必须同时满足：
+
+- Session 拆成持久 ActionRun，队列、状态和幂等键存入数据库；
+- Worker 使用租约、心跳和 fencing token，过期 Worker 不能写回；
+- 重启后区分安全重试、需要人工确认和已发生外部副作用；
+- 用户可以暂停、继续和取消，等待状态不忙循环；
+- 失败通知包含完整暂停上下文并去重；
+- 站内待处理始终存在，站外通知使用可替换适配器；
+- 通过杀 Worker、重启服务、超时、重复投递和取消竞态测试。
+
+完成记录（`0011_action_scheduler.sql`、[`action-scheduler-v1.md`](../../branch-proposals/action-scheduler-v1.md)）：
+
+- 新 Goal 执行使用持久 `goal_action_runs`，不重解释旧 `action_runs`；Action request、attempt、fencing、Lease 与不可变 Event 都有数据库约束；
+- `FOR UPDATE SKIP LOCKED` 并发认领只产生一个 active Lease；服务被杀并重建后原 Worker 可续接，过期 fencing 不能迟到写回；
+- 只有 `safe` 任务自动重排，`unsafe/unknown` 和持续工具失联进入 waiting/exception pause，人工明确 retry/fail/cancel 才恢复；
+- 取消先到时 Worker 只能确认取消，不能提交成功；截止时间、最大尝试、空队列退避和通知去重均通过真实 HTTP/SQL；
+- 所有人工介入场景同事务形成完整 Attention 和站内通知。站外走 outbox；没有配置适配器时保存 `suppressed`，不冒充已发送；
+- 签名 Playwright ToolLease 已在只读 OCI 中真实启动，Web 服务重建后保持 endpoint；launcher 消失则过期、暂停并经清理 Worker 确认。用户已明确要求暂停后得到通知，因此本项标为完成。
+
+## 10. 测试、证据与审核
+
+必须同时满足：
+
+- 单元、约束、迁移、HTTP、浏览器、Runner、恢复和安全测试有一键入口；
+- 测试结果绑定准确 commit、Artifact、插件版本和环境指纹；
+- 工作 Agent 自查目标、依赖、假设、遗漏和风险；
+- 独立审核 Worker 在冻结现场重跑必要验证并寻找反例；
+- 用户能看到结论、差异、证据、风险和审核意见后作最终决定；
+- 子枝干接受后，父枝干必须重新整合验证；
+- CI 使用最小只读权限，不发布、不部署、不接触真实数据。
+
+完成记录（[`review-integration-v1.md`](../../branch-proposals/review-integration-v1.md)、`scripts/quality-gate.sh`）：
+
+- 工作 Agent 的代码 Contribution 必须绑定成功 RunnerJob、准确 base/head/tree、EnvironmentManifest、输出清单与证据；无法解释的 worktree HEAD 不能进入审核；
+- Review ActionRun 由调度器分配给与工作 Agent 不同的已注册 Worker；候选以只读挂载提供，报告严格绑定候选摘要、契约、Git 现场、环境、逐项检查与反例，错误观察值和旧 fencing 无法写回；
+- 用户决定前父现场不变；决定后仍由独立 Integration Worker 在隔离候选按父契约复验，只有物理 CAS 与跨存储确认完成才形成已集成事实；
+- 一键门覆盖格式、Clippy、Rust 单元、迁移/旧 fixture/SQL 负约束、HTTP、浏览器、真实 Git/Runner/OCI、Worker 重启、竞态、故障注入、非 root 只读发行镜像和残留检查；
+- CI 模板只运行同一隔离门，不发布、不部署、不挂真实卷。部署备份/回退的专门演练继续由第 8、12 项负责，不把它重复算作本项缺口，因此本项标为完成。
+
+## 11. 多设备项目工作台
+
+必须同时满足：
+
+- 管理视角清楚显示目标枝干、Session、运行、暂停、子目标、拟合并和待决定；
+- 工作现场能查看/操作文件、代码、浏览器、工具、测试、Contribution 和审核；
+- 投影可替换，不把布局选择写入领域状态；
+- 所有有意义文字不小于 `12px`，正文不小于 `14px`，正文对比度不低于 4.5:1；
+- 390px 手机、常见平板和 1440px 桌面无页面级横向溢出，核心操作可触达；
+- 键盘、焦点、表单错误、减少动画和基本语义可访问性通过；
+- 用真实大图、多 Session、多 Proposal、暂停和审核数据验证性能与层级；
+- 用户实际使用后明确接受，而非由截图测试代替品味判断。
+
+BP-08 候选（[`workbench-v2.md`](../../branch-proposals/workbench-v2.md)）：
+
+- 指挥条和筛选准确投影运行、待判断、ActionRun、审核/集成和未读通知，不写回领域状态；父子枝干以前序稳定排列，Session 通过 URL 深链；
+- 工作现场直接显示真实 Git workspace、输入/Runner 文件、ActionRun payload/result 与事件、ToolCall/ToolLease endpoint、Evidence、Contribution、通知和物理 Integration 阶段；
+- 插件目录按需披露准确版本、能力、工具、权限、Runtime、签名发布者与撤销状态；安装表单只创建幂等请求，不提供未签名安装捷径；
+- 1440/820/390 Chromium、最小字号/对比度、44px 核心触控、Tab/方向键/Enter、减少动画和无页面横向溢出已自动验证；
+- 隔离 `100 GoalBranch / 300 Session / 20 Proposal` 大图在 BP-10 收尾完整质量门中实测 TTFB 中位数 `86.227ms`、DOMContentLoaded `241.9ms`、筛选 `18.3ms`，均在契约预算内；
+- Session 01 的 `6–10px` 反例继续保留为退回记录。机器必要条件已经满足，但用户尚未实际接受候选，所以状态仍是“待用户判断”。
+
+## 12. 私有部署与安全运维
+
+必须同时满足：
+
+- 单用户初始化、登录、登出、会话轮换、密码/恢复凭据和审计可用；
+- 所有状态写请求具备 CSRF 防护，登录和高成本接口有限速；
+- Cookie、安全响应头、代理来源、上传和密钥处理有生产配置及测试；
+- 应用默认回环监听，数据库不公开，远程访问通过受控 HTTPS 反向代理或私人网络；
+- Compose 在中等服务器上有健康、资源限额、持久卷、日志轮换和升级顺序；
+- 备份前置、迁移、健康验收、失败回退和旧版本兼容完成隔离演练；
+- 电脑、手机和平板通过 HTTPS 完成登录和关键流程；
+- 未经用户提供域名/账号并显式授权，不执行真实公开部署。
+
+BP-09 技术候选记录（[`private-deployment-v1.md`](../../branch-proposals/private-deployment-v1.md)、`0013_private_security_recovery.sql`）：
+
+- setup token 单例初始化、Argon2id + pepper、一次性恢复码、随机摘要会话、轮换/到期/撤销、登出和安全审计已经由并发与恢复场景验证；
+- 浏览器写请求统一经过认证、精确 HTTPS Origin、CSRF 与 Fetch Metadata；登录/恢复/普通及高成本写使用持久多维速率桶，应用重启后仍生效；
+- 只有固定 Caddy 地址可提供转发身份；HSTS/CSP/no-store 等响应头、Secure/HttpOnly/Strict Cookie，以及不泄漏原始凭据的审计均由 HTTPS 测试验证；
+- 安全 Compose 实启验证文件型 secret、非 root/只读根、资源/PID/日志上限、持久卷、健康依赖、内部 edge/data/tools、只有 Caddy 加入 ingress，以及私有模式唯一 `127.0.0.1` HTTPS 端口；
+- Chromium 1440/820/390 的 setup、登录和关键项目现场，以及备份—空目标恢复—升级—旧应用回退均已专项通过。真实域名/私人网络选择、系统 CA、防火墙、异地备份和遗留 `55432` 维护仍须用户授权与验收。
+
+## 子目标实施顺序
+
+| BranchProposal | 覆盖方面 | 依赖 | 合并前证据 |
+| --- | --- | --- | --- |
+| BP-11A 可读性修正 | 11 | 当前 v0.1 | Chromium 字号/对比度/三尺寸 + 用户判断 |
+| BP-01 想法到项目（机器门完成，待用户判断） | 1、3、11 | 核心领域 | 领域/迁移/HTTP/浏览器已通过；默认投影与手感待用户判断 |
+| BP-02 契约与领域补全（逻辑闭环完成） | 2、3、4、8、10 | v0.1 | 契约/来源/Evidence/并发/撤回/停止 E2E；物理父整合归 BP-07 |
+| BP-03 上下文与来源（逻辑闭环完成） | 5、8 | BP-02 | 长上下文、来源追溯和重建测试已通过；Git 来源继续由 BP-04 接入 |
+| BP-04 worktree Runner（逻辑闭环完成） | 6、8 | BP-02 | Git 竞态、隔离、资源、删除与逃逸测试全部通过 |
+| BP-05 中央真实插件（逻辑闭环完成） | 7 | BP-04 | 签名 OCI、四类真实插件、冲突环境、Git CAS、撤销和既有 ToolLease 接管契约均已验证；物理持续 Lease 归 BP-06 |
+| BP-06 持久调度恢复（逻辑闭环完成） | 2、4、7、9、10 | BP-04、BP-05 | kill/recreate/timeout/cancel/重复投递、通知及物理 ToolLease 测试全部通过 |
+| BP-07 证据与审核闭环（逻辑闭环完成） | 4、10 | BP-03–06 | 冻结 commit/环境、独立只读复验、完整/部分父整合、冲突/CAS/崩溃恢复及根目标人工终结均已验证 |
+| BP-08 完整多设备工作台（机器门完成，待用户判断） | 11 | BP-01–07 | 100/300 大图、键盘、三尺寸、性能均通过；用户判断未替代 |
+| BP-09 私有部署安全（机器门完成） | 12、8、10 | BP-01–08 | 认证/CSRF/限速/HTTPS、调和、安全 Compose、恢复/升级/回退及总质量门均通过 |
+| BP-10 插件资源与 Session 披露（机器门完成，待用户判断） | 7、5、10 | BP-05、BP-06、BP-09 | 签名 Skill/reference、精确 EnvironmentManifest、按需读取/审计、撤销和真实 OCI 流程均通过；插件现场手感待用户判断 |
+
+每个 BP 未达成时继续当前 Session；需要并行或独立目标时才创建子枝干。每次拟合并都必须记录冻结候选和独立复验；用户未接受前只保留候选，不自行合入 `main`。

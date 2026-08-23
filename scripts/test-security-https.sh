@@ -20,7 +20,7 @@ security_password="Initial-passphrase-2026"
 security_new_password="Recovered-passphrase-2026"
 security_runner_image="${SECURITY_RUNNER_IMAGE:-fudian-nextgen-runner:latest}"
 security_browser_image="${PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright:v1.62.0-noble}"
-security_screenshot_dir="${SCREENSHOT_DIR:-$security_repo_root/docs/screenshots}"
+security_screenshot_dir="${SCREENSHOT_DIR:-$security_repo_root/docs/assets/screenshots}"
 
 # shellcheck source=scripts/docker-test-lib.sh
 . "$security_repo_root/scripts/docker-test-lib.sh"

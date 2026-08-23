@@ -2,13 +2,14 @@
 
 COMPOSE ?= docker compose -f compose.yaml
 
-.PHONY: help dev build start check test fmt lint db-shell backup logs down
+.PHONY: help dev build start check docs test fmt lint db-shell backup logs down
 
 help:
 	@echo "make dev       启动 Rust 开发服务和 PostgreSQL"
 	@echo "make build     构建生产镜像"
 	@echo "make start     启动生产镜像并复用现有数据卷"
-	@echo "make check     运行格式、Clippy 和测试"
+	@echo "make check     运行文档、格式、Clippy 和测试"
+	@echo "make docs      检查 Markdown 结构和本地链接"
 	@echo "make db-shell  进入 PostgreSQL"
 	@echo "make backup    备份数据库、产物和源码"
 
@@ -30,7 +31,10 @@ lint:
 test:
 	$(COMPOSE) run --rm --no-deps app cargo test --all-targets
 
-check: fmt lint test
+docs:
+	./scripts/check-docs.py
+
+check: docs fmt lint test
 
 db-shell:
 	$(COMPOSE) exec postgres psql -U fudian_nextgen -d fudian_nextgen

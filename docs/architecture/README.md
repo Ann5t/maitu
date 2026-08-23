@@ -1,0 +1,11 @@
+# 实现架构
+
+> 状态：已实现快照。这里描述当前代码和测试证明的边界，不替代仍在讨论的产品设计。
+
+- [总体架构](architecture.md)：部署单元、数据、一致性、安全和测试边界
+- [目标枝干领域](goal-branch-domain.md)：聚合、状态机和全局不变量
+- [目标契约与生命周期](core-domain-v2.md)：探索、Evidence、候选和终态
+- [想法与项目](idea-project-domain-v1.md)：Idea、ProjectProposal 和来源
+- [上下文与记忆](context-memory-v1.md)：继承、目录、渐进式披露和审计
+
+具体接口字段放在[接口参考](../reference/README.md)。已完成 BranchProposal 的目标契约和验收证据保存在[历史归档](../archive/README.md)，避免把过去的实施计划误当作现行架构。

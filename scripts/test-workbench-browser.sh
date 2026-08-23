@@ -7,7 +7,7 @@ browser_network="fudian-browser-test-$browser_suffix"
 browser_db="fudian-browser-db-$browser_suffix"
 browser_app="fudian-browser-app-$browser_suffix"
 browser_image="mcr.microsoft.com/playwright:v1.62.0-noble"
-browser_screenshot_dir="${SCREENSHOT_DIR:-$browser_repo_root/docs/screenshots}"
+browser_screenshot_dir="${SCREENSHOT_DIR:-$browser_repo_root/docs/assets/screenshots}"
 browser_worker_bootstrap="browser_worker_bootstrap_0123456789abcdef"
 
 cleanup_browser_stack() {

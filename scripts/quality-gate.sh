@@ -16,6 +16,8 @@ trap cleanup_quality_gate EXIT
 
 cd "$quality_repo_root"
 
+./scripts/check-docs.py
+
 docker pull postgres:17-alpine >/dev/null
 docker pull mcr.microsoft.com/playwright:v1.62.0-noble >/dev/null
 docker build --target development --tag fudian-nextgen-app:latest .

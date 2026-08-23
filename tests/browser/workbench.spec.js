@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const { randomUUID } = require('node:crypto');
 
 const baseURL = process.env.BASE_URL;
-const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/screenshots';
+const screenshotDir = process.env.SCREENSHOT_DIR || '/work/docs/assets/screenshots';
 const workerBootstrap = process.env.WORKER_BOOTSTRAP;
 
 async function completeIndependentReview(page, reviewGateId) {

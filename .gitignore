@@ -13,6 +13,8 @@
 !/secrets/.gitkeep
 *.log
 *.swp
+__pycache__/
+*.py[cod]
 .DS_Store
 .idea/
 .vscode/
