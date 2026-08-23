@@ -49,3 +49,7 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标 AI 设置把 API 或账号登录等连接方式与模型用途分开；模型可勾选七类媒体能力，默认文字模型在同一 Session 内按需调用其他已配置能力，见[决策 0031](../decisions/0031-capability-based-ai-configuration.md)。
 
 目标产品由首个注册账号成为实例管理员，后续账号由管理员创建；想法按账号隔离，项目成员分负责人和参与者，管理员介入项目必须明确接管并审计，见[决策 0032](../decisions/0032-admin-created-accounts-and-project-roles.md)。
+
+目标想法空间只保留“刚记下、在讨论、待立项”三阶段看板；ProjectProposal 在待立项阶段确认转化，接受后来源进入历史而项目直接启动，见[决策 0033](../decisions/0033-three-stage-idea-board.md)。
+
+目标产品在所有普通文字入口复用服务器侧腾讯语音识别，转写只形成可编辑草稿且默认删除临时录音；它与 Agent 的音频理解能力相互独立，见[决策 0034](../decisions/0034-system-wide-tencent-speech-input.md)。
