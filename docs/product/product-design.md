@@ -538,7 +538,9 @@ AI 可以在用户离开前于同一父 Session 中整理多个并行 BranchProp
 第一阶段正式形态是部署在中等性能服务器上的响应式 Web/PWA：
 
 - Docker Compose 负责可重复部署；
-- Rust Web Server 负责产品页面、API、审核和持久状态；
+- Rust Axum Server 负责显式 API、审核、持久状态和首屏渲染；
+- Leptos/WebAssembly 负责目标画布、实时工作现场和响应式客户端交互；
+- CodeMirror 6、xterm.js 和 ELK.js 通过固定版本适配层分别提供编辑/diff、终端和自动布局，不拥有领域事实；
 - PostgreSQL、各项目 Git 仓库与 Git LFS 对象使用持久存储；
 - Rust Runner/Tool Broker 负责中央插件、临时 Worker 和 Lease；
 - 通过并发上限和持久队列适配服务器资源；
@@ -547,6 +549,8 @@ AI 可以在用户离开前于同一父 Session 中整理多个并行 BranchProp
 - 可以先通过私人网络访问，公开域名部署需要受控反向代理；
 - 桌面原生壳不是第一阶段依赖，交互稳定后再评估；
 - 更新前备份，迁移可追踪，工具和数据版本可恢复。
+
+权威实时状态使用带单调位置、能够断线补齐的 SSE；用户命令走普通 HTTPS。只有交互式终端或远程浏览器控制等短期双向现场使用受 ToolLease 约束的 WebSocket。Rust 与浏览器依赖分别由 Cargo 和前端锁文件固定，生产环境只提供构建好的本地静态资源，不在运行时从公网下载库。
 
 ## 18. 不可违反的产品不变量
 

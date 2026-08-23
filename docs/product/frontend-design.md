@@ -89,12 +89,13 @@ Fudian 的界面应当像一个安静、精确、可以长期工作的项目控�
 
 ## 7. 交互实现选择
 
-当前页面由 Rust 在服务端生成 HTML。此阶段不为增加动效迁移到 Leptos、Dioxus 或其他客户端框架，因为那会同时改变渲染、状态同步和构建链。
+2026-08-24 的目标产品已经需要无限画布、实时现场、自动跟随和断线补齐，因此此前“继续 Maud 加少量脚本”的候选结论不再适用。
 
-- 现在使用 CSS、Web Animations API 和 View Transition API：零运行时依赖，不支持时自然退化，并尊重“减少动态效果”偏好。
-- 等后端出现稳定的 HTML 片段接口后，再评估 htmx 处理局部更新；不先引入库再寻找使用场景。
-- 只有目标图出现复杂的空间布局动画、手势和可中断编排后，才评估 Motion；普通折叠、切换和主题过渡不需要额外动画运行时。
-
-参考：[MDN View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API/Using)、[htmx 文档](https://htmx.org/docs/)、[Leptos Islands](https://book.leptos.dev/islands.html)、[Motion animate](https://motion.dev/docs/animate)。
+- 交互前端迁移为 Leptos/WebAssembly，Axum 保留显式领域 API 与首屏服务端渲染；
+- 目标图由 Rust 状态驱动 SVG，ELK.js 只在 Worker 中计算布局；
+- 文本编辑与 diff 使用 CodeMirror 6，终端显示使用 xterm.js；
+- 普通实时更新使用可补齐 SSE，用户命令使用 HTTPS，短期双向工具现场才使用 WebSocket；
+- 普通动效仍优先使用 CSS、Web Animations API 和 View Transition API，并尊重减少动态效果偏好；
+- 第一版只交付响应式 Web/PWA，不同时维护原生桌面和手机工程。
 
 第二轮候选把代表性手机目标现场从约 2920px 进一步收至 2187px；这是信息分组带来的结果，不是缩小字号或删除真实能力。全局成果入口、六项工作现场导航、英文眉题和大部分解释性小字已经移除。

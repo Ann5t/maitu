@@ -59,3 +59,5 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标图使用无限画布与语义缩放：实线代表目标、圆形代表 Session、菱形代表 MergeGate，暂停附着来源，方框只做枝干或子树聚合；自动时序布局允许用户移动整条子树，见[决策 0036](../decisions/0036-semantic-zoom-goal-canvas.md)。
 
 目标 Session 工作现场按实际文件、终端、浏览器与对话动作出现并自动跟随，用户可固定视图；实时状态通过可补齐的有序事件流恢复，手机使用单现场展开，见[决策 0037](../decisions/0037-action-following-session-worksite.md)。
+
+目标交互前端使用 Leptos/WebAssembly 并保留 Axum 显式 API；CodeMirror、xterm.js 与 ELK.js 通过固定适配层提供浏览器底层能力，SSE 负责可补齐状态流，WebSocket 只用于短期双向工具现场，见[决策 0038](../decisions/0038-leptos-web-workbench-and-replayable-streams.md)。
