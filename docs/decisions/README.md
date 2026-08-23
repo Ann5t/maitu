@@ -39,5 +39,6 @@
 - [0034：腾讯语音识别作为全系统可编辑语音输入](0034-system-wide-tencent-speech-input.md)
 - [0035：项目首页使用活跃项目卡片墙](0035-active-project-card-wall.md)
 - [0036：目标图使用语义缩放画布和稳定流程形状](0036-semantic-zoom-goal-canvas.md)
+- [0037：Session 工作现场按 Agent 当前动作自动跟随](0037-action-following-session-worksite.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
