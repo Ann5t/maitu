@@ -29,5 +29,6 @@
 - [0024：统一工具目录复用不可变资源并隔离 Session 环境](0024-unified-tools-with-isolated-reused-environments.md)
 - [0025：管理员安装插件且 Session 固定工具版本](0025-admin-plugin-install-and-pinned-session-tools.md)
 - [0026：工具能力由环境、适配器和 Agent 说明组合](0026-composable-tool-capability-model.md)
+- [0027：原生插件最少提供清单与隔离自检](0027-minimal-native-plugin-layout.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

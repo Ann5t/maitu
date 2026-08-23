@@ -37,3 +37,5 @@
 目标插件由管理员安装，获批 Session 可直接使用固定版本；升级不影响运行中环境，详细调用和版本占用只按需显示，见[决策 0025](../decisions/0025-admin-plugin-install-and-pinned-session-tools.md)。
 
 目标工具目录中的能力由共享环境、调用适配器和 Agent 说明组合；MCP、MCPB、OCI 只是统一 Tool Broker 合同的兼容方式，见[决策 0026](../decisions/0026-composable-tool-capability-model.md)。
+
+Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料、Assets、MCP 与专用 Runtime 按复杂度选择，见[决策 0027](../decisions/0027-minimal-native-plugin-layout.md)。
