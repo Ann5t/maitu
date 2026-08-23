@@ -32,5 +32,7 @@
 - [0027：原生插件最少提供清单与隔离自检](0027-minimal-native-plugin-layout.md)
 - [0028：插件开发、来源、联网与文件访问均受控](0028-controlled-plugin-development-and-sandbox.md)
 - [0029：服务器持续执行且等待只阻塞相关枝干](0029-continuous-server-execution-with-localized-blocking.md)
+- [0030：Session 按资源排队并受全局 AI 预算约束](0030-resource-aware-session-scheduling.md)
+- [0031：AI 连接与按模型能力配置相互分离](0031-capability-based-ai-configuration.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

@@ -43,3 +43,7 @@ Fudian 原生插件最少提供 `plugin.toml` 和隔离自检，Skill、资料�
 目标插件只有在受控开发沙箱通过安装后才能供 Session 使用；第一版无公共市场，网络、秘密和 worktree 输入输出都由 Broker 最小授权，见[决策 0028](../decisions/0028-controlled-plugin-development-and-sandbox.md)。
 
 目标调度没有单独过夜模式：获批 Session 在服务器持续运行，等待只阻塞来源枝干，其他合格叶子继续；新分支仍必须人工批准，见[决策 0029](../decisions/0029-continuous-server-execution-with-localized-blocking.md)。
+
+目标调度器按服务器和 Provider 资源限制并行运行 Session，其余工作持久排队；队列默认按批准时间并允许用户提升优先级，所有项目共同受实例级 AI 用量提醒与硬上限约束，见[决策 0030](../decisions/0030-resource-aware-session-scheduling.md)。
+
+目标 AI 设置把 API 或账号登录等连接方式与模型用途分开；模型可勾选七类媒体能力，默认文字模型在同一 Session 内按需调用其他已配置能力，见[决策 0031](../decisions/0031-capability-based-ai-configuration.md)。
