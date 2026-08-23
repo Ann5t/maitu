@@ -24,5 +24,6 @@
 - [0019：正式测试前按最终领域模型干净重建](0019-pretest-clean-domain-rebuild.md)
 - [0020：项目仓库保持纯净并自动同步获批更新](0020-clean-project-repository-and-github-sync.md)
 - [0021：第一版由 Fudian 独占写入项目 GitHub 仓库](0021-fudian-is-sole-github-writer.md)
+- [0022：MergeGate 简要展示自动证据并允许用户例外接受](0022-concise-merge-evidence-and-user-waiver.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
