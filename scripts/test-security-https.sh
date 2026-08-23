@@ -22,6 +22,9 @@ security_runner_image="${SECURITY_RUNNER_IMAGE:-fudian-nextgen-runner:latest}"
 security_browser_image="${PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright:v1.62.0-noble}"
 security_screenshot_dir="${SCREENSHOT_DIR:-$security_repo_root/docs/screenshots}"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$security_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_security_stack() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$security_app" >/dev/null 2>&1; then
@@ -37,7 +40,7 @@ cleanup_security_stack() {
     docker network rm "$security_network" >/dev/null 2>&1 || true
   fi
   if [[ "$security_tmp" == /tmp/tmp.* && -d "$security_tmp" ]]; then
-    rm -rf -- "$security_tmp"
+    fudian_test_remove_bind_tree "$security_tmp"
   fi
   return "$exit_status"
 }

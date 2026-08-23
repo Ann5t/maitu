@@ -9,6 +9,9 @@ review_app="fudian-review-integration-app-$review_suffix"
 review_tmp="$(mktemp -d)"
 review_bootstrap="bootstrap_review_integration_0123456789abcdef"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$review_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_review_stack() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$review_app" >/dev/null 2>&1; then
@@ -21,7 +24,7 @@ cleanup_review_stack() {
   [[ "$review_network" == fudian-review-integration-test-* ]] \
     && docker network rm "$review_network" >/dev/null 2>&1 || true
   [[ "$review_tmp" == /tmp/tmp.* && -d "$review_tmp" ]] \
-    && rm -rf -- "$review_tmp"
+    && fudian_test_remove_bind_tree "$review_tmp"
   return "$exit_status"
 }
 trap cleanup_review_stack EXIT
@@ -143,7 +146,7 @@ execute_runner_job() {
 with open(sys.argv[2],"w",encoding="utf-8") as handle:
  json.dump(json.loads(sys.argv[1])["spec"],handle,separators=(",",":"),ensure_ascii=False)' \
     "$prepared" "$spec_file"
-  chmod 0777 "$review_tmp/runner/$output_key"
+  fudian_test_open_runner_output "$review_app" "$output_key"
   docker run --rm --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges:true --pids-limit 32 --memory 128m --cpus 0.5 \
     --tmpfs /tmp:rw,nosuid,nodev,size=33554432 \

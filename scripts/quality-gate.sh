@@ -4,9 +4,12 @@ set -euo pipefail
 quality_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 quality_tmp="$(mktemp -d)"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$quality_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_quality_gate() {
   local exit_status="$?"
-  [[ "$quality_tmp" == /tmp/tmp.* ]] && rm -rf "$quality_tmp"
+  [[ "$quality_tmp" == /tmp/tmp.* ]] && fudian_test_remove_bind_tree "$quality_tmp"
   return "$exit_status"
 }
 trap cleanup_quality_gate EXIT

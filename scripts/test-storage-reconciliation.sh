@@ -8,6 +8,9 @@ storage_db="fudian-storage-db-$storage_suffix"
 storage_app="fudian-storage-app-$storage_suffix"
 storage_tmp="$(mktemp -d)"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$storage_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_storage_test() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$storage_app" >/dev/null 2>&1; then
@@ -20,7 +23,7 @@ cleanup_storage_test() {
   [[ "$storage_network" == fudian-storage-test-* ]] \
     && docker network rm "$storage_network" >/dev/null 2>&1 || true
   [[ "$storage_tmp" == /tmp/tmp.* && -d "$storage_tmp" ]] \
-    && rm -rf -- "$storage_tmp"
+    && fudian_test_remove_bind_tree "$storage_tmp"
   return "$exit_status"
 }
 trap cleanup_storage_test EXIT
@@ -133,14 +136,16 @@ storage_approval="$(post_goal "$storage_project_id" proposal.approve \
 storage_branch_id="$(json_field "$storage_approval" result.goalBranchId)"
 storage_session_id="$(json_field "$storage_approval" result.sessionId)"
 
-mkdir -p "$storage_tmp/artifacts/records" "$storage_tmp/artifacts/lost" \
-  "$storage_tmp/repositories/projects/orphan.git" "$storage_tmp/worktrees/scratch" \
-  "$storage_tmp/runner/jobs/orphan"
-printf 'known artifact\n' >"$storage_tmp/artifacts/records/known.txt"
-printf 'orphan artifact\n' >"$storage_tmp/artifacts/lost/orphan.txt"
-printf 'orphan repository\n' >"$storage_tmp/repositories/projects/orphan.git/marker"
-printf 'orphan worktree\n' >"$storage_tmp/worktrees/scratch/marker"
-printf 'orphan runner output\n' >"$storage_tmp/runner/jobs/orphan/marker"
+docker exec --user 0:0 "$storage_app" sh -eu -c '
+  mkdir -p /data/artifacts/records /data/artifacts/lost \
+    /data/repositories/projects/orphan.git /data/worktrees/scratch \
+    /data/runner/jobs/orphan
+  printf "known artifact\n" >/data/artifacts/records/known.txt
+  printf "orphan artifact\n" >/data/artifacts/lost/orphan.txt
+  printf "orphan repository\n" >/data/repositories/projects/orphan.git/marker
+  printf "orphan worktree\n" >/data/worktrees/scratch/marker
+  printf "orphan runner output\n" >/data/runner/jobs/orphan/marker
+'
 storage_known_digest="$(sha256sum "$storage_tmp/artifacts/records/known.txt" | awk '{print $1}')"
 storage_orphan_digest="$(sha256sum "$storage_tmp/artifacts/lost/orphan.txt" | awk '{print $1}')"
 storage_artifact_id="$(new_uuid)"

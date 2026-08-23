@@ -9,6 +9,9 @@ scheduler_app="fudian-scheduler-app-$scheduler_suffix"
 scheduler_tmp="$(mktemp -d)"
 scheduler_bootstrap="bootstrap_scheduler_test_0123456789abcdef"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$scheduler_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_scheduler_stack() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$scheduler_app" >/dev/null 2>&1; then
@@ -21,7 +24,7 @@ cleanup_scheduler_stack() {
   [[ "$scheduler_network" == fudian-scheduler-test-* ]] \
     && docker network rm "$scheduler_network" >/dev/null 2>&1 || true
   [[ "$scheduler_tmp" == /tmp/tmp.* && -d "$scheduler_tmp" ]] \
-    && rm -rf -- "$scheduler_tmp"
+    && fudian_test_remove_bind_tree "$scheduler_tmp"
   return "$exit_status"
 }
 trap cleanup_scheduler_stack EXIT

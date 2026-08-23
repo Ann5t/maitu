@@ -8,6 +8,9 @@ workspace_db="fudian-workspace-db-$workspace_suffix"
 workspace_app="fudian-workspace-app-$workspace_suffix"
 workspace_tmp="$(mktemp -d)"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$workspace_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_workspace_stack() {
   local exit_status="$?"
   if [[ "$exit_status" -ne 0 ]] && docker inspect "$workspace_app" >/dev/null 2>&1; then
@@ -20,7 +23,7 @@ cleanup_workspace_stack() {
   [[ "$workspace_network" == fudian-workspace-test-* ]] \
     && docker network rm "$workspace_network" >/dev/null 2>&1 || true
   if [[ "$workspace_tmp" == /tmp/tmp.* && -d "$workspace_tmp" ]]; then
-    rm -rf -- "$workspace_tmp"
+    fudian_test_remove_bind_tree "$workspace_tmp"
   fi
   return "$exit_status"
 }
@@ -158,7 +161,7 @@ response=json.loads(sys.argv[1])
 with open(sys.argv[2],"w",encoding="utf-8") as handle:
     json.dump(response["spec"],handle,separators=(",",":"),ensure_ascii=False)' \
     "$prepare_response" "$spec_file"
-  chmod 0777 "$output_path"
+  fudian_test_open_runner_output "$workspace_app" "$output_key"
   docker run --rm \
     --network none \
     --read-only \
@@ -480,7 +483,8 @@ workspace_integrity_prepare="$(prepare_custom_job "$workspace_project_id" "$work
   "$workspace_child_snapshot" "out/**" '["fixture-write","out/integrity.txt","trusted"]')"
 workspace_integrity_result="$(execute_worker "$workspace_integrity_prepare" "$workspace_child_key" integrity)"
 workspace_integrity_output_key="$(json_field "$workspace_integrity_prepare" outputKey)"
-printf 'tampered' > "$workspace_tmp/runner/$workspace_integrity_output_key/out/integrity.txt"
+fudian_test_write_managed_file "$workspace_app" \
+  "/data/runner/$workspace_integrity_output_key/out/integrity.txt" tampered
 workspace_integrity_job="$(json_field "$workspace_integrity_prepare" jobId)"
 workspace_integrity_token="$(json_field "$workspace_integrity_prepare" leaseToken)"
 workspace_integrity_body="$(python3 -c 'import json,sys
@@ -490,7 +494,8 @@ workspace_integrity_reject="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H 'content-type: application/json' -d "$workspace_integrity_body" \
   "$workspace_base/api/v1/projects/$workspace_project_id/sessions/$workspace_child_session/runner-jobs/$workspace_integrity_job/finalize")"
 [[ "$workspace_integrity_reject" == 409 ]]
-printf 'trusted' > "$workspace_tmp/runner/$workspace_integrity_output_key/out/integrity.txt"
+fudian_test_write_managed_file "$workspace_app" \
+  "/data/runner/$workspace_integrity_output_key/out/integrity.txt" trusted
 workspace_integrity_finalize="$(finalize_job "$workspace_project_id" "$workspace_child_session" \
   "$workspace_integrity_prepare" "$workspace_integrity_result")"
 workspace_child_head="$(json_field "$workspace_integrity_finalize" headCommit)"
@@ -641,7 +646,8 @@ resume_session "$workspace_project_id" "$workspace_child_session" "内存耗尽�
 workspace_dirty_prepare="$(prepare_custom_job "$workspace_project_id" "$workspace_child_session" \
   "$workspace_child_snapshot" "out/**" '["fixture-write","out/never.txt","never"]')"
 workspace_dirty_result="$(execute_worker "$workspace_dirty_prepare" "$workspace_child_key" dirty-race)"
-printf 'untracked external change' > "$workspace_tmp/worktrees/$workspace_child_key/external.txt"
+fudian_test_write_managed_file "$workspace_app" \
+  "/data/worktrees/$workspace_child_key/external.txt" 'untracked external change'
 workspace_dirty_job="$(json_field "$workspace_dirty_prepare" jobId)"
 workspace_dirty_token="$(json_field "$workspace_dirty_prepare" leaseToken)"
 workspace_dirty_finalize_body="$(python3 -c 'import json,sys
@@ -677,7 +683,8 @@ workspace_drift_root_key="$(json_field "$workspace_drift_root_approval" result.w
 workspace_drift_child_response="$(post_goal_for "$workspace_drift_project_id" session.propose_child \
   "{\"parentSessionId\":\"$workspace_drift_root_session\",\"revision\":$workspace_revision}")"
 workspace_drift_child_proposal="$(json_field "$workspace_drift_child_response" result.proposalId)"
-printf 'parent drift before approval' > "$workspace_tmp/worktrees/$workspace_drift_root_key/drift.txt"
+fudian_test_write_managed_file "$workspace_app" \
+  "/data/worktrees/$workspace_drift_root_key/drift.txt" 'parent drift before approval'
 workspace_drift_approval_id="$(new_uuid)"
 workspace_drift_approval_body="$(python3 -c 'import json,sys
 print(json.dumps({"clientRequestId":sys.argv[1],"action":"proposal.approve","payload":{
@@ -717,7 +724,8 @@ workspace_cas_snapshot="$(json_field "$workspace_cas_approval" result.workspace.
 workspace_cas_prepare="$(prepare_job "$workspace_cas_project_id" "$workspace_cas_session" \
   "$workspace_cas_snapshot" "out/candidate.txt" "candidate")"
 workspace_cas_result="$(execute_worker "$workspace_cas_prepare" "$workspace_cas_key" cas-candidate)"
-printf 'external commit wins' > "$workspace_tmp/worktrees/$workspace_cas_key/external-commit.txt"
+fudian_test_write_managed_file "$workspace_app" \
+  "/data/worktrees/$workspace_cas_key/external-commit.txt" 'external commit wins'
 docker exec "$workspace_app" git -C "/data/worktrees/$workspace_cas_key" add -- external-commit.txt
 docker exec "$workspace_app" git -C "/data/worktrees/$workspace_cas_key" \
   -c user.name='CAS Test' -c user.email='cas@fudian.invalid' -c commit.gpgSign=false \

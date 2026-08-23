@@ -11,6 +11,9 @@ real_tool_crash="fudian-real-tool-crash-$real_suffix"
 real_tmp="$(mktemp -d)"
 real_worker_bootstrap="real_plugin_worker_bootstrap_0123456789abcdef"
 
+# shellcheck source=scripts/docker-test-lib.sh
+. "$real_repo_root/scripts/docker-test-lib.sh"
+
 cleanup_real_plugins() {
   local exit_status="$?"
   if (( exit_status != 0 )) && docker inspect "$real_app" >/dev/null 2>&1; then
@@ -26,7 +29,8 @@ cleanup_real_plugins() {
     && docker rm -f "$real_db" >/dev/null 2>&1 || true
   [[ "$real_network" == fudian-real-plugins-test-* ]] \
     && docker network rm "$real_network" >/dev/null 2>&1 || true
-  [[ "$real_tmp" == /tmp/tmp.* && -d "$real_tmp" ]] && rm -rf -- "$real_tmp"
+  [[ "$real_tmp" == /tmp/tmp.* && -d "$real_tmp" ]] \
+    && fudian_test_remove_bind_tree "$real_tmp"
   return "$exit_status"
 }
 trap cleanup_real_plugins EXIT
@@ -224,7 +228,7 @@ execute_seed_worker() {
 with open(sys.argv[2],"w",encoding="utf-8") as handle:
     json.dump(json.loads(sys.argv[1])["spec"],handle,separators=(",",":"),ensure_ascii=False)' \
     "$prepare" "$spec_file"
-  chmod 0777 "$output_path"
+  fudian_test_open_runner_output "$real_app" "$output_key"
   docker run --rm \
     --network none \
     --read-only \
@@ -559,7 +563,7 @@ m=json.loads(sys.argv[2]); print(json.dumps({
 with open(sys.argv[2],"w",encoding="utf-8") as handle:
     json.dump(json.loads(sys.argv[1])["runner"]["spec"],handle,separators=(",",":"),ensure_ascii=False)' \
     "$prepare" "$spec_file"
-  chmod 0777 "$output_path"
+  fudian_test_open_runner_output "$real_app" "$output_key"
   cpu_millis="$(json_field "$prepare" runner.spec.resources.cpuMillis)"
   memory_mib="$(json_field "$prepare" runner.spec.resources.memoryMiB)"
   pids="$(json_field "$prepare" runner.spec.resources.pids)"
