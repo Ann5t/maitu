@@ -44,12 +44,14 @@ Fudian 是一个单用户、自托管、面向长期目标推进的项目执行�
 
 - 当前版本的目标契约；
 - 从父枝干继承的上下文与产物引用；
-- 持续使用的 Git worktree；
+- 唯一且持续存在的 Git branch，以及需要时挂载的 worktree；
 - 依次发生的 Agent Session 节点；
 - 子目标枝干、回流成果与审核记录；
 - 当前状态和未解决条件。
 
-同一目标枝干同一时间只允许一个 Agent 修改其 worktree。需要并行时，必须先提出并批准新的子目标枝干。
+一个正式 GoalBranch 严格对应一个 Git branch。根 GoalBranch 直接使用项目默认分支；子 GoalBranch 在 Proposal 获批后，从父 Session 的准确安全 commit 创建。BranchProposal 本身没有 branch 或可写 worktree。
+
+Git branch 是长期身份，物理 worktree 只是可重建的运行现场：活动时挂载，暂停或归档后可以释放，需要时从已记录并现场核验的 commit 重建。同一目标枝干同一时间只允许一个 Agent 修改其 worktree。需要并行时，必须先提出并批准新的子目标枝干。
 
 ### 4.3 AgentSessionNode
 
@@ -58,6 +60,10 @@ Fudian 是一个单用户、自托管、面向长期目标推进的项目执行�
 Session 内部可以包含大量行动、小目标、命令、测试、浏览器操作和轻量检查点；这些内容进入 Session 的详情与事件记录，不自动成为项目主图上的主要节点。
 
 一个执行进程崩溃后恢复，仍属于同一个 Session 节点。只有审核退回后开始新一轮工作，或明确重新分配一轮工作时，才在同一枝干上创建下一个 Session 节点。
+
+同一 GoalBranch 上的 Session 连续接力。后一个 Session 必须从前一个 Session 的最终安全 commit 开始，不回到父枝干或初始基线；Session 切换不创建 branch，也不发生 merge。前一个 Session 的有意义文件变化必须在交接前形成干净的检查点 commit，不能依赖某个未提交的物理目录继续存在。
+
+审核退回后的新 Session 默认继承被冻结候选的完整状态，再根据反馈继续修改。需要放弃旧变化时，以新的修改或 revert 保留历史，不通过重写历史假装旧工作没有发生。一个 Session 可以产生零到多个 commit；Session 和 commit 不是同一种节点。
 
 ### 4.4 BranchProposal
 
