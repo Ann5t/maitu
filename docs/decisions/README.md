@@ -11,5 +11,6 @@
 - [0006：父枝干更新按需披露给运行中的子枝干](0006-parent-update-disclosure.md)
 - [0007：项目文件使用 Git 与标准 Git LFS](0007-standard-git-lfs-for-project-files.md)
 - [0008：在菱形 Merge Gate 中由 AI 处理整合](0008-ai-assisted-merge-gate.md)
+- [0009：终态目标枝干保留 Git ref 并释放 worktree](0009-retain-terminal-ref-release-worktree.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。

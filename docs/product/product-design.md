@@ -57,6 +57,8 @@ Git branch 是长期身份，物理 worktree 只是可重建的运行现场：�
 
 父枝干等待期间可以由受控整合流程接收已经审核通过的子枝干 merge，因此其 Git HEAD 可能前进，但这不等于父工作 Agent 正在执行。只有必需子目标均已接受、明确失败或被用户有理由地豁免，且没有运行中的后代后，父枝干才能创建下一 Session 恢复整合和推进。
 
+GoalBranch 进入 `integrated | stopped | archived` 等终态后，其 Git ref 保留并由 Fudian 设为只读，继续指向最终 HEAD；物理 worktree 在确认没有活动租约或整合任务后释放。Git 和 Git LFS 对象继续可达，因此现场可以按原 commit 与环境记录重建。若以后要从旧成果继续，创建来源清楚的新 GoalBranch，不重新激活已经结束的枝干。
+
 ### 4.3 AgentSessionNode
 
 **一个 Agent Session 是目标枝干上的主要节点。**
@@ -306,6 +308,8 @@ Agent 不得使用 `apt`、`pip install`、`curl` 等方式为自己安装工具
 - 密钥、Cookie 和其他秘密不能进入普通产物仓库。
 
 Fudian 自身源码也必须进入独立 Git 仓库。开发采用可运行的主分支、短期功能分支/worktree、可解释的小提交和自动化质量门。GitHub 远程仓库由用户创建和上传，Agent 不擅自发布。
+
+Fudian 内部目标枝干默认只保存在托管仓库；普通远端默认只推送项目默认分支，避免把所有内部执行枝干暴露成远端协作分支。用户可以通过显式导出设置选择同步活动枝干或完整审计 refs。
 
 ## 13. 文件导入
 
