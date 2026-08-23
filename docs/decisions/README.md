@@ -15,5 +15,6 @@
 - [0010：每个项目使用独立 Git 仓库，不设总 Git](0010-one-repository-per-project.md)
 - [0011：持久文件只进入项目 Git 或 Git LFS](0011-retained-files-live-in-project-git.md)
 - [0012：成果摘要属于拟合并候选，不设独立 Contribution](0012-merge-candidate-outcome-summary.md)
+- [0013：目标说明是 GoalBranch 的内部版本](0013-goal-definition-is-branch-version.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
