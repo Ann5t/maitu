@@ -12,5 +12,6 @@
 - [0007：项目文件使用 Git 与标准 Git LFS](0007-standard-git-lfs-for-project-files.md)
 - [0008：在菱形 Merge Gate 中由 AI 处理整合](0008-ai-assisted-merge-gate.md)
 - [0009：终态目标枝干保留 Git ref 并释放 worktree](0009-retain-terminal-ref-release-worktree.md)
+- [0010：每个项目使用独立 Git 仓库，不设总 Git](0010-one-repository-per-project.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
