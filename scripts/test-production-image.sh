@@ -86,7 +86,7 @@ assert health["name"] == "fudian"' "$runtime_tmp/health.json"
 [[ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$runtime_app")" == true ]]
 
 curl -fsS "$runtime_base/" > "$runtime_tmp/index.html"
-grep -q '浮点' "$runtime_tmp/index.html"
+grep -q '脉图' "$runtime_tmp/index.html"
 curl -fsS "$runtime_base/assets/app.css" > "$runtime_tmp/app.css"
 grep -q -- '--acid' "$runtime_tmp/app.css"
 

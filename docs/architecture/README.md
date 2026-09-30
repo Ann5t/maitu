@@ -2,6 +2,8 @@
 
 > 状态：已实现快照。这里描述当前代码和测试证明的边界，不替代仍在讨论的产品设计。
 
+Maitu 首轮在独立任务分支增加资料任务、DeepSeek 适配、项目图和执行历史，边界见[并行资料任务决定](../decisions/maitu-0001-parallel-file-workflows.md)。以下浮点领域与后续产品规划按其原始状态保留。
+
 - [总体架构](architecture.md)：部署单元、数据、一致性、安全和测试边界
 - [目标枝干领域](goal-branch-domain.md)：聚合、状态机和全局不变量
 - [目标契约与生命周期](core-domain-v2.md)：探索、Evidence、候选和终态

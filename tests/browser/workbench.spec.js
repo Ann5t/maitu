@@ -360,7 +360,7 @@ test('settings reports real AI status and persists explicit theme choice', async
 });
 
 test('project dashboard keeps the current work visually primary', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/legacy');
   await expect(page.getByRole('heading', { name: '项目', level: 1 })).toBeVisible();
   await expect(page.locator('.side-nav a[href="/?view=artifacts"]')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('WORKSPACE');
