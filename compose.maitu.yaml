@@ -1,0 +1,82 @@
+name: ${MAITU_INSTANCE:-maitu}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: maitu
+      POSTGRES_USER: maitu
+      POSTGRES_PASSWORD: maitu_local_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maitu -d maitu"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  storage-init:
+    image: postgres:17-alpine
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner
+        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner
+    volumes:
+      - artifacts:/data/artifacts
+      - repositories:/data/repositories
+      - worktrees:/data/worktrees
+      - runner_outputs:/data/runner
+    tmpfs:
+      - /var/lib/postgresql/data
+    restart: "no"
+
+  app:
+    image: maitu-app:local
+    build:
+      context: .
+      target: runtime
+      args:
+        HTTP_PROXY: ${MAITU_BUILD_PROXY:-}
+        HTTPS_PROXY: ${MAITU_BUILD_PROXY:-}
+    environment:
+      DATABASE_URL: postgres://maitu:maitu_local_dev@postgres:5432/maitu
+      FUDIAN_SECURITY_MODE: disabled
+      FUDIAN_BIND: 0.0.0.0:3000
+      ARTIFACT_ROOT: /data/artifacts
+      REPOSITORY_ROOT: /data/repositories
+      WORKTREE_ROOT: /data/worktrees
+      RUNNER_OUTPUT_ROOT: /data/runner
+      RUST_LOG: fudian=info,tower_http=info
+    ports:
+      - "127.0.0.1:${MAITU_PORT:-3033}:3000"
+    volumes:
+      - artifacts:/data/artifacts
+      - repositories:/data/repositories
+      - worktrees:/data/worktrees
+      - runner_outputs:/data/runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "fudian", "healthcheck", "127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  postgres_data:
+  artifacts:
+  repositories:
+  worktrees:
+  runner_outputs:

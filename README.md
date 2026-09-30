@@ -14,7 +14,13 @@
 
 打开本仓库根目录即可查看真实 Git 历史。Agent 先阅读 [AGENTS.md](AGENTS.md)，归类任务并建立分支，再修改文件。完成后以 PR 审阅，用户批准后合入 `main`。
 
-本机启动与检查遵循 [贡献指南](CONTRIBUTING.md)和[测试指南](docs/development/testing.md)。Docker 运行入口和实际验证结果在当前实施进度中维护。
+本机运行入口见 [本机运行指南](docs/operations/maitu-local.md)。在仓库根目录的 PowerShell 中执行：
+
+```powershell
+./scripts/start-local.ps1
+```
+
+默认地址为 `http://localhost:3033`。开发与检查遵循 [贡献指南](CONTRIBUTING.md)和[测试指南](docs/development/testing.md)，实际验证结果在实施进度中维护。
 
 ## 首版交付顺序
 
