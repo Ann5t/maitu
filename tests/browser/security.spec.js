@@ -34,7 +34,7 @@ for (const [name, viewport] of sizes) {
       page.waitForURL(url => url.pathname === '/'),
       page.locator('button[type="submit"]').click(),
     ]);
-    await expect(page.locator('body')).toContainText('最近项目');
+    await expect(page.locator('#maitu-project-create')).toBeVisible();
     const cookies = await context.cookies();
     const session = cookies.find(cookie => cookie.name === '__Host-fudian_session');
     const csrf = cookies.find(cookie => cookie.name === '__Host-fudian_csrf');
