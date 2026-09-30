@@ -243,7 +243,7 @@ unauth_status="$(secure_curl -o /dev/null -w '%{http_code}' -H 'Accept: text/htm
 [[ "$unauth_status" == 307 ]]
 secure_curl --fail -b "$security_jar" -c "$security_jar" "$security_origin/" \
   >"$security_tmp/authenticated.html"
-grep -q '最近项目' "$security_tmp/authenticated.html"
+grep -q 'id="maitu-project-create"' "$security_tmp/authenticated.html"
 
 session_before="$(session_from_jar "$security_jar")"
 sleep 2
