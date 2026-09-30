@@ -32,6 +32,8 @@ Docker Desktop 自身也需要通过其系统代理或手动代理访问镜像�
 
 代理地址不写入 Git、本机全局配置或运行时应用环境。此启动脚本仅设置当前进程与镜像构建参数。
 
+请求进入 Clash 后仍可能匹配到直连。首次完整测试会下载微软的 Playwright 镜像；如果日志显示 `mcr.microsoft.com` 或其 `data.mcr.microsoft.com` 子域走 `DIRECT` 且下载缓慢，可在 Clash 中把 `mcr.microsoft.com` 的域名后缀规则放在微软直连规则之前，选择可用代理组。此规则包括该镜像站的数据子域，不需要把所有微软请求改成代理。本次验收临时为 Docker 的这些请求设置了代理路径，镜像下载后恢复原规则；启动脚本不修改 Clash 规则。
+
 ## 服务与数据
 
 ```powershell
