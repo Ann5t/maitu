@@ -53,3 +53,5 @@
 - [0048：第一版使用 OCI Worker 与原生依赖后端](0048-oci-workers-with-native-package-backends.md)
 
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
+
+- [0049 脉图以 Docker 网页版继续推进](0049-maitu-docker-web-bootstrap.md)

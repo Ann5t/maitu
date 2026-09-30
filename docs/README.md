@@ -1,6 +1,15 @@
-# Fudian 文档
+# 脉图文档
 
 这里按读者要解决的问题组织文档，而不是按开发时间平铺文件。根 [README](../README.md) 负责快速开始；本页负责完整导航。
+
+## 脉图当前入口
+
+- [首版范围](product/maitu-scope.md)
+- [实施进度](development/maitu-progress.md)
+- [旧项目来源](product/source-projects.md)
+- [产品设计建议](product/maitu-design.md)
+
+以下为继承的浮点文档导航，各页保留原始状态和背景。
 
 ## 从哪里开始
 
