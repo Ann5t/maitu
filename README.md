@@ -20,7 +20,7 @@
 ./scripts/start-local.ps1
 ```
 
-默认地址为 `http://localhost:3033`。开发与检查遵循 [贡献指南](CONTRIBUTING.md)和[测试指南](docs/development/testing.md)，实际验证结果在实施进度中维护。
+默认地址为 `http://127.0.0.1:3033`。开发与检查遵循 [贡献指南](CONTRIBUTING.md)和[测试指南](docs/development/testing.md)，实际验证结果在实施进度中维护。
 
 ## 首版交付顺序
 

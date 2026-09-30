@@ -73,8 +73,12 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw '脉图未成功启动，请查看镜像下载、构建或服务日志。'
     }
-    $taskUrl = "http://localhost:$Port"
-    $taskHealth = Invoke-RestMethod -Uri "$taskUrl/api/health" -TimeoutSec 10
+    $taskUrl = "http://127.0.0.1:$Port"
+    $taskHealthArgs = @{ Uri = "$taskUrl/api/health"; TimeoutSec = 10 }
+    if ((Get-Command Invoke-RestMethod).Parameters.ContainsKey('NoProxy')) {
+        $taskHealthArgs.NoProxy = $true
+    }
+    $taskHealth = Invoke-RestMethod @taskHealthArgs
     if ($taskHealth.ok -ne $true) {
         throw '服务健康检查未通过。'
     }
