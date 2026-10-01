@@ -120,6 +120,7 @@ async fn model(State(fixture): State<Arc<Fixture>>, Json(request): Json<Value>) 
 async fn task(state: &AppState, project: Uuid, title: &str) -> workflows::TaskRecord {
     workflows::create_task(
         &state.pool,
+        &state.providers,
         project,
         CreateTaskRequest {
             request_id: Uuid::new_v4(),
@@ -130,6 +131,7 @@ async fn task(state: &AppState, project: Uuid, title: &str) -> workflows::TaskRe
             acceptance_criteria: "实际检查通过".into(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await
@@ -215,12 +217,14 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
     let worker = tokio::spawn(workflows::run_worker(state.clone(), signal));
     let planner = plans::generate(
         &state.pool,
+        &state.providers,
         project,
         plans::GeneratePlanRequest {
             request_id: Uuid::new_v4(),
             instruction: "并行修改 A B，再整合".into(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await
@@ -255,12 +259,14 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
     invalid.tasks[0].depends_on.push("d".into());
     let newer = plans::generate(
         &state.pool,
+        &state.providers,
         project,
         plans::GeneratePlanRequest {
             request_id: Uuid::new_v4(),
             instruction: String::new(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await

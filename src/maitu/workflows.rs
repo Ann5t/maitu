@@ -1,11 +1,18 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool, types::Json};
-use tokio::{sync::watch, task::JoinSet};
+use tokio::{
+    sync::{Mutex, watch},
+    task::JoinSet,
+};
 use tracing::error;
 use uuid::Uuid;
 
@@ -33,6 +40,7 @@ pub struct TaskRecord {
     pub task_kind: String,
     pub acceptance_criteria: String,
     pub source_ids: Json<Vec<Uuid>>,
+    pub connection_key: String,
     pub status: String,
     pub wait_reason: Option<String>,
     pub latest_attempt_id: Option<Uuid>,
@@ -49,6 +57,7 @@ pub struct AttemptRecord {
     pub number: i32,
     pub status: String,
     pub input_snapshot: Option<Json<Value>>,
+    pub connection_key: String,
     pub provider_base_url: Option<String>,
     pub model: Option<String>,
     pub artifact_id: Option<Uuid>,
@@ -99,6 +108,13 @@ pub struct AttemptEvent {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionLoad {
+    pub key: String,
+    pub running: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowSnapshot {
@@ -106,7 +122,8 @@ pub struct WorkflowSnapshot {
     pub tasks: Vec<TaskRecord>,
     pub dependencies: Vec<Dependency>,
     pub sources: Vec<SourceSummary>,
-    pub provider: super::provider::ProviderView,
+    pub connections: Vec<super::provider::ProviderView>,
+    pub connection_load: Vec<ConnectionLoad>,
     pub active_tasks: i64,
     pub code_project: Option<super::code::CodeProject>,
 }
@@ -137,6 +154,10 @@ pub struct CreateTaskRequest {
     pub source_ids: Vec<Uuid>,
     #[serde(default)]
     pub dependency_ids: Vec<Uuid>,
+    /// Empty means automatic scheduling across usable connections. A non-empty
+    /// value pins the task to one named connection.
+    #[serde(default)]
+    pub connection_key: String,
 }
 
 fn file_kind() -> String {
@@ -177,6 +198,11 @@ pub async fn snapshot(
     providers: &ProviderStore,
     id: Uuid,
 ) -> AppResult<WorkflowSnapshot> {
+    let load: Vec<ConnectionLoad> = sqlx::query_as(
+        "SELECT connection_key AS key,count(*) AS running FROM maitu_attempts WHERE status='running' GROUP BY connection_key",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(WorkflowSnapshot {
         project: project(pool, id).await?,
         tasks: sqlx::query_as("SELECT * FROM maitu_tasks WHERE project_id=$1 ORDER BY created_at,id")
@@ -185,7 +211,13 @@ pub async fn snapshot(
             .bind(id).fetch_all(pool).await?,
         sources: sqlx::query_as("SELECT id,filename,sha256,octet_length(content) AS size_bytes,created_at FROM maitu_sources WHERE project_id=$1 ORDER BY created_at,id")
             .bind(id).fetch_all(pool).await?,
-        provider: providers.get().await.view(),
+        connections: providers
+            .list()
+            .await
+            .iter()
+            .map(ProviderConfig::view)
+            .collect(),
+        connection_load: load,
         active_tasks: sqlx::query_scalar("SELECT count(*) FROM maitu_tasks WHERE status='running'").fetch_one(pool).await?,
         code_project: super::code::project(pool,id).await?,
     })
@@ -271,11 +303,19 @@ pub async fn source(pool: &PgPool, id: Uuid) -> AppResult<SourceRecord> {
 
 pub async fn create_task(
     pool: &PgPool,
+    providers: &ProviderStore,
     project_id: Uuid,
     mut input: CreateTaskRequest,
 ) -> AppResult<TaskRecord> {
     input.title = input.title.trim().into();
     input.instruction = input.instruction.trim().into();
+    input.connection_key = input.connection_key.trim().into();
+    if !input.connection_key.is_empty() && providers.get(&input.connection_key).await.is_none() {
+        return Err(AppError::bad_request(
+            "invalid_connection",
+            "任务指定的模型连接不存在",
+        ));
+    }
     validate_filename(&input.output_filename)?;
     if input.title.is_empty()
         || input.title.len() > 400
@@ -322,6 +362,7 @@ pub async fn create_task(
             || existing.output_filename != input.output_filename
             || existing.task_kind != input.task_kind
             || existing.acceptance_criteria != input.acceptance_criteria
+            || existing.connection_key != input.connection_key
             || existing.source_ids.0 != input.source_ids
             || parents != input.dependency_ids
         {
@@ -350,9 +391,9 @@ pub async fn create_task(
             "资料与前序任务必须来自当前项目",
         ));
     }
-    let task = sqlx::query_as("INSERT INTO maitu_tasks(id,project_id,title,instruction,output_filename,source_ids,task_kind,acceptance_criteria) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *")
+    let task = sqlx::query_as("INSERT INTO maitu_tasks(id,project_id,title,instruction,output_filename,source_ids,task_kind,acceptance_criteria,connection_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
         .bind(input.request_id).bind(project_id).bind(input.title).bind(input.instruction).bind(input.output_filename)
-        .bind(Json(input.source_ids)).bind(&input.task_kind).bind(&input.acceptance_criteria).fetch_one(&mut *tx).await?;
+        .bind(Json(input.source_ids)).bind(&input.task_kind).bind(&input.acceptance_criteria).bind(&input.connection_key).fetch_one(&mut *tx).await?;
     for parent in input.dependency_ids {
         sqlx::query("INSERT INTO maitu_task_dependencies(project_id,task_id,parent_task_id) VALUES($1,$2,$3)")
             .bind(project_id).bind(input.request_id).bind(parent).execute(&mut *tx).await?;
@@ -527,14 +568,16 @@ async fn claim(
     config: &ProviderConfig,
 ) -> AppResult<Option<(TaskRecord, AttemptRecord)>> {
     // Pin available parents even when another parent is still missing. Blocked jobs
-    // must not hide ready jobs beyond the first page of the queue.
+    // must not hide ready jobs beyond the first page of the queue. Tasks pinned to
+    // another connection are invisible here; automatic tasks fit any connection.
     sqlx::query("UPDATE maitu_attempt_dependencies d SET source_attempt_id=p.accepted_attempt_id FROM maitu_tasks p,maitu_tasks t WHERE d.attempt_id=t.latest_attempt_id AND t.status='queued' AND p.id=d.parent_task_id AND d.source_attempt_id IS NULL AND p.accepted_attempt_id IS NOT NULL")
         .execute(&state.pool).await?;
     sqlx::query("UPDATE maitu_tasks t SET wait_reason='等待前序任务的成果被采用；可先推进其他任务' WHERE t.status='queued' AND EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) AND t.wait_reason IS DISTINCT FROM '等待前序任务的成果被采用；可先推进其他任务'")
         .execute(&state.pool).await?;
     let queued: Vec<TaskRecord> = sqlx::query_as(
-        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
+        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
     )
+    .bind(&config.key)
     .fetch_all(&state.pool)
     .await?;
     'candidates: for candidate in queued {
@@ -665,16 +708,24 @@ async fn claim(
             }
         };
         snapshot.0["estimatedInputTokens"] = json!(estimated_tokens);
-        let attempt = sqlx::query_as("UPDATE maitu_attempts SET status='running',started_at=now(),input_snapshot=$2,provider_base_url=$3,model=$4 WHERE id=$1 AND status='queued' RETURNING *")
-            .bind(attempt_id).bind(snapshot).bind(&config.base_url).bind(&config.model).fetch_one(&mut *tx).await?;
+        let attempt = sqlx::query_as("UPDATE maitu_attempts SET status='running',started_at=now(),input_snapshot=$2,connection_key=$3,provider_base_url=$4,model=$5 WHERE id=$1 AND status='queued' RETURNING *")
+            .bind(attempt_id).bind(snapshot).bind(&config.key).bind(&config.base_url).bind(&config.model).fetch_one(&mut *tx).await?;
         sqlx::query(
             "UPDATE maitu_tasks SET status='running',wait_reason=NULL,updated_at=now() WHERE id=$1",
         )
         .bind(current.id)
         .execute(&mut *tx)
         .await?;
-        sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'started','输入与前序成果版本已固定，开始独立执行')")
-            .bind(attempt_id).execute(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'started',$2)",
+        )
+        .bind(attempt_id)
+        .bind(format!(
+            "输入与前序成果版本已固定，使用连接「{}」（{}，{}）开始独立执行",
+            config.label, config.key, config.model
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         return Ok(Some((current, attempt)));
     }
@@ -700,6 +751,114 @@ async fn finish_failed(
     .bind(message)
     .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Provider-side codes where another try (possibly on another connection) can
+/// legitimately succeed. Auth and balance failures only fail over to a
+/// different connection; they never replay on the same credentials.
+const TRANSIENT_CODES: [&str; 6] = [
+    "provider_rate_limit",
+    "provider_timeout",
+    "provider_unavailable",
+    "provider_network",
+    "provider_response",
+    "provider_http",
+];
+const MAX_AUTO_RETRIES: i32 = 3;
+
+/// Records the failure and, within bounds, requeues one fresh attempt so a
+/// failing or throttled connection does not leave the task blocked while other
+/// connections can serve it. Interrupted attempts are never replayed here: the
+/// provider may have finished the original request.
+async fn fail_or_retry(
+    state: &AppState,
+    task: &TaskRecord,
+    attempt: &AttemptRecord,
+    code: &str,
+    message: &str,
+) -> AppResult<()> {
+    let transient = TRANSIENT_CODES.contains(&code);
+    // A pinned task retries only on transient provider trouble with its own
+    // connection. An automatic task may also switch away from a connection
+    // whose credentials or balance were rejected, but only when another usable
+    // connection actually exists.
+    let eligible = if task.connection_key.is_empty() {
+        transient
+            || state
+                .providers
+                .active()
+                .await
+                .iter()
+                .any(|connection| connection.key != attempt.connection_key)
+    } else {
+        transient
+    };
+    if !eligible || attempt.number > MAX_AUTO_RETRIES {
+        return finish_failed(&state.pool, task.id, attempt.id, code, message).await;
+    }
+    if transient {
+        cooldowns().penalize(&attempt.connection_key).await;
+    }
+    let mut tx = state.pool.begin().await?;
+    // Only the task's latest attempt may be retried; an older attempt's failure
+    // was already superseded by a newer one.
+    let still_latest: bool =
+        sqlx::query_scalar("SELECT latest_attempt_id=$2 FROM maitu_tasks WHERE id=$1 FOR UPDATE")
+            .bind(task.id)
+            .bind(attempt.id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .unwrap_or(false);
+    if !still_latest {
+        tx.commit().await?;
+        return finish_failed(&state.pool, task.id, attempt.id, code, message).await;
+    }
+    sqlx::query("UPDATE maitu_attempts SET status='failed',error_code=$2,error_message=$3,completed_at=now() WHERE id=$1 AND status IN ('queued','running')")
+        .bind(attempt.id).bind(code).bind(message).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'failed',$2)",
+    )
+    .bind(attempt.id)
+    .bind(message)
+    .execute(&mut *tx)
+    .await?;
+    let number: i32 = attempt.number + 1;
+    let retry_id = Uuid::new_v4();
+    let snapshot = attempt
+        .input_snapshot
+        .as_ref()
+        .map(|value| {
+            let mut snapshot = value.0.clone();
+            snapshot["upstream"] = json!([]);
+            if let Some(object) = snapshot.as_object_mut() {
+                object.remove("provider");
+                object.remove("estimatedInputTokens");
+            }
+            snapshot
+        })
+        .unwrap_or_else(|| json!({"additionalInstruction":""}));
+    sqlx::query("INSERT INTO maitu_attempts(id,task_id,number,status,input_snapshot) VALUES($1,$2,$3,'queued',$4)")
+        .bind(retry_id).bind(task.id).bind(number).bind(Json(&snapshot)).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO maitu_attempt_dependencies(attempt_id,parent_task_id) SELECT $1,parent_task_id FROM maitu_attempt_dependencies WHERE attempt_id=$2")
+        .bind(retry_id).bind(attempt.id).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'queued',$2)",
+    )
+    .bind(retry_id)
+    .bind(format!(
+        "第 {number} 次尝试已自动排队：{}；等待可用连接，已完成的记录保留",
+        if task.connection_key.is_empty() && !transient {
+            "此连接暂时不可用，将优先改用其他连接"
+        } else {
+            "连接暂时不可用，稍后重试"
+        }
+    ))
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE maitu_tasks SET status='queued',latest_attempt_id=$2,wait_reason='连接暂时不可用，自动重试已排队；其他任务继续执行',updated_at=now() WHERE id=$1")
+        .bind(task.id).bind(retry_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -799,18 +958,13 @@ async fn execute(
             .bind(attempt.id)
             .execute(&state.pool)
             .await?;
+        // A served request proves the connection works again.
+        cooldowns().clear(&attempt.connection_key).await;
     }
     let response = match response {
         Ok(response) => response,
         Err(failure) => {
-            return finish_failed(
-                &state.pool,
-                task.id,
-                attempt.id,
-                failure.code,
-                &failure.message,
-            )
-            .await;
+            return fail_or_retry(&state, &task, &attempt, failure.code, &failure.message).await;
         }
     };
     event(
@@ -898,6 +1052,45 @@ async fn interrupt_running(pool: &PgPool) -> AppResult<()> {
     Ok(())
 }
 
+/// In-memory per-connection throttle state. A connection that just rate-limited
+/// or failed us is skipped for a bounded, growing pause so retries back off
+/// instead of hammering. It resets on the next success and is per process.
+#[derive(Default)]
+struct Cooldowns(Mutex<HashMap<String, Instant>>);
+
+static COOLDOWNS: OnceLock<Cooldowns> = OnceLock::new();
+
+fn cooldowns() -> &'static Cooldowns {
+    COOLDOWNS.get_or_init(Cooldowns::default)
+}
+
+impl Cooldowns {
+    const BASE: Duration = Duration::from_secs(1);
+    const MAX: Duration = Duration::from_secs(30);
+
+    async fn active(&self, key: &str) -> bool {
+        self.0
+            .lock()
+            .await
+            .get(key)
+            .is_some_and(|until| *until > Instant::now())
+    }
+
+    async fn penalize(&self, key: &str) {
+        let mut cooldowns = self.0.lock().await;
+        let until = cooldowns.get(key).copied();
+        let next = match until {
+            Some(until) if until > Instant::now() => ((until - Instant::now()) * 2).min(Self::MAX),
+            _ => Self::BASE,
+        };
+        cooldowns.insert(key.to_owned(), Instant::now() + next);
+    }
+
+    async fn clear(&self, key: &str) {
+        self.0.lock().await.remove(key);
+    }
+}
+
 pub async fn run_worker(
     state: Arc<AppState>,
     mut shutdown: watch::Receiver<bool>,
@@ -921,8 +1114,9 @@ pub async fn run_worker(
         }
     };
     interrupt_running(&state.pool).await?;
-    let mut jobs: JoinSet<(Uuid, Uuid, AppResult<()>)> = JoinSet::new();
-    let mut active = HashMap::new();
+    let cooldowns = cooldowns();
+    let mut jobs: JoinSet<(Uuid, Uuid, String, AppResult<()>)> = JoinSet::new();
+    let mut active: HashMap<tokio::task::Id, (Uuid, Uuid, String)> = HashMap::new();
     let result = async {
         let mut tick = tokio::time::interval(Duration::from_millis(300));
         loop {
@@ -930,15 +1124,23 @@ pub async fn run_worker(
                 _ = shutdown.changed() => break,
                 Some(joined) = jobs.join_next_with_id(), if !jobs.is_empty() => {
                     match joined {
-                        Ok((id, (task, attempt, outcome))) => {
+                        Ok((id, (task, attempt, connection, outcome))) => {
                             active.remove(&id);
-                            if let Err(failure) = outcome {
-                                error!(code=failure.code(), "资料任务执行失败");
-                                finish_failed(&state.pool, task, attempt, failure.code(), &failure.public_message()).await?;
+                            match outcome {
+                                Ok(()) => {}
+                                Err(failure) => {
+                                    error!(code=failure.code(), "资料任务执行失败");
+                                    let record = sqlx::query_as::<_, TaskRecord>("SELECT * FROM maitu_tasks WHERE id=$1")
+                                        .bind(task).fetch_one(&state.pool).await?;
+                                    let attempt_record = sqlx::query_as::<_, AttemptRecord>("SELECT * FROM maitu_attempts WHERE id=$1")
+                                        .bind(attempt).fetch_one(&state.pool).await?;
+                                    fail_or_retry(&state, &record, &attempt_record, failure.code(), &failure.public_message()).await?;
+                                }
                             }
+                            let _ = connection;
                         }
                         Err(failure) => {
-                            if let Some((task, attempt)) = active.remove(&failure.id()) {
+                            if let Some((task, attempt, _)) = active.remove(&failure.id()) {
                                 finish_failed(&state.pool, task, attempt, "worker_interrupted", "此任务执行中断，可查看输入后重试").await?;
                             }
                         }
@@ -947,22 +1149,43 @@ pub async fn run_worker(
                 _ = tick.tick() => {
                     // Keep the leader session alive and fail closed if its lock is lost.
                     sqlx::query("SELECT 1").execute(&mut leader).await?;
-                    let config = state.providers.get().await;
-                    if config.api_key.is_empty() {
-                        sqlx::query("UPDATE maitu_tasks SET wait_reason='请先配置 DeepSeek 连接' WHERE status='queued' AND wait_reason IS DISTINCT FROM '请先配置 DeepSeek 连接'").execute(&state.pool).await?;
+                    let connections = state.providers.active().await;
+                    if connections.is_empty() {
+                        sqlx::query("UPDATE maitu_tasks SET wait_reason='请先在设置中配置可用的模型连接' WHERE status='queued' AND wait_reason IS DISTINCT FROM '请先在设置中配置可用的模型连接'").execute(&state.pool).await?;
                         continue;
                     }
-                    while jobs.len() < config.concurrency {
-                        let Some((task, attempt)) = claim(&state, &config).await? else { break };
-                        let task_id = task.id;
-                        let attempt_id = attempt.id;
-                        let worker_state = state.clone();
-                        let worker_config = config.clone();
-                        let handle = jobs.spawn(async move {
-                            let result = execute(worker_state, worker_config, task, attempt).await;
-                            (task_id, attempt_id, result)
-                        });
-                        active.insert(handle.id(), (task_id, attempt_id));
+                    // Tasks pinned to a connection that is currently unusable must
+                    // say so instead of appearing stuck behind invisible capacity.
+                    let keys: Vec<String> = connections.iter().map(|c| c.key.clone()).collect();
+                    sqlx::query("UPDATE maitu_tasks t SET wait_reason='指定的模型连接当前不可用；请在设置中检查，或将任务改为自动选择连接' WHERE t.status='queued' AND t.connection_key <> '' AND NOT (t.connection_key = ANY($1)) AND t.wait_reason IS DISTINCT FROM '指定的模型连接当前不可用；请在设置中检查，或将任务改为自动选择连接'")
+                        .bind(&keys).execute(&state.pool).await?;
+                    for connection in &connections {
+                        if cooldowns.active(&connection.key).await {
+                            sqlx::query("UPDATE maitu_tasks t SET wait_reason='此任务等待连接冷却后自动重试' WHERE t.status='queued' AND t.connection_key=$1 AND t.wait_reason IS DISTINCT FROM '此任务等待连接冷却后自动重试'")
+                                .bind(&connection.key).execute(&state.pool).await?;
+                            continue;
+                        }
+                        loop {
+                            // The database is the single source of truth: claim
+                            // commits the attempt to 'running' before returning,
+                            // so spawned jobs are always counted there.
+                            let running: i64 = sqlx::query_scalar("SELECT count(*) FROM maitu_attempts WHERE status='running' AND connection_key=$1")
+                                .bind(&connection.key).fetch_one(&state.pool).await?;
+                            if running >= connection.concurrency as i64 {
+                                break;
+                            }
+                            let Some((task, attempt)) = claim(&state, connection).await? else { break };
+                            let task_id = task.id;
+                            let attempt_id = attempt.id;
+                            let connection_key = connection.key.clone();
+                            let worker_state = state.clone();
+                            let worker_config = connection.clone();
+                            let handle = jobs.spawn(async move {
+                                let result = execute(worker_state, worker_config, task, attempt).await;
+                                (task_id, attempt_id, connection_key, result)
+                            });
+                            active.insert(handle.id(), (task_id, attempt_id, connection.key.clone()));
+                        }
                     }
                 }
             }

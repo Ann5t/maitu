@@ -9,7 +9,7 @@ use axum::{
     Router,
     http::{HeaderName, HeaderValue},
     middleware,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use sqlx::PgPool;
 use tower_http::{
@@ -75,7 +75,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/maitu", get(maitu::dashboard))
         .route("/maitu/settings", get(maitu::settings))
         .route("/maitu/projects/{project_id}", get(maitu::project_page))
-        .route("/api/maitu/provider", get(maitu::provider_config).put(maitu::save_provider))
+        .route("/api/maitu/connections", get(maitu::connections).post(maitu::save_connection))
+        .route("/api/maitu/connections/{key}", delete(maitu::delete_connection))
+        .route("/api/maitu/provider", get(maitu::provider_config))
         .route("/api/maitu/projects/{project_id}", get(maitu::project_snapshot))
         .route("/api/maitu/projects/{project_id}/tasks", post(maitu::create_task))
         .route("/api/maitu/projects/{project_id}/plans", post(maitu::generate_plan))
