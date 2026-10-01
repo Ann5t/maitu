@@ -10,6 +10,10 @@ recovery_source_app="$recovery_prefix-source-app"
 recovery_target_db="$recovery_prefix-target-db"
 recovery_current_app="$recovery_prefix-current-app"
 recovery_rollback_app="$recovery_prefix-rollback-app"
+recovery_maitu_source_db="$recovery_prefix-maitu-source-db"
+recovery_maitu_target_db="$recovery_prefix-maitu-target-db"
+recovery_maitu_source_app="$recovery_prefix-maitu-source-app"
+recovery_maitu_target_app="$recovery_prefix-maitu-target-app"
 recovery_old_image="$recovery_prefix-bp08"
 recovery_current_image="${FUDIAN_RECOVERY_CURRENT_IMAGE:-fudian-nextgen-runtime:bp09-test}"
 recovery_postgres_image="postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
@@ -34,12 +38,20 @@ recovery_volumes=(
   "$recovery_target_worktrees"
   "$recovery_target_runner"
 )
+recovery_maitu_source_volumes=()
+recovery_maitu_target_volumes=()
+for recovery_storage_class in artifacts repositories worktrees runner; do
+  recovery_maitu_source_volumes+=("$recovery_prefix-maitu-source-$recovery_storage_class")
+  recovery_maitu_target_volumes+=("$recovery_prefix-maitu-target-$recovery_storage_class")
+done
+recovery_volumes+=("${recovery_maitu_source_volumes[@]}" "${recovery_maitu_target_volumes[@]}")
 
 cleanup_recovery_test() {
   local exit_status="$?"
   if (( exit_status != 0 )); then
     for recovery_log_container in \
-      "$recovery_source_app" "$recovery_current_app" "$recovery_rollback_app"; do
+      "$recovery_source_app" "$recovery_current_app" "$recovery_rollback_app" \
+      "$recovery_maitu_source_app" "$recovery_maitu_target_app"; do
       if docker inspect "$recovery_log_container" >/dev/null 2>&1; then
         docker logs "$recovery_log_container" >&2 || true
       fi
@@ -47,7 +59,9 @@ cleanup_recovery_test() {
   fi
   for recovery_container in \
     "$recovery_source_app" "$recovery_current_app" "$recovery_rollback_app" \
-    "$recovery_source_db" "$recovery_target_db"; do
+    "$recovery_source_db" "$recovery_target_db" \
+    "$recovery_maitu_source_app" "$recovery_maitu_target_app" \
+    "$recovery_maitu_source_db" "$recovery_maitu_target_db"; do
     if [[ "$recovery_container" == "$recovery_prefix"-* ]]; then
       docker rm -f "$recovery_container" >/dev/null 2>&1 || true
     fi
@@ -347,3 +361,78 @@ recovery_rollback_state="$(docker exec "$recovery_target_db" psql -U fudian -d f
 [[ "$recovery_rollback_state" == 16:1:1:1 ]]
 
 echo "backup recovery passed: BP08 backup, empty labeled restore, 12-to-16 upgrade, hash preservation and BP08 application rollback"
+
+# A Maitu-only instance has no projects/*.git. Exercise the actual backup/restore
+# scripts with its managed code repository, rather than letting a legacy repo
+# conceal a skipped code-repository validation.
+for recovery_volume in "${recovery_maitu_source_volumes[@]}"; do
+  create_volume "$recovery_volume"
+  chown_volume "$recovery_volume"
+done
+for recovery_volume in "${recovery_maitu_target_volumes[@]}"; do
+  create_volume "$recovery_volume" true
+done
+docker run -d --name "$recovery_maitu_source_db" --network "$recovery_network" \
+  --network-alias maitu-recovery-source-db \
+  -e POSTGRES_USER=fudian -e "POSTGRES_PASSWORD=$recovery_database_password" \
+  -e POSTGRES_DB=fudian "$recovery_postgres_image" >/dev/null
+wait_for_database "$recovery_maitu_source_db"
+run_app "$recovery_maitu_source_app" "$recovery_current_image" maitu-recovery-source-db \
+  "${recovery_maitu_source_volumes[@]}" >/dev/null
+recovery_maitu_source_port="$(wait_for_app "$recovery_maitu_source_app")"
+recovery_maitu_source_base="http://127.0.0.1:$recovery_maitu_source_port"
+recovery_maitu_project="$(curl -fsS -H 'content-type: application/json' \
+  -d '{"intent":"Maitu managed code backup recovery"}' \
+  "$recovery_maitu_source_base/api/projects")"
+recovery_maitu_project_id="$(json_field "$recovery_maitu_project" id)"
+python3 -c 'import json,sys
+print(json.dumps({"requestId":sys.argv[1],"sourceName":"recovery fixture",
+  "files":[{"path":"index.js","content":"module.exports = 42;\n"}],
+  "checks":[{"id":"syntax","label":"syntax","program":"node",
+             "args":["--check","index.js"]}]}))' \
+  "$(new_uuid)" \
+  | curl -fsS -H 'content-type: application/json' --data-binary @- \
+    "$recovery_maitu_source_base/api/maitu/projects/$recovery_maitu_project_id/code" >/dev/null
+curl -fsS "$recovery_maitu_source_base/api/maitu/projects/$recovery_maitu_project_id" \
+  >"$recovery_tmp/maitu-before.json"
+curl -fsS "$recovery_maitu_source_base/api/maitu/projects/$recovery_maitu_project_id/code/export" \
+  >"$recovery_tmp/maitu-before.tar"
+docker exec "$recovery_maitu_source_app" sh -ec \
+  'test ! -d /data/repositories/projects && test -d /data/repositories/maitu-code'
+
+FUDIAN_BACKUP_DATABASE_CONTAINER="$recovery_maitu_source_db" \
+FUDIAN_BACKUP_POSTGRES_USER=fudian FUDIAN_BACKUP_POSTGRES_DB=fudian \
+FUDIAN_BACKUP_APP_CONTAINER="$recovery_maitu_source_app" \
+FUDIAN_BACKUP_ARTIFACT_VOLUME="${recovery_maitu_source_volumes[0]}" \
+FUDIAN_BACKUP_REPOSITORY_VOLUME="${recovery_maitu_source_volumes[1]}" \
+FUDIAN_BACKUP_WORKTREE_VOLUME="${recovery_maitu_source_volumes[2]}" \
+FUDIAN_BACKUP_RUNNER_VOLUME="${recovery_maitu_source_volumes[3]}" \
+  "$recovery_repo_root/scripts/backup-v2.sh" "$recovery_tmp/maitu-backups" >/dev/null
+recovery_maitu_bundle="$(find "$recovery_tmp/maitu-backups" -mindepth 1 -maxdepth 1 -type d \
+  ! -name '.partial-*' -print -quit)"
+docker run -d --name "$recovery_maitu_target_db" --network "$recovery_network" \
+  --network-alias maitu-recovery-target-db --label com.fudian.restore-target=true \
+  -e POSTGRES_USER=fudian -e "POSTGRES_PASSWORD=$recovery_database_password" \
+  -e POSTGRES_DB=fudian "$recovery_postgres_image" >/dev/null
+wait_for_database "$recovery_maitu_target_db"
+FUDIAN_RESTORE_CONFIRM=EMPTY_LABELED_TARGETS \
+FUDIAN_RESTORE_DATABASE_CONTAINER="$recovery_maitu_target_db" \
+FUDIAN_RESTORE_POSTGRES_USER=fudian FUDIAN_RESTORE_POSTGRES_DB=fudian \
+FUDIAN_RESTORE_ARTIFACT_VOLUME="${recovery_maitu_target_volumes[0]}" \
+FUDIAN_RESTORE_REPOSITORY_VOLUME="${recovery_maitu_target_volumes[1]}" \
+FUDIAN_RESTORE_WORKTREE_VOLUME="${recovery_maitu_target_volumes[2]}" \
+FUDIAN_RESTORE_RUNNER_VOLUME="${recovery_maitu_target_volumes[3]}" \
+FUDIAN_RESTORE_APP_IMAGE="$recovery_current_image" \
+  "$recovery_repo_root/scripts/restore-v2.sh" "$recovery_maitu_bundle" >/dev/null
+run_app "$recovery_maitu_target_app" "$recovery_current_image" maitu-recovery-target-db \
+  "${recovery_maitu_target_volumes[@]}" >/dev/null
+recovery_maitu_target_port="$(wait_for_app "$recovery_maitu_target_app")"
+curl -fsS "http://127.0.0.1:$recovery_maitu_target_port/api/maitu/projects/$recovery_maitu_project_id" \
+  >"$recovery_tmp/maitu-after.json"
+curl -fsS "http://127.0.0.1:$recovery_maitu_target_port/api/maitu/projects/$recovery_maitu_project_id/code/export" \
+  >"$recovery_tmp/maitu-after.tar"
+python3 -c 'import json,sys
+assert json.load(open(sys.argv[1])) == json.load(open(sys.argv[2]))' \
+  "$recovery_tmp/maitu-before.json" "$recovery_tmp/maitu-after.json"
+cmp "$recovery_tmp/maitu-before.tar" "$recovery_tmp/maitu-after.tar"
+echo "Maitu backup recovery passed: code-only instance, strict Git validation, identical project and code export"
