@@ -1,6 +1,6 @@
 # 旧仓库迁入与删除准备
 
-2026-10-01 更新。状态：迁移操作方案；尚未完成迁移或删除验收。最终存放仓库为 `Ann5t/maitu`。先完成[日常使用路线](../product/completion-roadmap.md)，再进行内容收拢，逐库报告是否具备删除条件。当前不删除任何旧仓库。
+2026-10-02 更新。状态：迁移与恢复验收已完成，五库具备删除条件，删除由用户决定。最终存放仓库为 `Ann5t/maitu`。归档与验收记录见[来源清单](../archive/sources/2026-10-02-migration-manifest.md)与[恢复验收](../archive/sources/2026-10-02-restore-verification.md)。先完成[日常使用路线](../product/completion-roadmap.md)，再进行内容收拢，逐库报告是否具备删除条件。当前不删除任何旧仓库。
 
 ## 当前盘点
 
