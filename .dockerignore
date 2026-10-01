@@ -3,6 +3,10 @@ target
 data
 .env
 .env.*
+secrets
+backups
+test-results
+playwright-report
 Dockerfile*
 compose*.yaml
 
