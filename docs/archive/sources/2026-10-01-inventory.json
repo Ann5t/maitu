@@ -1,0 +1,642 @@
+{
+  "observedAt": "2026-10-01T07:21:38.753114+00:00",
+  "method": "Authenticated GitHub metadata read plus git clone --mirror and local object inspection. No old repository was modified.",
+  "scope": "Refs advertised by GitHub at observation time, not hidden or unreachable objects. Local mirrors are inspection copies, not a published migration.",
+  "sources": [
+    {
+      "repository": "fudian",
+      "url": "https://github.com/Ann5t/fudian",
+      "defaultBranch": "feat/goal-branch-core-v0.1",
+      "defaultHead": "fb5e4d9b5211d77937ca2903bfb2db5a221639dc",
+      "defaultBranchCommitCount": 79,
+      "allMirroredRefsCommitCount": 92,
+      "isShallow": false,
+      "objectVerification": "git fsck --full --strict passed",
+      "refs": [
+        {
+          "ref": "refs/heads/feat/first-testable-baseline",
+          "sha": "71c919036584180d7c2c0a3ec3f0e4d525472009"
+        },
+        {
+          "ref": "refs/heads/feat/goal-branch-core-v0.1",
+          "sha": "fb5e4d9b5211d77937ca2903bfb2db5a221639dc"
+        }
+      ],
+      "branches": [
+        {
+          "name": "feat/first-testable-baseline",
+          "sha": "71c919036584180d7c2c0a3ec3f0e4d525472009",
+          "tree": "6dbbe29397be9aaeba6e5014bb824e2d91c94939",
+          "commitsNotInDefaultBranch": 13
+        },
+        {
+          "name": "feat/goal-branch-core-v0.1",
+          "sha": "fb5e4d9b5211d77937ca2903bfb2db5a221639dc",
+          "tree": "717f50de29029ed791da62664bb76eeafcfbe663",
+          "commitsNotInDefaultBranch": 0
+        }
+      ],
+      "tagCount": 0,
+      "releaseCount": 0,
+      "releaseAssetCount": 0,
+      "githubIssueCount": 0,
+      "githubPullRequestCount": 0,
+      "wikiEnabled": false,
+      "wikiContentVerification": "disabled",
+      "lfsPointerBlobCount": 0,
+      "lfsScanScope": "all blobs reachable from mirrored advertised refs",
+      "gitlinkPathsAtMirroredRefs": [],
+      "largestReachableBlobBytes": 485976,
+      "backupPublishedInMaitu": false,
+      "emptyTargetRestoreVerified": false,
+      "originalLocalRuntimeAndUncommittedDataAudit": "not_inspected",
+      "deletionReady": false
+    },
+    {
+      "repository": "project1",
+      "url": "https://github.com/Ann5t/project1",
+      "defaultBranch": "main",
+      "defaultHead": "2553a0a61e2b2d5a4a5e7cbb751be5391bb99fbe",
+      "defaultBranchCommitCount": 5,
+      "allMirroredRefsCommitCount": 40,
+      "isShallow": false,
+      "objectVerification": "git fsck --full --strict passed",
+      "refs": [
+        {
+          "ref": "refs/heads/dependabot/cargo/comrak-0.52.0",
+          "sha": "a7cc25c6557483ad7cf084ea2d85463ccc59a1f4"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/hmac-0.13.0",
+          "sha": "3f35e61f71d7e776c71415f7ed1d58edcd6c6e58"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/quick-xml-0.40.1",
+          "sha": "97ef77d01aef221076b81342baec98d44b141daf"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/rand-0.9.4",
+          "sha": "1f445d92e7d21cbe42f8b13f16a50e0b9ea2b165"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/reqwest-0.13.4",
+          "sha": "288bb3b56bef714e4d38679634ba08cfed93c9f4"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/sha1-0.11.0",
+          "sha": "068421157ecb0869f8519b586cee5444efae468b"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/sqlx-0.9.0",
+          "sha": "10eb857179fe52035fbe87bbb14eefe6671f1b84"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/sysinfo-0.39.5",
+          "sha": "0d729be93a56ffc60ce89542a89f585dca1d53f2"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/tokio-cron-scheduler-0.15.1",
+          "sha": "0792eb515787f053afa35a299a79a36dc2ebc364"
+        },
+        {
+          "ref": "refs/heads/dependabot/cargo/tower-http-0.7.0",
+          "sha": "7be3a123eef132e7ddc9d4d40240701cae6ba36b"
+        },
+        {
+          "ref": "refs/heads/dependabot/docker/rust-1.98-slim-bookworm",
+          "sha": "12bdcf12435a82f6a4af1d9dcd5de977b6be355e"
+        },
+        {
+          "ref": "refs/heads/dependabot/github_actions/actions/checkout-7",
+          "sha": "effbc95b196d3d9f11d537bf0490c6c5c505ece2"
+        },
+        {
+          "ref": "refs/heads/dependabot/github_actions/docker/build-push-action-7",
+          "sha": "af1641c039cedcc4313f2341cd0d0c6a8bd5ea8b"
+        },
+        {
+          "ref": "refs/heads/dependabot/github_actions/docker/login-action-4",
+          "sha": "049626e51de8023b5cb231824f4ea5306a672222"
+        },
+        {
+          "ref": "refs/heads/dependabot/github_actions/docker/metadata-action-6",
+          "sha": "9f49932ffefb76c444b616450cf97f68601c8771"
+        },
+        {
+          "ref": "refs/heads/dependabot/github_actions/docker/setup-buildx-action-4",
+          "sha": "73b86403b1c7ac3ea94a29fec6e99ec75be75557"
+        },
+        {
+          "ref": "refs/heads/main",
+          "sha": "2553a0a61e2b2d5a4a5e7cbb751be5391bb99fbe"
+        },
+        {
+          "ref": "refs/pull/1/head",
+          "sha": "fcda88d69d5af1d688c417ed07934abb14717e9f"
+        },
+        {
+          "ref": "refs/pull/10/head",
+          "sha": "288bb3b56bef714e4d38679634ba08cfed93c9f4"
+        },
+        {
+          "ref": "refs/pull/10/merge",
+          "sha": "4e83944fe989a00042618aad6e41466b9411d718"
+        },
+        {
+          "ref": "refs/pull/11/head",
+          "sha": "3f35e61f71d7e776c71415f7ed1d58edcd6c6e58"
+        },
+        {
+          "ref": "refs/pull/11/merge",
+          "sha": "20ca985b8459f28e5073af59d4ffc4f295ee4aab"
+        },
+        {
+          "ref": "refs/pull/12/head",
+          "sha": "0d729be93a56ffc60ce89542a89f585dca1d53f2"
+        },
+        {
+          "ref": "refs/pull/12/merge",
+          "sha": "120bd74abb7989757ca95ae1746d26f8e083f02d"
+        },
+        {
+          "ref": "refs/pull/13/head",
+          "sha": "0792eb515787f053afa35a299a79a36dc2ebc364"
+        },
+        {
+          "ref": "refs/pull/13/merge",
+          "sha": "7f244504c8d86ae3c50bf401858637333505abea"
+        },
+        {
+          "ref": "refs/pull/14/head",
+          "sha": "a7cc25c6557483ad7cf084ea2d85463ccc59a1f4"
+        },
+        {
+          "ref": "refs/pull/14/merge",
+          "sha": "f4fffc7a432d0f1211099ec5d119a5d2b425b2e6"
+        },
+        {
+          "ref": "refs/pull/15/head",
+          "sha": "7be3a123eef132e7ddc9d4d40240701cae6ba36b"
+        },
+        {
+          "ref": "refs/pull/15/merge",
+          "sha": "efd87bb1de0a2eef9bab498cbed2c059b5bafb12"
+        },
+        {
+          "ref": "refs/pull/16/head",
+          "sha": "10eb857179fe52035fbe87bbb14eefe6671f1b84"
+        },
+        {
+          "ref": "refs/pull/16/merge",
+          "sha": "c28fccfaf3c468fc1d28925f4777771849e0bfd4"
+        },
+        {
+          "ref": "refs/pull/17/head",
+          "sha": "effbc95b196d3d9f11d537bf0490c6c5c505ece2"
+        },
+        {
+          "ref": "refs/pull/17/merge",
+          "sha": "b387a8952081752d725af94da726a1c37ea80df6"
+        },
+        {
+          "ref": "refs/pull/18/head",
+          "sha": "ac485a276071f2d5d77c39bfdfcbb99af55975c5"
+        },
+        {
+          "ref": "refs/pull/19/head",
+          "sha": "12bdcf12435a82f6a4af1d9dcd5de977b6be355e"
+        },
+        {
+          "ref": "refs/pull/19/merge",
+          "sha": "e3c3349d7016ef56d16f0d0d73eccac834509665"
+        },
+        {
+          "ref": "refs/pull/2/head",
+          "sha": "9f49932ffefb76c444b616450cf97f68601c8771"
+        },
+        {
+          "ref": "refs/pull/2/merge",
+          "sha": "1fe471416a558c26c887f9785846c0251bf7a0c6"
+        },
+        {
+          "ref": "refs/pull/3/head",
+          "sha": "a4579c187a59b4119d8c433658ecabd67ec5acb2"
+        },
+        {
+          "ref": "refs/pull/4/head",
+          "sha": "049626e51de8023b5cb231824f4ea5306a672222"
+        },
+        {
+          "ref": "refs/pull/4/merge",
+          "sha": "4ddc7547cd42650663414335b9b8b731b9f93bd5"
+        },
+        {
+          "ref": "refs/pull/5/head",
+          "sha": "af1641c039cedcc4313f2341cd0d0c6a8bd5ea8b"
+        },
+        {
+          "ref": "refs/pull/5/merge",
+          "sha": "74df9839b78397d4fef30e8ab2e7d95741e8399d"
+        },
+        {
+          "ref": "refs/pull/6/head",
+          "sha": "73b86403b1c7ac3ea94a29fec6e99ec75be75557"
+        },
+        {
+          "ref": "refs/pull/6/merge",
+          "sha": "53ddb52dc1b317caa776838dbd1750d9223038b9"
+        },
+        {
+          "ref": "refs/pull/7/head",
+          "sha": "068421157ecb0869f8519b586cee5444efae468b"
+        },
+        {
+          "ref": "refs/pull/7/merge",
+          "sha": "10fc831bc217dbce7acb32dc210bf4328064f45c"
+        },
+        {
+          "ref": "refs/pull/8/head",
+          "sha": "97ef77d01aef221076b81342baec98d44b141daf"
+        },
+        {
+          "ref": "refs/pull/8/merge",
+          "sha": "6eee860938b43b3de9fd4b6ec35d49e9a287e86a"
+        },
+        {
+          "ref": "refs/pull/9/head",
+          "sha": "1f445d92e7d21cbe42f8b13f16a50e0b9ea2b165"
+        },
+        {
+          "ref": "refs/pull/9/merge",
+          "sha": "67e067ef8fcc160506894d420e27516e2e67f683"
+        }
+      ],
+      "branches": [
+        {
+          "name": "dependabot/cargo/comrak-0.52.0",
+          "sha": "a7cc25c6557483ad7cf084ea2d85463ccc59a1f4",
+          "tree": "bf5e0c4c522bce167ae01721267d6f5165a19514",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/hmac-0.13.0",
+          "sha": "3f35e61f71d7e776c71415f7ed1d58edcd6c6e58",
+          "tree": "315e0b196df9c6f153260de1da5e5180d00c1f35",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/quick-xml-0.40.1",
+          "sha": "97ef77d01aef221076b81342baec98d44b141daf",
+          "tree": "67322277a53d4f727594e6e5ccce8a132d6a9ce5",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/rand-0.9.4",
+          "sha": "1f445d92e7d21cbe42f8b13f16a50e0b9ea2b165",
+          "tree": "d6543ba9fba7e45d391b4f6657531b6d0792b888",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/reqwest-0.13.4",
+          "sha": "288bb3b56bef714e4d38679634ba08cfed93c9f4",
+          "tree": "cae83d7dd4982cbdef3123f4aab1c34599969715",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/sha1-0.11.0",
+          "sha": "068421157ecb0869f8519b586cee5444efae468b",
+          "tree": "d1c6c692a86e01e5894e91ad496e4f8e34c6a66f",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/sqlx-0.9.0",
+          "sha": "10eb857179fe52035fbe87bbb14eefe6671f1b84",
+          "tree": "c95f1441eec438260523ad75c3521dd0837b59f4",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/sysinfo-0.39.5",
+          "sha": "0d729be93a56ffc60ce89542a89f585dca1d53f2",
+          "tree": "729094410d03ba8765a59be5814e51c5633161c6",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/tokio-cron-scheduler-0.15.1",
+          "sha": "0792eb515787f053afa35a299a79a36dc2ebc364",
+          "tree": "f5d54e6f1fc2d77d028c15bb07e35c46892ccfaf",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/cargo/tower-http-0.7.0",
+          "sha": "7be3a123eef132e7ddc9d4d40240701cae6ba36b",
+          "tree": "2f0dab24506323fc0d78dbb9ab87317ff4c43347",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/docker/rust-1.98-slim-bookworm",
+          "sha": "12bdcf12435a82f6a4af1d9dcd5de977b6be355e",
+          "tree": "339d16c91abae3fee209c298e472b14585701ea9",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/github_actions/actions/checkout-7",
+          "sha": "effbc95b196d3d9f11d537bf0490c6c5c505ece2",
+          "tree": "e58fdfa995cf7478dc687a5e7aa55124f74e293f",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/github_actions/docker/build-push-action-7",
+          "sha": "af1641c039cedcc4313f2341cd0d0c6a8bd5ea8b",
+          "tree": "ea985add738c237ac360ce2bcc2a4b9f78e865a9",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/github_actions/docker/login-action-4",
+          "sha": "049626e51de8023b5cb231824f4ea5306a672222",
+          "tree": "5fffb535075393ee67c41e3ff9e31540b841952b",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/github_actions/docker/metadata-action-6",
+          "sha": "9f49932ffefb76c444b616450cf97f68601c8771",
+          "tree": "b1475ce9d1e07f5fabbc1f54a77574402fd86741",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "dependabot/github_actions/docker/setup-buildx-action-4",
+          "sha": "73b86403b1c7ac3ea94a29fec6e99ec75be75557",
+          "tree": "9912185643da57dd98d87718a56714c0372bb684",
+          "commitsNotInDefaultBranch": 1
+        },
+        {
+          "name": "main",
+          "sha": "2553a0a61e2b2d5a4a5e7cbb751be5391bb99fbe",
+          "tree": "5a19ae2788deb50782b8551a3c130bf01b3ae0b8",
+          "commitsNotInDefaultBranch": 0
+        }
+      ],
+      "tagCount": 0,
+      "releaseCount": 0,
+      "releaseAssetCount": 0,
+      "githubIssueCount": 0,
+      "githubPullRequestCount": 19,
+      "wikiEnabled": true,
+      "wikiContentVerification": "not_inspected",
+      "lfsPointerBlobCount": 0,
+      "lfsScanScope": "all blobs reachable from mirrored advertised refs",
+      "gitlinkPathsAtMirroredRefs": [],
+      "largestReachableBlobBytes": 124568,
+      "backupPublishedInMaitu": false,
+      "emptyTargetRestoreVerified": false,
+      "originalLocalRuntimeAndUncommittedDataAudit": "not_inspected",
+      "deletionReady": false
+    },
+    {
+      "repository": "-Encore",
+      "url": "https://github.com/Ann5t/-Encore",
+      "defaultBranch": "master",
+      "defaultHead": "3e9742df633c01dfca2c57a6724b8c01a7aff721",
+      "defaultBranchCommitCount": 37,
+      "allMirroredRefsCommitCount": 101,
+      "isShallow": false,
+      "objectVerification": "git fsck --full --strict passed",
+      "refs": [
+        {
+          "ref": "refs/heads/copilot/check-codex-desktop-functionality",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b"
+        },
+        {
+          "ref": "refs/heads/copilot/research-software-necessity",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b"
+        },
+        {
+          "ref": "refs/heads/feature/fill-stubs",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b"
+        },
+        {
+          "ref": "refs/heads/feature/scaffold",
+          "sha": "e04b448e58d9a21dede3d5590b7454b74d6df49e"
+        },
+        {
+          "ref": "refs/heads/master",
+          "sha": "3e9742df633c01dfca2c57a6724b8c01a7aff721"
+        }
+      ],
+      "branches": [
+        {
+          "name": "copilot/check-codex-desktop-functionality",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b",
+          "tree": "3bbca0d9d41e358844fcc4814bb0c5913679e254",
+          "commitsNotInDefaultBranch": 64
+        },
+        {
+          "name": "copilot/research-software-necessity",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b",
+          "tree": "3bbca0d9d41e358844fcc4814bb0c5913679e254",
+          "commitsNotInDefaultBranch": 64
+        },
+        {
+          "name": "feature/fill-stubs",
+          "sha": "f3891418d10706d07ee8b6474a71537ccc63ec6b",
+          "tree": "3bbca0d9d41e358844fcc4814bb0c5913679e254",
+          "commitsNotInDefaultBranch": 64
+        },
+        {
+          "name": "feature/scaffold",
+          "sha": "e04b448e58d9a21dede3d5590b7454b74d6df49e",
+          "tree": "a5788b88ba75a7e0329e1af566c3b27276e6ec99",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "master",
+          "sha": "3e9742df633c01dfca2c57a6724b8c01a7aff721",
+          "tree": "1384b180690a4c6fe75f8f1d570485c9c0413faf",
+          "commitsNotInDefaultBranch": 0
+        }
+      ],
+      "tagCount": 0,
+      "releaseCount": 0,
+      "releaseAssetCount": 0,
+      "githubIssueCount": 0,
+      "githubPullRequestCount": 0,
+      "wikiEnabled": false,
+      "wikiContentVerification": "disabled",
+      "lfsPointerBlobCount": 0,
+      "lfsScanScope": "all blobs reachable from mirrored advertised refs",
+      "gitlinkPathsAtMirroredRefs": [],
+      "largestReachableBlobBytes": 10659683,
+      "backupPublishedInMaitu": false,
+      "emptyTargetRestoreVerified": false,
+      "originalLocalRuntimeAndUncommittedDataAudit": "not_inspected",
+      "deletionReady": false
+    },
+    {
+      "repository": "personal-ai-hub",
+      "url": "https://github.com/Ann5t/personal-ai-hub",
+      "defaultBranch": "master",
+      "defaultHead": "fb275f0e92645ac974eedec7af9476d3a7aa033b",
+      "defaultBranchCommitCount": 200,
+      "allMirroredRefsCommitCount": 200,
+      "isShallow": false,
+      "objectVerification": "git fsck --full --strict passed",
+      "refs": [
+        {
+          "ref": "refs/heads/codex/add-tests-and-gitignore",
+          "sha": "08ba60e59b03b237c152f11c59fc035085575421"
+        },
+        {
+          "ref": "refs/heads/codex/ai-inbox-organizer",
+          "sha": "b324ea2a88b3eef18ab8a71e3f343a72a9ae7450"
+        },
+        {
+          "ref": "refs/heads/codex/deepseek-ai-drafts",
+          "sha": "3b7c749c4250e4df5a43c316051a55f95ffbd22a"
+        },
+        {
+          "ref": "refs/heads/codex/merge-workspace-git",
+          "sha": "c07a20bc27d776f7b0f7c3d1fc1a6a8b0e6f24ae"
+        },
+        {
+          "ref": "refs/heads/codex/p0-p1-prd-implementation",
+          "sha": "47c481d5d95bf5d9966935c4b65af707e0094038"
+        },
+        {
+          "ref": "refs/heads/codex/phase-1-foundation",
+          "sha": "82939a0d86ef8356e1f26cfdb55b27b78da9ea43"
+        },
+        {
+          "ref": "refs/heads/codex/phase-2-basic-ui",
+          "sha": "ca466403c73fc96bf485abd5351dba6354937781"
+        },
+        {
+          "ref": "refs/heads/codex/update-handoff-workflow",
+          "sha": "752d337e33fac0cfdccd65e497082ad1dfd3e259"
+        },
+        {
+          "ref": "refs/heads/codex/workflow-governance",
+          "sha": "88c012176cab3cb4141ef9c5acc6bce9a557a89f"
+        },
+        {
+          "ref": "refs/heads/master",
+          "sha": "fb275f0e92645ac974eedec7af9476d3a7aa033b"
+        }
+      ],
+      "branches": [
+        {
+          "name": "codex/add-tests-and-gitignore",
+          "sha": "08ba60e59b03b237c152f11c59fc035085575421",
+          "tree": "a0320234d4cde9b2da4d2cc8095910b37eca0e0a",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/ai-inbox-organizer",
+          "sha": "b324ea2a88b3eef18ab8a71e3f343a72a9ae7450",
+          "tree": "3830f8acdce766a0e04d43edb096cf7418610287",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/deepseek-ai-drafts",
+          "sha": "3b7c749c4250e4df5a43c316051a55f95ffbd22a",
+          "tree": "7d4e233667aa40cd3089186d7916bbaeb932bb8b",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/merge-workspace-git",
+          "sha": "c07a20bc27d776f7b0f7c3d1fc1a6a8b0e6f24ae",
+          "tree": "f1255faf1958c58c499593e9e8d5756c39a72d38",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/p0-p1-prd-implementation",
+          "sha": "47c481d5d95bf5d9966935c4b65af707e0094038",
+          "tree": "8ab03e37cda91d61d53a6509c7889f3778169085",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/phase-1-foundation",
+          "sha": "82939a0d86ef8356e1f26cfdb55b27b78da9ea43",
+          "tree": "58e93cdc1187a45742240e76e90324632a4ee05c",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/phase-2-basic-ui",
+          "sha": "ca466403c73fc96bf485abd5351dba6354937781",
+          "tree": "9d34c6fd51fbf23e04b58e346f5202b97a5c026f",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/update-handoff-workflow",
+          "sha": "752d337e33fac0cfdccd65e497082ad1dfd3e259",
+          "tree": "94d627b227d06fb2b08579ce52e5e7ed27cc7520",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "codex/workflow-governance",
+          "sha": "88c012176cab3cb4141ef9c5acc6bce9a557a89f",
+          "tree": "2021acd04e183e5b7ecb6a7025fa5bf4fead160e",
+          "commitsNotInDefaultBranch": 0
+        },
+        {
+          "name": "master",
+          "sha": "fb275f0e92645ac974eedec7af9476d3a7aa033b",
+          "tree": "dad51352ff05aade07bb076eedd3bf68f37bf8a8",
+          "commitsNotInDefaultBranch": 0
+        }
+      ],
+      "tagCount": 0,
+      "releaseCount": 0,
+      "releaseAssetCount": 0,
+      "githubIssueCount": 0,
+      "githubPullRequestCount": 0,
+      "wikiEnabled": false,
+      "wikiContentVerification": "disabled",
+      "lfsPointerBlobCount": 0,
+      "lfsScanScope": "all blobs reachable from mirrored advertised refs",
+      "gitlinkPathsAtMirroredRefs": [],
+      "largestReachableBlobBytes": 236873,
+      "backupPublishedInMaitu": false,
+      "emptyTargetRestoreVerified": false,
+      "originalLocalRuntimeAndUncommittedDataAudit": "not_inspected",
+      "deletionReady": false
+    },
+    {
+      "repository": "the-hive",
+      "url": "https://github.com/Ann5t/the-hive",
+      "defaultBranch": "master",
+      "defaultHead": "1c4c230137c657d9486a91782573e7f5bff1fde4",
+      "defaultBranchCommitCount": 42,
+      "allMirroredRefsCommitCount": 42,
+      "isShallow": false,
+      "objectVerification": "git fsck --full --strict passed",
+      "refs": [
+        {
+          "ref": "refs/heads/master",
+          "sha": "1c4c230137c657d9486a91782573e7f5bff1fde4"
+        }
+      ],
+      "branches": [
+        {
+          "name": "master",
+          "sha": "1c4c230137c657d9486a91782573e7f5bff1fde4",
+          "tree": "5e9ad329e1ac553e73bb294a447216ea50bc8ebe",
+          "commitsNotInDefaultBranch": 0
+        }
+      ],
+      "tagCount": 0,
+      "releaseCount": 0,
+      "releaseAssetCount": 0,
+      "githubIssueCount": 0,
+      "githubPullRequestCount": 0,
+      "wikiEnabled": false,
+      "wikiContentVerification": "disabled",
+      "lfsPointerBlobCount": 0,
+      "lfsScanScope": "all blobs reachable from mirrored advertised refs",
+      "gitlinkPathsAtMirroredRefs": [],
+      "largestReachableBlobBytes": 78308,
+      "backupPublishedInMaitu": false,
+      "emptyTargetRestoreVerified": false,
+      "originalLocalRuntimeAndUncommittedDataAudit": "not_inspected",
+      "deletionReady": false
+    }
+  ]
+}
