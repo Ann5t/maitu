@@ -12,6 +12,8 @@ use crate::{
     application::projects,
     error::{AppError, AppResult},
     maitu::{
+        code,
+        plans::{self, AdoptPlanRequest, GeneratePlanRequest},
         provider::ProviderConfig,
         workflows::{self, AcceptRequest, AddSourceRequest, CreateTaskRequest, StartRequest},
     },
@@ -30,7 +32,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js?v=provider-save-2" defer {}
+                script src="/assets/maitu.js?v=project-execution-1" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -42,7 +44,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                             a href="/maitu/settings" class=(if mode == "settings" { "is-active" } else { "" }) { "⚙ 模型连接" }
                         }
                         div class="maitu-nav-bottom" {
-                            p { "资料 → 任务 → 成果" }
+                            p { "想法 → 任务图 → 成果" }
                             button type="button" data-theme-set="light" aria-label="浅色主题" { "浅色" }
                             button type="button" data-theme-set="dark" aria-label="深色主题" { "深色" }
                             a href="/legacy" { "早期工作台" }
@@ -112,8 +114,16 @@ pub async fn project_page(
             div { a class="maitu-back" href="/" { "← 全部项目" } h1 { (&project.title) } p { (&project.intent) } }
             div class="maitu-head-actions" {
                 span id="maitu-capacity" class="maitu-capacity" { "读取执行状态…" }
+                button id="maitu-generate-plan" type="button" class="maitu-button" { "生成推进计划" }
                 button id="maitu-start-ready" type="button" class="maitu-button" { "启动待执行任务" }
                 button id="maitu-new-task" type="button" class="maitu-button maitu-button--primary" { "+ 添加任务" }
+            }
+        }
+        section id="maitu-code-project" class="maitu-code-project" {
+            div { strong { "项目代码" } p id="maitu-code-state" class="maitu-note" { "可以导入代码副本，让节点真实修改并运行检查。" } }
+            div class="maitu-head-actions" {
+                button id="maitu-import-code" type="button" class="maitu-button" { "导入代码文件夹" }
+                a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
         div class="maitu-workspace" {
@@ -138,10 +148,51 @@ pub async fn project_page(
             form id="maitu-task-create" {
                 div class="maitu-section-head" { h2 { "添加任务" } button type="button" class="maitu-close" data-close-dialog="maitu-task-dialog" aria-label="关闭添加任务" { "×" } }
                 label { "任务名称" input name="title" required maxlength="120" placeholder="例如：整理需求、检查风险、拟定推进计划"; }
+                label { "任务类型" select name="taskKind" {
+                    option value="file" { "读取资料并产出文件" }
+                    option value="code" { "修改代码并运行检查" }
+                } }
                 label { "具体要求" textarea name="instruction" required maxlength="16000" rows="4" placeholder="说明希望它读取什么、分析什么，以及文件中应包含什么。" {} }
                 label { "成果文件名" input name="outputFilename" required maxlength="80" value="result.md"; }
+                label { "怎样算完成" textarea name="acceptanceCriteria" rows="2" maxlength="8000" placeholder="例如：原有行为保留，新增情况有验证，项目检查通过。" {} }
                 fieldset { legend { "使用哪些资料" } p class="maitu-note" { "未选择时，使用启动时项目的全部资料。" } div id="maitu-task-sources" class="maitu-checks" {} }
                 fieldset { legend { "依赖哪些前序任务" } p class="maitu-note" { "等待前序成果被采用后执行，引用的成果版本会保留在记录中。" } div id="maitu-task-dependencies" class="maitu-checks" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "加入任务图" }
+            }
+        }
+        dialog id="maitu-code-import-dialog" class="maitu-dialog" {
+            form id="maitu-code-import-form" {
+                div class="maitu-section-head" { h2 { "导入代码副本" } button type="button" class="maitu-close" data-close-dialog="maitu-code-import-dialog" aria-label="关闭代码导入" { "×" } }
+                p { "选择代码文件夹。脉图保存独立副本，每次执行都从固定版本开始；原文件夹由你继续管理。" }
+                label { "代码文件夹" input id="maitu-code-files" type="file" webkitdirectory directory multiple required; }
+                p id="maitu-code-import-count" class="maitu-note" { "最多 2,000 个文本文件、20 MiB，单件最多 1 MiB。构建缓存、真实环境配置与非文本原件会跳过。" }
+                label { "检查方式" select name="checkProgram" {
+                    option value="node" { "Node：运行项目测试" }
+                    option value="python3" { "Python：运行单元测试" }
+                    option value="cargo" { "Rust：运行项目测试" }
+                } }
+                label { "检查名称" input name="checkLabel" value="项目测试" required maxlength="120"; }
+                label { "检查参数" textarea name="checkArgs" rows="3" required { "--test" } }
+                p class="maitu-note" { "每行一个参数。检查环境提供 Node、Python 和 Rust，在隔离环境实际运行；所需依赖须已随项目提供。" }
+                button type="submit" class="maitu-button maitu-button--primary" { "保存代码基线" }
+            }
+        }
+        dialog id="maitu-plan-generate-dialog" class="maitu-dialog" {
+            form id="maitu-plan-generate-form" {
+                div class="maitu-section-head" { h2 { "怎样推进这个想法？" } button type="button" class="maitu-close" data-close-dialog="maitu-plan-generate-dialog" aria-label="关闭计划要求" { "×" } }
+                p { "以项目目标和资料为依据，提出任务、依赖和验收要求。生成后可以调整，再决定加入图中。" }
+                label { "补充要求" textarea name="instruction" rows="4" maxlength="8000" placeholder="例如：先做一个可用版本，把互不依赖的部分同时推进……" {} }
+                fieldset { legend { "参考资料" } p class="maitu-note" { "未选时使用当前全部项目资料。" } div id="maitu-plan-sources" class="maitu-checks" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "生成计划" }
+            }
+        }
+        dialog id="maitu-plan-review-dialog" class="maitu-dialog maitu-dialog--wide" {
+            form id="maitu-plan-review-form" {
+                div class="maitu-section-head" { h2 { "调整推进计划" } button type="button" class="maitu-close" data-close-dialog="maitu-plan-review-dialog" aria-label="关闭计划编辑" { "×" } }
+                label { "推进思路" textarea name="summary" rows="3" required maxlength="5000" {} }
+                div id="maitu-plan-questions" {}
+                div id="maitu-plan-edit-tasks" {}
+                p class="maitu-note" { "加入图中后先保持待启动，由你决定开始执行。原始计划和本次调整都会保留。" }
                 button type="submit" class="maitu-button maitu-button--primary" { "加入任务图" }
             }
         }
@@ -153,6 +204,14 @@ pub async fn project_page(
                 label { "资料文件名" input name="filename" required value="资料.txt" maxlength="80"; }
                 label { "资料内容" textarea name="content" required rows="7" maxlength="250000" {} }
                 button type="submit" class="maitu-button maitu-button--primary" { "保存到项目" }
+            }
+        }
+        dialog id="maitu-retry-dialog" class="maitu-dialog" {
+            form id="maitu-retry-form" {
+                div class="maitu-section-head" { h2 { "补充要求后再执行" } button type="button" class="maitu-close" data-close-dialog="maitu-retry-dialog" aria-label="关闭补充要求" { "×" } }
+                p class="maitu-note" { "新建一次尝试，固定新的要求与代码基线；原输入、改动和检查记录保留。" }
+                label { "本次补充要求" textarea name="additionalInstruction" required maxlength="8000" rows="5" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "开始新尝试" }
             }
         }
         dialog id="maitu-output-dialog" class="maitu-dialog maitu-dialog--wide" {
@@ -233,6 +292,22 @@ pub async fn create_task(
         workflows::create_task(&state.pool, id, input).await?
     )))
 }
+pub async fn generate_plan(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<GeneratePlanRequest>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(json!(plans::generate(&state.pool, id, input).await?)))
+}
+pub async fn adopt_plan(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<AdoptPlanRequest>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(
+        json!({"taskIds":plans::adopt(&state.pool, id, input).await?}),
+    ))
+}
 pub async fn add_source(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -260,7 +335,13 @@ pub async fn start_task(
     Json(input): Json<StartRequest>,
 ) -> AppResult<Json<Value>> {
     Ok(Json(json!(
-        workflows::start(&state.pool, id, input.request_id).await?
+        workflows::start_with_instruction(
+            &state.pool,
+            id,
+            input.request_id,
+            &input.additional_instruction
+        )
+        .await?
     )))
 }
 pub async fn accept_output(
@@ -268,7 +349,46 @@ pub async fn accept_output(
     Path(id): Path<Uuid>,
     Json(input): Json<AcceptRequest>,
 ) -> AppResult<Json<Value>> {
-    Ok(Json(json!(
+    let task = workflows::task(&state.pool, id).await?;
+    let result = if task.task_kind == "code" {
+        code::adopt(&state, id, input.attempt_id).await?
+    } else {
         workflows::accept(&state.pool, id, input.attempt_id).await?
-    )))
+    };
+    Ok(Json(json!(result)))
+}
+
+pub async fn import_code(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<code::ImportRequest>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(json!(code::import(&state, id, input).await?)))
+}
+
+pub async fn export_code(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "application/x-tar"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"maitu-project.tar\"",
+            ),
+        ],
+        code::export(&state, id).await?,
+    )
+        .into_response())
+}
+
+pub async fn code_diff(
+    State(state): State<Arc<AppState>>,
+    Path((task, attempt)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(
+        json!({"content":code::working_diff(&state,task,attempt).await?}),
+    ))
 }

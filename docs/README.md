@@ -8,6 +8,8 @@
 - [首版范围](product/maitu-scope.md)
 - [实施进度](development/maitu-progress.md)
 - [从想法到编码成果 Goal](development/code-workflow-goal.md)
+- [本机使用与代码导入](operations/maitu-local.md)
+- [目标与编码执行的实现选择](decisions/maitu-0002-goal-to-code-workflow.md)
 - [旧项目来源](product/source-projects.md)
 - [旧仓库迁入与删除准备](operations/legacy-repository-migration.md)
 - [产品设计建议](product/maitu-design.md)

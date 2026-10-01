@@ -1669,6 +1669,9 @@ fn is_high_cost_path(path: &str) -> bool {
         || path.contains("/plugins/install")
         || path.contains("/runner-jobs")
         || (path.starts_with("/api/maitu/tasks/") && path.ends_with("/start"))
+        || (path.starts_with("/api/maitu/projects/") && path.ends_with("/plans"))
+        || (path.starts_with("/api/maitu/projects/") && path.ends_with("/code"))
+        || (path.starts_with("/api/maitu/tasks/") && path.ends_with("/accept"))
 }
 
 fn is_public_path(path: &str) -> bool {

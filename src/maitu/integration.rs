@@ -109,6 +109,8 @@ async fn new_task(
             title: title.into(),
             instruction: instruction.into(),
             output_filename: format!("{title}.md"),
+            task_kind: "file".into(),
+            acceptance_criteria: String::new(),
             source_ids: Vec::new(),
             dependency_ids: parents,
         },

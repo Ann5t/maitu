@@ -31,6 +31,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /app/target/release/fudian /usr/local/bin/fudian
 COPY --from=builder /app/target/release/fudian-maintenance /usr/local/bin/fudian-maintenance
+COPY --from=builder /app/target/release/maitu-check-worker /usr/local/bin/maitu-check-worker
 COPY --chown=fudian:fudian assets ./assets
 USER fudian
 ENV FUDIAN_BIND=0.0.0.0:3000 \
@@ -48,3 +49,14 @@ COPY --from=builder /app/target/release/fudian-tool-runtime /opt/fudian/fudian-t
 USER runner
 WORKDIR /workspace/input
 ENTRYPOINT ["/usr/local/bin/fudian-runner"]
+
+FROM toolchain AS code-runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 1000 --create-home checker \
+    && mkdir -p /input
+COPY --from=builder /app/target/release/maitu-code-check /usr/local/bin/maitu-code-check
+USER checker
+WORKDIR /input
+ENTRYPOINT ["/usr/local/bin/maitu-code-check"]

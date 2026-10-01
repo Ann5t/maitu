@@ -21,6 +21,7 @@
 - `test-ideas-http.sh`
 - `test-inputs-http.sh`
 - `test-tooling-http.sh`
+- `test-maitu-code-workflow.sh`：计划采用、真实进程、并行代码、失败修正、冲突与中断恢复
 - `test-workspace-runner-http.sh`
 - `test-scheduler-http.sh`
 - `test-review-integration-http.sh`

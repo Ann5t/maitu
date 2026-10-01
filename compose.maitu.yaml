@@ -24,14 +24,17 @@ services:
       - sh
       - -ec
       - >-
-        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config
-        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config
+        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config /run/maitu-executor
+        && if [ ! -s /run/maitu-executor/token ]; then umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' >/run/maitu-executor/token; fi
+        && chmod 700 /run/maitu-executor && chmod 600 /run/maitu-executor/token
+        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config /run/maitu-executor
     volumes:
       - artifacts:/data/artifacts
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
       - provider_config:/data/maitu-config
+      - executor_auth:/run/maitu-executor
     tmpfs:
       - /var/lib/postgresql/data
     restart: "no"
@@ -53,6 +56,8 @@ services:
       WORKTREE_ROOT: /data/worktrees
       RUNNER_OUTPUT_ROOT: /data/runner
       MAITU_CONFIG_ROOT: /data/maitu-config
+      MAITU_CHECK_WORKER_URL: http://check-worker:3001
+      MAITU_CHECK_WORKER_TOKEN_FILE: /run/maitu-executor/token
       RUST_LOG: fudian=info,tower_http=info
     ports:
       - "127.0.0.1:${MAITU_PORT:-3033}:3000"
@@ -62,11 +67,15 @@ services:
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
       - provider_config:/data/maitu-config
+      - executor_auth:/run/maitu-executor:ro
+    networks: [default, executor]
     depends_on:
       postgres:
         condition: service_healthy
       storage-init:
         condition: service_completed_successfully
+      check-worker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "fudian", "healthcheck", "127.0.0.1:3000"]
       interval: 10s
@@ -77,6 +86,47 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
 
+  code-runtime:
+    image: maitu-code-runtime:local
+    build:
+      context: .
+      target: code-runtime
+      args:
+        HTTP_PROXY: ${MAITU_BUILD_PROXY:-}
+        HTTPS_PROXY: ${MAITU_BUILD_PROXY:-}
+    command: ["--version"]
+    network_mode: none
+    read_only: true
+    restart: "no"
+
+  check-worker:
+    image: maitu-app:local
+    command: ["maitu-check-worker"]
+    environment:
+      MAITU_WORKTREE_VOLUME: ${MAITU_INSTANCE:-maitu}_worktrees
+      MAITU_CHECK_RECORD_ROOT: /data/runner/code-checks
+      MAITU_CODE_IMAGE: maitu-code-runtime:local
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner_outputs:/data/runner
+      - executor_auth:/run/maitu-executor:ro
+    networks: [executor]
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+      code-runtime:
+        condition: service_completed_successfully
+    # The model's project commands never receive this trusted controller's socket.
+    user: "0:0"
+    healthcheck:
+      test: ["CMD", "fudian", "healthcheck", "127.0.0.1:3001"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    init: true
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   artifacts:
@@ -84,3 +134,8 @@ volumes:
   worktrees:
   runner_outputs:
   provider_config:
+  executor_auth:
+
+networks:
+  executor:
+    internal: true

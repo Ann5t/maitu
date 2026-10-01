@@ -52,7 +52,7 @@ if [[ -n "$backup_app_container" ]]; then
   docker exec "$backup_app_container" sh -ec '
     repository_root="${REPOSITORY_ROOT:-/data/repositories}"
     found=0
-    for repository in "$repository_root"/projects/*.git; do
+    for repository in "$repository_root"/projects/*.git "$repository_root"/maitu-code/*/repository.git; do
       [ -d "$repository" ] || continue
       found=1
       git --git-dir "$repository" fsck --strict
@@ -111,7 +111,7 @@ archive_volume "$backup_runner_volume" runner-outputs.tar.gz runner-outputs.file
 
 echo "备份当前可构建源码（排除 .env、secret、数据与 Git 凭据）"
 tar -czf "$backup_partial/source.tar.gz" -C "$backup_repo_root" \
-  Cargo.toml Cargo.lock Dockerfile compose.yaml compose.secure.yaml compose.secure-public.yaml \
+  Cargo.toml Cargo.lock Dockerfile compose.yaml compose.secure.yaml compose.secure-public.yaml compose.maitu.yaml \
   Makefile .env.example .env.secure.example README.md \
   src migrations assets deploy docs scripts recovery .github
 

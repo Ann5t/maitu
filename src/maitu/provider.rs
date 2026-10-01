@@ -247,7 +247,7 @@ pub struct ProviderFailure {
 }
 
 impl ProviderFailure {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(super) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -305,22 +305,88 @@ pub async fn complete(
     prompt: &str,
 ) -> Result<Completion, ProviderFailure> {
     check_context_budget(config, prompt)?;
+    complete_with_system(config, SYSTEM_PROMPT, prompt, false).await
+}
+
+pub async fn complete_with_system(
+    config: &ProviderConfig,
+    system: &str,
+    prompt: &str,
+    json_output: bool,
+) -> Result<Completion, ProviderFailure> {
+    let mut request = request_base(
+        config,
+        json!([
+            {"role":"system", "content":system},
+            {"role":"user", "content":prompt}
+        ]),
+    );
+    if json_output {
+        request["response_format"] = json!({"type":"json_object"});
+    }
+    let body = send_request(config, request).await?;
+    parse_completion(&body)
+}
+
+pub struct ChatTurn {
+    pub message: Value,
+    pub usage: Value,
+}
+
+pub async fn chat(
+    config: &ProviderConfig,
+    messages: &[Value],
+    tools: &Value,
+) -> Result<ChatTurn, ProviderFailure> {
+    let mut request = request_base(config, json!(messages));
+    request["tools"] = tools.clone();
+    let body = send_request(config, request).await?;
+    let response: Value = serde_json::from_slice(&body).map_err(|_| {
+        ProviderFailure::new("provider_invalid_response", "模型返回无法读取的工具请求")
+    })?;
+    let choice = &response["choices"][0];
+    let message = &choice["message"];
+    let finish = choice["finish_reason"].as_str();
+    if !matches!(finish, Some("stop" | "tool_calls"))
+        || !message.is_object()
+        || message["role"] != "assistant"
+    {
+        return Err(ProviderFailure::new(
+            "provider_incomplete",
+            "模型工具执行回复未完整结束",
+        ));
+    }
+    if finish == Some("tool_calls")
+        && message["tool_calls"]
+            .as_array()
+            .is_none_or(|calls| calls.is_empty())
+    {
+        return Err(ProviderFailure::new(
+            "provider_invalid_response",
+            "模型没有返回有效工具调用",
+        ));
+    }
+    // Thinking tool calls require the complete reasoning_content to be returned
+    // on every following request. Preserve the assistant message without rebuilding it.
+    Ok(ChatTurn {
+        message: message.clone(),
+        usage: response.get("usage").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn request_base(config: &ProviderConfig, messages: Value) -> Value {
+    json!({"model":config.model,"stream":false,"max_tokens":config.max_tokens,
+        "thinking":{"type":if config.thinking_enabled {"enabled"} else {"disabled"}},"messages":messages})
+}
+
+async fn send_request(config: &ProviderConfig, request: Value) -> Result<Vec<u8>, ProviderFailure> {
+    check_context_budget(config, &request.to_string())?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(READ_IDLE_TIMEOUT)
         .build()
         .map_err(|_| ProviderFailure::new("provider_client", "无法建立模型连接"))?;
-    let request = json!({
-        "model": config.model,
-        "stream": false,
-        "max_tokens": config.max_tokens,
-        "thinking": { "type": if config.thinking_enabled { "enabled" } else { "disabled" } },
-        "messages": [
-            {"role":"system", "content":SYSTEM_PROMPT},
-            {"role":"user", "content":prompt}
-        ]
-    });
     let mut response = client
         .post(config.endpoint())
         .bearer_auth(&config.api_key)
@@ -356,7 +422,7 @@ pub async fn complete(
         }
         body.extend_from_slice(&chunk);
     }
-    parse_completion(&body)
+    Ok(body)
 }
 
 fn parse_completion(body: &[u8]) -> Result<Completion, ProviderFailure> {
