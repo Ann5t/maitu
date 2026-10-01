@@ -175,6 +175,17 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         providers,
         tool_proxy_client: reqwest::Client::new(),
     });
+    let app_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let app_address = app_listener.local_addr().unwrap();
+    let app_router = crate::web::router(state.clone());
+    let app_server = tokio::spawn(async move {
+        axum::serve(
+            app_listener,
+            app_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
     let project = projects::create_project(
         &state.pool,
         ProjectIntake {
@@ -237,6 +248,18 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     });
 
     let first_a = wait_status(&state, a.id, "produced").await;
+    let download = reqwest::get(format!(
+        "http://{app_address}/artifacts/{}",
+        first_a.attempts[0].artifact_id.unwrap()
+    ))
+    .await
+    .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+    assert_eq!(
+        download.headers()["content-disposition"],
+        "inline; filename*=UTF-8''A.md"
+    );
+    assert!(download.text().await.unwrap().contains("Fixture output 1"));
     assert_eq!(
         fixture_state.peak.load(Ordering::SeqCst),
         3,
@@ -451,7 +474,7 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     let no_thinking = new_task(
         &state,
         project,
-        "non-thinking",
+        "非思考 结论",
         "[no-thinking] produce a final answer",
         vec![],
     )
@@ -460,6 +483,17 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         .await
         .unwrap();
     let no_thinking_result = wait_status(&state, no_thinking.id, "produced").await;
+    let download = reqwest::get(format!(
+        "http://{app_address}/artifacts/{}",
+        no_thinking_result.attempts[0].artifact_id.unwrap()
+    ))
+    .await
+    .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+    assert_eq!(
+        download.headers()["content-disposition"],
+        "inline; filename*=UTF-8''%E9%9D%9E%E6%80%9D%E8%80%83%20%E7%BB%93%E8%AE%BA.md"
+    );
     assert_eq!(
         no_thinking_result.attempts[0]
             .input_snapshot
@@ -509,8 +543,9 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     );
     shutdown.send(true).unwrap();
     recovered_worker.await.unwrap();
+    app_server.abort();
     fixture_server.abort();
     println!(
-        "Maitu fixture integration passed: real HTTP overlap, failure isolation, explicit retry, immutable inputs, pinned outputs, configurable capacity, thinking modes, final-only artifacts and process recovery."
+        "Maitu fixture integration passed: real HTTP overlap, failure isolation, explicit retry, immutable inputs, pinned outputs, configurable capacity, thinking modes, final-only artifacts, named downloads and process recovery."
     );
 }
