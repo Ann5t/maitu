@@ -25,6 +25,7 @@ pub struct ProviderConfig {
     pub concurrency: usize,
     pub context_tokens: u32,
     pub max_tokens: u32,
+    pub thinking_enabled: bool,
 }
 
 impl Default for ProviderConfig {
@@ -35,7 +36,8 @@ impl Default for ProviderConfig {
             api_key: String::new(),
             concurrency: 3,
             context_tokens: MAX_CONTEXT_TOKENS,
-            max_tokens: 8192,
+            max_tokens: 65536,
+            thinking_enabled: true,
         }
     }
 }
@@ -60,6 +62,7 @@ pub struct ProviderView {
     pub concurrency: usize,
     pub context_tokens: u32,
     pub max_tokens: u32,
+    pub thinking_enabled: bool,
     pub max_context_tokens: u32,
     pub max_output_tokens: u32,
 }
@@ -73,6 +76,7 @@ impl ProviderConfig {
             concurrency: self.concurrency,
             context_tokens: self.context_tokens,
             max_tokens: self.max_tokens,
+            thinking_enabled: self.thinking_enabled,
             max_context_tokens: MAX_CONTEXT_TOKENS,
             max_output_tokens: MAX_OUTPUT_TOKENS,
         }
@@ -288,7 +292,7 @@ pub async fn complete(
         "model": config.model,
         "stream": false,
         "max_tokens": config.max_tokens,
-        "thinking": { "type": "disabled" },
+        "thinking": { "type": if config.thinking_enabled { "enabled" } else { "disabled" } },
         "messages": [
             {"role":"system", "content":SYSTEM_PROMPT},
             {"role":"user", "content":prompt}
@@ -379,13 +383,14 @@ mod tests {
             )
             .is_err()
         );
+        let completion = parse_completion(
+            br#"{"choices":[{"finish_reason":"stop","message":{"reasoning_content":"reasoning is separate","content":"result"}}],"usage":{"completion_tokens_details":{"reasoning_tokens":3}}}"#
+        )
+        .unwrap();
+        assert_eq!(completion.content, "result");
         assert_eq!(
-            parse_completion(
-                br#"{"choices":[{"finish_reason":"stop","message":{"content":"result"}}]}"#
-            )
-            .unwrap()
-            .content,
-            "result"
+            completion.usage["completion_tokens_details"]["reasoning_tokens"],
+            3
         );
     }
 
@@ -436,6 +441,7 @@ mod tests {
         .unwrap();
         assert_eq!(config.max_tokens, 4096);
         assert_eq!(config.context_tokens, MAX_CONTEXT_TOKENS);
+        assert!(config.thinking_enabled);
         assert!(config.validate().is_ok());
         let view = serde_json::to_value(config.view()).unwrap();
         assert!(view.get("timeoutSeconds").is_none());

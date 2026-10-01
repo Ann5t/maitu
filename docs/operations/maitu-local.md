@@ -38,7 +38,9 @@ Docker Desktop 自身也需要通过其系统代理或手动代理访问镜像�
 
 打开本机 `/maitu/settings`，填写 DeepSeek 密钥，设置同时执行数并保存。密钥写入独立的 `provider_config` 卷，读取页面不会返回密钥。保存配置不等于请求已验证，通过实际任务结果判断连接是否可用。
 
-连接页显示上下文预算与最大输出长度。当前 DeepSeek Flash 和 Pro 的上下文容量为 1,048,576 Token，最大输出为 393,216 Token，参见[官方模型元数据](https://api-docs.deepseek.com/zh-cn/api/list-models/)。新配置的上下文预算默认使用模型容量，最大输出默认 8,192 Token，与当前非思考模式的[官方默认值](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)一致。输出上限实际发送为 `max_tokens`；已保存的输出设置保持原值。
+连接页显示思考模式、上下文预算与最大输出长度。当前 DeepSeek Flash 和 Pro 的上下文容量为 1,048,576 Token，最大输出为 393,216 Token，参见[官方模型元数据](https://api-docs.deepseek.com/zh-cn/api/list-models/)。按用户选择，新连接默认开启思考，最大输出默认 65,536 Token，与当前思考模式的[官方默认值](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)一致；上下文预算默认使用模型容量。输出额度包含思考与最终正文，实际发送为 `max_tokens`。
+
+可以切换为非思考模式，官方参考默认输出为 8,192 Token。切换模式保留用户填写的输出上限，已保存配置缺少模式字段时默认开启思考，已有输出长度与密钥保留。思考开关实际发送到 API，并保存在每次任务的输入记录中；成果文件保存最终正文，用量记录保留服务返回的统计。
 
 上下文预算是脉图用于安排输入与预留输出的本机设置，不是改变模型容量的 API 参数。输入采用[官方文本比例](https://api-docs.deepseek.com/zh-cn/quick_start/token_usage/)估算，超出预算会在发请求前停止并记录原因；没有自动裁剪资料。估算不能保证准确 Token 数，实际输入和输出用量以返回的 `usage` 为准。完整输入快照另有 8 MiB 的文件大小限制。
 

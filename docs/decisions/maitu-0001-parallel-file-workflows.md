@@ -26,7 +26,7 @@ PostgreSQL 会话锁保证一个实例执行器获得队列领导权。会话由
 
 数据库记录和文件成果使用实例持久卷，刷新页面和重建容器后保留。继承的实例备份不导出个人模型密钥；恢复到另一实例时应重新配置连接。
 
-DeepSeek 适配使用官方的 [Chat Completions 接口](https://api-docs.deepseek.com/api/create-chat-completion/)和[当前模型入口](https://api-docs.deepseek.com/)，默认 `https://api.deepseek.com`、`deepseek-flash`，关闭思考输出并保存完整文件正文。模型名称可以修改。
+DeepSeek 适配使用官方的 [Chat Completions 接口](https://api-docs.deepseek.com/api/create-chat-completion/)和[当前模型入口](https://api-docs.deepseek.com/)，默认 `https://api.deepseek.com`、`deepseek-flash`。按用户选择默认开启思考，可在连接页关闭；成果文件保存最终正文。模型名称可以修改，思考模式记入每次任务的输入记录。
 
 连接页的长度设置、模型能力来源、估算边界与后台等待行为见[本机使用说明](../operations/maitu-local.md)。这些设置固定在本次输入中，预算不够时保留原因且不发出模型请求。
 

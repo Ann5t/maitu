@@ -89,21 +89,30 @@
 
   if (mode === 'settings') {
     const form = $('#maitu-provider-form');
+    function modeHint() {
+      $('#maitu-generation-defaults').textContent = form.elements.thinkingEnabled.value === 'true'
+        ? '思考模式：参考默认输出上限 65,536 Token。此额度包含思考与最终正文。'
+        : '非思考模式：参考默认输出上限 8,192 Token。切换模式会保留你填写的输出上限。';
+    }
     function populate(config) {
       for (const name of ['baseUrl','model','concurrency','contextTokens','maxTokens']) form.elements[name].value = config[name];
       form.elements.contextTokens.max = config.maxContextTokens;
       form.elements.maxTokens.max = config.maxOutputTokens;
+      form.elements.thinkingEnabled.value = String(config.thinkingEnabled);
+      modeHint();
       $('#maitu-model-limits').textContent = `DeepSeek：上下文容量 ${config.maxContextTokens.toLocaleString('en-US')} Token，最大输出 ${config.maxOutputTokens.toLocaleString('en-US')} Token。`;
       form.elements.apiKey.value = '';
       $('#maitu-provider-state').textContent = config.configured ? '已配置 · 用实际任务验证连接' : '等待填写密钥';
     }
     api('/api/maitu/provider').then(populate).catch(error => feedback(error.message,true));
+    form.elements.thinkingEnabled.addEventListener('change', modeHint);
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const submit = $('button[type="submit"]',form);
       submit.disabled = true;
       const data = Object.fromEntries(new FormData(form));
       for (const key of ['concurrency','contextTokens','maxTokens']) data[key] = Number(data[key]);
+      data.thinkingEnabled = data.thinkingEnabled === 'true';
       if (data.maxTokens >= data.contextTokens) {
         feedback('最大输出长度须小于上下文预算，为任务要求和资料保留输入空间。', true);
         submit.disabled = false;

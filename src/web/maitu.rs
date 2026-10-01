@@ -172,17 +172,21 @@ pub async fn settings() -> Markup {
                 label { "API 地址" input name="baseUrl" type="url" required value="https://api.deepseek.com"; }
                 label { "模型名称" input name="model" required value="deepseek-flash" list="maitu-models"; }
                 datalist id="maitu-models" { option value="deepseek-flash"; option value="deepseek-v4-pro"; }
+                label { "思考模式" select name="thinkingEnabled" {
+                    option value="true" selected { "开启思考（默认）" }
+                    option value="false" { "关闭思考" }
+                } }
                 label { "API 密钥" input name="apiKey" type="password" autocomplete="new-password" placeholder="首次配置时填写；留空可保留当前密钥"; }
                 p class="maitu-note" { "密钥保存在本机专用配置卷，不显示在任务记录中。" }
                 div class="maitu-settings-grid" {
                     label { "同时执行的任务数" input name="concurrency" type="number" min="1" max="64" value="3" required; }
                     label { "上下文预算（Token）" input name="contextTokens" type="number" min="1" max="1048576" value="1048576" required; }
-                    label { "最大输出长度（Token）" input name="maxTokens" type="number" min="1" max="393216" value="8192" required; }
+                    label { "最大输出长度（Token）" input name="maxTokens" type="number" min="1" max="393216" value="65536" required; }
                 }
                 p id="maitu-model-limits" class="maitu-note" { "DeepSeek：上下文容量 1,048,576 Token，最大输出 393,216 Token。" }
                 p class="maitu-note" { "上下文预算计入任务要求、资料与预留输出。输入按文本估算，超出预算会提示调整；实际 Token 用量以模型返回为准。输出上限实际传给模型，不代表每次都会写满。" }
                 p class="maitu-note" {
-                    "当前默认使用非思考模式，最大输出默认 8,192 Token。"
+                    span id="maitu-generation-defaults" { "思考模式：参考默认输出上限 65,536 Token。此额度包含思考与最终正文。" }
                     a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noopener noreferrer" { "查看官方模型说明" }
                 }
                 p class="maitu-note" { "保存后用于新启动的请求。连接是否可用，以实际任务的执行结果为准；限流时可降低并发。" }

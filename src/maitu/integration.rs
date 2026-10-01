@@ -48,7 +48,6 @@ async fn fixture(
         headers.get("authorization").unwrap(),
         "Bearer isolated-test-key"
     );
-    assert_eq!(request["thinking"]["type"], "disabled");
     assert_eq!(request["max_tokens"], 65536);
     assert!(request.get("contextTokens").is_none());
     let prompt = request["messages"][1]["content"]
@@ -57,6 +56,11 @@ async fn fixture(
         .to_owned();
     let title = prompt.lines().next().unwrap().to_owned();
     let instruction = prompt.lines().nth(1).unwrap_or_default();
+    let thinking = !instruction.contains("[no-thinking]");
+    assert_eq!(
+        request["thinking"]["type"],
+        if thinking { "enabled" } else { "disabled" }
+    );
     let count = {
         let mut calls = state.calls.lock().await;
         let count = calls.entry(title).or_default();
@@ -81,7 +85,13 @@ async fn fixture(
         )
             .into_response();
     }
-    Json(json!({"choices":[{"finish_reason":"stop","message":{"content":format!("Fixture output {count}\n{prompt}")}}],"usage":{"total_tokens":20}})).into_response()
+    Json(json!({
+        "choices":[{"finish_reason":"stop","message":{
+            "reasoning_content": if thinking { Some("fixture reasoning must not appear in artifacts") } else { None },
+            "content":format!("Fixture output {count}\n{prompt}")
+        }}],
+        "usage":{"total_tokens":20,"completion_tokens_details":{"reasoning_tokens": if thinking { 3 } else { 0 }}}
+    })).into_response()
 }
 
 async fn new_task(
@@ -250,6 +260,11 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     assert_eq!(input["sources"][0]["sha256"], original.sha256);
     assert_eq!(input["provider"]["maxTokens"], provider.max_tokens);
     assert_eq!(input["provider"]["contextTokens"], provider.context_tokens);
+    assert_eq!(input["provider"]["thinkingEnabled"], true);
+    assert_eq!(
+        first_a.attempts[0].usage.as_ref().unwrap().0["completion_tokens_details"]["reasoning_tokens"],
+        3
+    );
     assert!(input["estimatedInputTokens"].as_u64().unwrap() > 0);
     assert!(!input.to_string().contains("isolated-test-key"));
     workflows::accept(&state.pool, a.id, a_attempt.id)
@@ -319,11 +334,9 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         .fetch_one(&state.pool)
         .await
         .unwrap();
-    assert!(
-        String::from_utf8(old_output.read(&old_path).await.unwrap())
-            .unwrap()
-            .starts_with("Fixture output 1")
-    );
+    let old_content = String::from_utf8(old_output.read(&old_path).await.unwrap()).unwrap();
+    assert!(old_content.starts_with("Fixture output 1"));
+    assert!(!old_content.contains("fixture reasoning must not appear in artifacts"));
     wait_status(&state, c.id, "produced").await;
     let c_done = workflows::detail(&state.pool, c.id).await.unwrap();
     assert!(
@@ -430,6 +443,38 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     state
         .providers
         .save(ProviderConfig {
+            thinking_enabled: false,
+            ..provider.clone()
+        })
+        .await
+        .unwrap();
+    let no_thinking = new_task(
+        &state,
+        project,
+        "non-thinking",
+        "[no-thinking] produce a final answer",
+        vec![],
+    )
+    .await;
+    workflows::start(&state.pool, no_thinking.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let no_thinking_result = wait_status(&state, no_thinking.id, "produced").await;
+    assert_eq!(
+        no_thinking_result.attempts[0]
+            .input_snapshot
+            .as_ref()
+            .unwrap()
+            .0["provider"]["thinkingEnabled"],
+        false
+    );
+    assert_eq!(
+        no_thinking_result.attempts[0].usage.as_ref().unwrap().0["completion_tokens_details"]["reasoning_tokens"],
+        0
+    );
+    state
+        .providers
+        .save(ProviderConfig {
             context_tokens: 256,
             max_tokens: 1,
             ..provider.clone()
@@ -466,6 +511,6 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     recovered_worker.await.unwrap();
     fixture_server.abort();
     println!(
-        "Maitu fixture integration passed: real HTTP overlap, failure isolation, explicit retry, immutable inputs, pinned outputs, configurable capacity and process recovery."
+        "Maitu fixture integration passed: real HTTP overlap, failure isolation, explicit retry, immutable inputs, pinned outputs, configurable capacity, thinking modes, final-only artifacts and process recovery."
     );
 }

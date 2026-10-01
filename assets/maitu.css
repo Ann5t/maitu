@@ -3,8 +3,8 @@
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Segoe UI","Microsoft YaHei",sans-serif; }
 a { color:inherit; text-decoration:none; }
-button,input,textarea { font:inherit; }
-button,a,input,textarea,summary { -webkit-tap-highlight-color:transparent; }
+button,input,textarea,select { font:inherit; }
+button,a,input,textarea,select,summary { -webkit-tap-highlight-color:transparent; }
 button { cursor:pointer; }
 button:disabled { opacity:.55; cursor:wait; }
 :focus-visible { outline:2px solid var(--green); outline-offset:3px; }
@@ -36,7 +36,7 @@ p { color:var(--muted); }
 .maitu-back { display:inline-block; margin-bottom:13px; }
 .maitu-intake { display:grid; grid-template-columns:minmax(210px,.6fr) minmax(260px,1fr); gap:35px; background:var(--panel); padding:30px; border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); margin-bottom:34px; }
 .maitu-intake p { max-width:310px; font-size:14px; }
-input,textarea { width:100%; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); padding:11px 12px; min-height:44px; }
+input,textarea,select { width:100%; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); padding:11px 12px; min-height:44px; }
 textarea { resize:vertical; }
 .maitu-intake form { display:grid; gap:14px; justify-items:start; }
 .maitu-section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px; }
