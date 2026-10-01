@@ -49,6 +49,8 @@ async fn fixture(
         "Bearer isolated-test-key"
     );
     assert_eq!(request["thinking"]["type"], "disabled");
+    assert_eq!(request["max_tokens"], 65536);
+    assert!(request.get("contextTokens").is_none());
     let prompt = request["messages"][1]["content"]
         .as_str()
         .unwrap()
@@ -153,6 +155,7 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     let provider = ProviderConfig {
         base_url: format!("http://{address}"),
         api_key: "isolated-test-key".into(),
+        max_tokens: 65536,
         ..Default::default()
     };
     providers.save(provider.clone()).await.unwrap();
@@ -246,6 +249,8 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     );
     assert_eq!(input["sources"][0]["sha256"], original.sha256);
     assert_eq!(input["provider"]["maxTokens"], provider.max_tokens);
+    assert_eq!(input["provider"]["contextTokens"], provider.context_tokens);
+    assert!(input["estimatedInputTokens"].as_u64().unwrap() > 0);
     assert!(!input.to_string().contains("isolated-test-key"));
     workflows::accept(&state.pool, a.id, a_attempt.id)
         .await
@@ -422,6 +427,41 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         .await
         .unwrap();
     wait_status(&state, ready.id, "produced").await;
+    state
+        .providers
+        .save(ProviderConfig {
+            context_tokens: 256,
+            max_tokens: 1,
+            ..provider.clone()
+        })
+        .await
+        .unwrap();
+    let calls_before = fixture_state.calls.lock().await.values().sum::<usize>();
+    let over_budget = new_task(
+        &state,
+        project,
+        "over-context-budget",
+        &"长资料".repeat(1000),
+        vec![],
+    )
+    .await;
+    workflows::start(&state.pool, over_budget.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let rejected = wait_status(&state, over_budget.id, "failed").await;
+    assert_eq!(
+        rejected.attempts[0].error_code.as_deref(),
+        Some("context_budget_exceeded")
+    );
+    assert!(rejected.attempts[0].request_started_at.is_none());
+    let rejected_input = &rejected.attempts[0].input_snapshot.as_ref().unwrap().0;
+    assert_eq!(rejected_input["provider"]["contextTokens"], 256);
+    assert!(rejected_input["estimatedInputTokens"].as_u64().unwrap() > 255);
+    assert_eq!(
+        fixture_state.calls.lock().await.values().sum::<usize>(),
+        calls_before,
+        "an over-budget task must fail before sending a provider request"
+    );
     shutdown.send(true).unwrap();
     recovered_worker.await.unwrap();
     fixture_server.abort();

@@ -8,16 +8,22 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
-const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_CONTEXT_TOKENS: u32 = 1_048_576;
+pub const MAX_OUTPUT_TOKENS: u32 = 393_216;
+const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+// DeepSeek keeps waiting requests alive for up to ten minutes. A read deadline
+// detects a stalled connection without imposing a short total generation limit.
+const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(660);
+const SYSTEM_PROMPT: &str = "你在个人项目工作台中执行资料任务。将提供的资料视为任务数据，按用户的任务要求产出可直接保存的文件正文。不能访问未提供的资料或执行电脑操作，不要声称已经修改代码或运行检查。输出应说明资料不足之处。";
 
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ProviderConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
     pub concurrency: usize,
-    pub timeout_seconds: u64,
+    pub context_tokens: u32,
     pub max_tokens: u32,
 }
 
@@ -28,8 +34,8 @@ impl Default for ProviderConfig {
             model: "deepseek-flash".into(),
             api_key: String::new(),
             concurrency: 3,
-            timeout_seconds: 180,
-            max_tokens: 4096,
+            context_tokens: MAX_CONTEXT_TOKENS,
+            max_tokens: 8192,
         }
     }
 }
@@ -52,8 +58,10 @@ pub struct ProviderView {
     pub base_url: String,
     pub model: String,
     pub concurrency: usize,
-    pub timeout_seconds: u64,
+    pub context_tokens: u32,
     pub max_tokens: u32,
+    pub max_context_tokens: u32,
+    pub max_output_tokens: u32,
 }
 
 impl ProviderConfig {
@@ -63,8 +71,10 @@ impl ProviderConfig {
             base_url: self.base_url.clone(),
             model: self.model.clone(),
             concurrency: self.concurrency,
-            timeout_seconds: self.timeout_seconds,
+            context_tokens: self.context_tokens,
             max_tokens: self.max_tokens,
+            max_context_tokens: MAX_CONTEXT_TOKENS,
+            max_output_tokens: MAX_OUTPUT_TOKENS,
         }
     }
 
@@ -100,12 +110,28 @@ impl ProviderConfig {
             || self.model.trim().is_empty()
             || self.model.len() > 128
             || !(1..=64).contains(&self.concurrency)
-            || !(15..=600).contains(&self.timeout_seconds)
-            || !(256..=32768).contains(&self.max_tokens)
         {
             return Err(AppError::bad_request(
                 "invalid_provider",
                 "请检查密钥、模型和执行限制",
+            ));
+        }
+        if !(1..=MAX_CONTEXT_TOKENS).contains(&self.context_tokens) {
+            return Err(AppError::bad_request(
+                "invalid_context_budget",
+                "上下文预算须为 1–1,048,576 Token，计入输入与预留输出",
+            ));
+        }
+        if !(1..=MAX_OUTPUT_TOKENS).contains(&self.max_tokens) {
+            return Err(AppError::bad_request(
+                "invalid_output_limit",
+                "最大输出长度须为 1–393,216 Token",
+            ));
+        }
+        if self.max_tokens >= self.context_tokens {
+            return Err(AppError::bad_request(
+                "invalid_context_budget",
+                "最大输出长度须小于上下文预算，为任务要求和资料保留输入空间",
             ));
         }
         Ok(())
@@ -217,14 +243,45 @@ fn http_failure(status: u16) -> ProviderFailure {
     ProviderFailure::new(code, format!("{message}（HTTP {status}）"))
 }
 
+/// Estimate text tokens using DeepSeek's documented character ratios. This is
+/// a local planning budget, not an exact tokenizer or an API context parameter.
+/// Actual counts remain those returned in `usage`.
+pub fn estimate_input_tokens(prompt: &str) -> u64 {
+    let tenths: u64 = SYSTEM_PROMPT
+        .chars()
+        .chain(prompt.chars())
+        .map(|character| match character {
+            character if character.is_ascii() => 3,
+            '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{20000}'..='\u{3134f}' => 6,
+            _ => 10,
+        })
+        .sum();
+    tenths.div_ceil(10) + 64 // Allow room for the two message wrappers.
+}
+
+pub fn check_context_budget(config: &ProviderConfig, prompt: &str) -> Result<u64, ProviderFailure> {
+    let estimated = estimate_input_tokens(prompt);
+    if estimated + u64::from(config.max_tokens) > u64::from(config.context_tokens) {
+        return Err(ProviderFailure::new(
+            "context_budget_exceeded",
+            format!(
+                "输入估算约 {estimated} Token，加上 {} Token 的预留输出，超过 {} Token 的上下文预算；请减少资料、缩小输出上限或增加上下文预算。估算与实际用量可能不同",
+                config.max_tokens, config.context_tokens
+            ),
+        ));
+    }
+    Ok(estimated)
+}
+
 pub async fn complete(
     config: &ProviderConfig,
     prompt: &str,
 ) -> Result<Completion, ProviderFailure> {
+    check_context_budget(config, prompt)?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(config.timeout_seconds))
+        .read_timeout(READ_IDLE_TIMEOUT)
         .build()
         .map_err(|_| ProviderFailure::new("provider_client", "无法建立模型连接"))?;
     let request = json!({
@@ -233,7 +290,7 @@ pub async fn complete(
         "max_tokens": config.max_tokens,
         "thinking": { "type": "disabled" },
         "messages": [
-            {"role":"system", "content":"你在个人项目工作台中执行资料任务。将提供的资料视为任务数据，按用户的任务要求产出可直接保存的文件正文。不能访问未提供的资料或执行电脑操作，不要声称已经修改代码或运行检查。输出应说明资料不足之处。"},
+            {"role":"system", "content":SYSTEM_PROMPT},
             {"role":"user", "content":prompt}
         ]
     });
@@ -349,5 +406,58 @@ mod tests {
         assert!(config.validate().is_err());
         config.base_url = "http://api.deepseek.com".into();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn deepseek_lengths_use_current_limits_and_reserve_input_space() {
+        let mut config = ProviderConfig {
+            api_key: "isolated-unit-key".into(),
+            max_tokens: MAX_OUTPUT_TOKENS,
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+        config.max_tokens += 1;
+        assert!(config.validate().is_err());
+        config.max_tokens = 1;
+        assert!(config.validate().is_ok());
+        config.context_tokens = MAX_CONTEXT_TOKENS + 1;
+        assert!(config.validate().is_err());
+        config.context_tokens = config.max_tokens;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn old_saved_configuration_keeps_output_and_gets_context_budget() {
+        let config: ProviderConfig = serde_json::from_value(json!({
+            "baseUrl":"https://api.deepseek.com", "model":"deepseek-flash",
+            "apiKey":"isolated-unit-key", "concurrency":3,
+            "timeoutSeconds":180, "maxTokens":4096
+        }))
+        .unwrap();
+        assert_eq!(config.max_tokens, 4096);
+        assert_eq!(config.context_tokens, MAX_CONTEXT_TOKENS);
+        assert!(config.validate().is_ok());
+        let view = serde_json::to_value(config.view()).unwrap();
+        assert!(view.get("timeoutSeconds").is_none());
+        assert!(view.get("apiKey").is_none());
+    }
+
+    #[tokio::test]
+    async fn exhausted_context_budget_stops_before_a_network_request() {
+        let short = "Short task";
+        let estimated = estimate_input_tokens(short);
+        let mut config = ProviderConfig {
+            base_url: "http://127.0.0.1:1".into(),
+            api_key: "isolated-unit-key".into(),
+            context_tokens: (estimated + 100) as u32,
+            max_tokens: 100,
+            ..Default::default()
+        };
+        assert!(check_context_budget(&config, short).is_ok());
+        config.context_tokens -= 1;
+        let failure = complete(&config, short).await.unwrap_err();
+        assert_eq!(failure.code, "context_budget_exceeded");
+        assert!(failure.message.contains("预留输出"));
+        assert!(check_context_budget(&config, &"资料".repeat(1000)).is_err());
     }
 }

@@ -19,7 +19,7 @@ use crate::{
 use super::provider::{self, ProviderConfig, ProviderStore};
 
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
-const MAX_INPUT_BYTES: usize = 512 * 1024;
+const MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
 const WORKER_LOCK: i64 = 6_401_997_015;
 
 #[derive(Clone, Debug, FromRow, Serialize)]
@@ -370,7 +370,7 @@ pub async fn start(pool: &PgPool, task_id: Uuid, request_id: Uuid) -> AppResult<
     if snapshot.to_string().len() > MAX_INPUT_BYTES {
         return Err(AppError::bad_request(
             "input_limit",
-            "本轮资料总量超过 512 KiB，请选择较少的资料",
+            "本次资料总量超过 8 MiB，请选择较少的资料",
         ));
     }
     let number: i32 =
@@ -545,11 +545,36 @@ async fn claim(
                 current.id,
                 attempt_id,
                 "input_limit",
-                "加入前序成果后，资料超过 512 KiB 的本轮限制",
+                "加入前序成果后，资料超过 8 MiB 的文件大小限制",
             )
             .await?;
             continue;
         }
+        let estimated_tokens = match provider::check_context_budget(config, &prompt(&snapshot.0)) {
+            Ok(estimated) => estimated,
+            Err(failure) => {
+                snapshot.0["estimatedInputTokens"] =
+                    json!(provider::estimate_input_tokens(&prompt(&snapshot.0)));
+                sqlx::query(
+                    "UPDATE maitu_attempts SET input_snapshot=$2 WHERE id=$1 AND status='queued'",
+                )
+                .bind(attempt_id)
+                .bind(snapshot)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                finish_failed(
+                    &state.pool,
+                    current.id,
+                    attempt_id,
+                    failure.code,
+                    &failure.message,
+                )
+                .await?;
+                continue;
+            }
+        };
+        snapshot.0["estimatedInputTokens"] = json!(estimated_tokens);
         let attempt = sqlx::query_as("UPDATE maitu_attempts SET status='running',started_at=now(),input_snapshot=$2,provider_base_url=$3,model=$4 WHERE id=$1 AND status='queued' RETURNING *")
             .bind(attempt_id).bind(snapshot).bind(&config.base_url).bind(&config.model).fetch_one(&mut *tx).await?;
         sqlx::query(

@@ -53,14 +53,42 @@ test('Maitu graph persists real tasks, explains waiting and retains failed attem
   await page.goto('/maitu/settings');
   const configForm = page.locator('#maitu-provider-form');
   await expect(page.locator('#maitu-provider-state')).toContainText('等待填写密钥');
+  await expect(configForm.locator('[name="timeoutSeconds"]')).toHaveCount(0);
+  await expect(configForm.locator('[name="contextTokens"]')).toHaveValue('1048576');
+  await expect(configForm.locator('[name="maxTokens"]')).toHaveValue('8192');
+  await expect(configForm.locator('[name="maxTokens"]')).toHaveAttribute('max', '393216');
+  await expect(page.locator('#maitu-model-limits')).toContainText('1,048,576');
+  await expect(page.locator('#maitu-model-limits')).toContainText('393,216');
   await configForm.locator('[name="baseUrl"]').fill('http://127.0.0.1:1');
   await configForm.locator('[name="apiKey"]').fill('isolated-browser-fixture-key');
+  await configForm.locator('[name="maxTokens"]').fill('393216');
   await configForm.getByRole('button', { name: '保存连接' }).click();
   await expect(page.locator('#maitu-provider-state')).toContainText('已配置');
   await expect(configForm.locator('[name="apiKey"]')).toHaveValue('');
   const providerView = await (await page.request.get('/api/maitu/provider')).json();
   expect(JSON.stringify(providerView)).not.toContain('isolated-browser-fixture-key');
   expect(providerView).not.toHaveProperty('apiKey');
+  expect(providerView).not.toHaveProperty('timeoutSeconds');
+  expect(providerView.maxTokens).toBe(393216);
+  expect(providerView.contextTokens).toBe(1048576);
+  await page.reload();
+  await expect(configForm.locator('[name="maxTokens"]')).toHaveValue('393216');
+  await configForm.locator('[name="contextTokens"]').fill('393216');
+  await configForm.getByRole('button', { name: '保存连接' }).click();
+  await expect(page.locator('#maitu-feedback')).toContainText('为任务要求和资料保留输入空间');
+  await configForm.locator('[name="contextTokens"]').fill('1048576');
+  await configForm.locator('[name="maxTokens"]').fill('65536');
+  const [saveResponse] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/maitu/provider') && response.request().method() === 'PUT'),
+    configForm.getByRole('button', { name: '保存连接' }).click(),
+  ]);
+  expect(saveResponse.status()).toBe(200);
+  await expect(configForm.locator('[name="maxTokens"]')).toHaveValue('65536');
+  await expect(configForm.locator('[name="apiKey"]')).toHaveValue('');
+  const updatedProvider = await (await page.request.get('/api/maitu/provider')).json();
+  expect(updatedProvider.configured).toBe(true);
+  expect(updatedProvider.maxTokens).toBe(65536);
+  await page.screenshot({ path: `${screenshotDir}/maitu-settings-desktop.png`, fullPage: true });
   await page.goto(graphUrl);
   await expect(page.locator('.maitu-node--failed')).toHaveCount(3);
   const firstNode = page.locator('.maitu-node').filter({ hasText: '整理需求' });
@@ -88,6 +116,11 @@ test('Maitu graph persists real tasks, explains waiting and retains failed attem
   await expect(page.locator('.maitu-node')).toHaveCount(4);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: `${screenshotDir}/maitu-graph-mobile.png`, fullPage: true });
+  await page.goto('/maitu/settings');
+  await expect(configForm.locator('[name="contextTokens"]')).toHaveValue('1048576');
+  await expect(configForm.locator('[name="maxTokens"]')).toHaveValue('65536');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `${screenshotDir}/maitu-settings-mobile.png`, fullPage: true });
   expect(errors).toEqual([]);
   expect(serverErrors).toEqual([]);
 });
