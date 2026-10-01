@@ -88,6 +88,14 @@ docker compose -f compose.maitu.yaml stop
 
 `compose.maitu.yaml` 默认项目名为 `maitu`，使用项目专属的 PostgreSQL、成果、仓库、工作区、执行输出与模型配置卷；旧 `compose.yaml` 是继承来源。可以在启动前设置 `MAITU_INSTANCE` 运行另一套独立实例，并选择空闲端口。继承的备份不导出个人模型密钥，恢复到另一实例时需重新配置。
 
+模型连接配置（含密钥）保存在 `maitu_provider_config` 卷的 `connections.json` 中，`scripts/backup-v2.sh` 按设计不导出该卷。需要连同连接配置一起迁移或备份时，手动复制该卷数据，例如：
+
+```powershell
+docker run --rm -v maitu_provider_config:/data -v (pwd):/out postgres:17-alpine tar czf /out/maitu-connections.tar.gz -C /data .
+```
+
+恢复时把归档解回同名卷并重建应用容器；归档内含密钥，按凭据保管。
+
 应用的本机入口关闭账号认证，并只发布 `127.0.0.1` 上的网页端口。迁到远程服务器时采用[安全部署指南](deployment.md)中的独立配置。
 
 当前已完成与尚待验证的行为见[实施进度](../development/maitu-progress.md)。
