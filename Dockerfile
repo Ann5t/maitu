@@ -17,7 +17,9 @@ FROM toolchain AS builder
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
-RUN cargo build --release --locked
+RUN --mount=type=cache,id=maitu-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=maitu-cargo-git,target=/usr/local/cargo/git \
+    CARGO_HTTP_MULTIPLEXING=false cargo build --release --locked
 
 FROM debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258 AS runtime
 RUN apt-get update \

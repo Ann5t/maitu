@@ -328,7 +328,7 @@ recovery_upgraded_state="$(docker exec "$recovery_target_db" psql -U fudian -d f
                  (SELECT count(*) FROM goal_branches), chr(58),
                  (SELECT count(*) FROM artifacts), chr(58),
                  (SELECT count(*) FROM app_users));')"
-[[ "$recovery_upgraded_state" == 14:1:1:1:0 ]]
+[[ "$recovery_upgraded_state" == 15:1:1:1:0 ]]
 recovery_restored_digest="$(docker exec "$recovery_current_app" \
   sha256sum /data/artifacts/recovery/artifact.txt | awk '{print $1}')"
 [[ "$recovery_restored_digest" == "$recovery_artifact_digest" ]]
@@ -344,6 +344,6 @@ recovery_rollback_state="$(docker exec "$recovery_target_db" psql -U fudian -d f
                  (SELECT count(*) FROM projects), chr(58),
                  (SELECT count(*) FROM goal_branches), chr(58),
                  (SELECT count(*) FROM artifacts));')"
-[[ "$recovery_rollback_state" == 14:1:1:1 ]]
+[[ "$recovery_rollback_state" == 15:1:1:1 ]]
 
-echo "backup recovery passed: BP08 backup, empty labeled restore, 12-to-14 upgrade, hash preservation and BP08 application rollback"
+echo "backup recovery passed: BP08 backup, empty labeled restore, 12-to-15 upgrade, hash preservation and BP08 application rollback"

@@ -24,13 +24,14 @@ services:
       - sh
       - -ec
       - >-
-        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner
-        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner
+        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config
+        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config
     volumes:
       - artifacts:/data/artifacts
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - provider_config:/data/maitu-config
     tmpfs:
       - /var/lib/postgresql/data
     restart: "no"
@@ -51,6 +52,7 @@ services:
       REPOSITORY_ROOT: /data/repositories
       WORKTREE_ROOT: /data/worktrees
       RUNNER_OUTPUT_ROOT: /data/runner
+      MAITU_CONFIG_ROOT: /data/maitu-config
       RUST_LOG: fudian=info,tower_http=info
     ports:
       - "127.0.0.1:${MAITU_PORT:-3033}:3000"
@@ -59,6 +61,7 @@ services:
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - provider_config:/data/maitu-config
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,3 +83,4 @@ volumes:
   repositories:
   worktrees:
   runner_outputs:
+  provider_config:

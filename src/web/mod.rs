@@ -1,5 +1,6 @@
 mod goal_projection;
 mod handlers;
+mod maitu;
 mod views;
 
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub config: Config,
     pub tool_proxy_client: reqwest::Client,
+    pub providers: crate::maitu::provider::ProviderStore,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -68,7 +70,19 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .patch(security::tool_proxy_path)
                 .delete(security::tool_proxy_path),
         )
-        .route("/", get(handlers::dashboard))
+        .route("/", get(maitu::dashboard))
+        .route("/legacy", get(handlers::dashboard))
+        .route("/maitu", get(maitu::dashboard))
+        .route("/maitu/settings", get(maitu::settings))
+        .route("/maitu/projects/{project_id}", get(maitu::project_page))
+        .route("/api/maitu/provider", get(maitu::provider_config).put(maitu::save_provider))
+        .route("/api/maitu/projects/{project_id}", get(maitu::project_snapshot))
+        .route("/api/maitu/projects/{project_id}/tasks", post(maitu::create_task))
+        .route("/api/maitu/projects/{project_id}/sources", post(maitu::add_source))
+        .route("/api/maitu/sources/{source_id}", get(maitu::source))
+        .route("/api/maitu/tasks/{task_id}", get(maitu::task_detail))
+        .route("/api/maitu/tasks/{task_id}/start", post(maitu::start_task))
+        .route("/api/maitu/tasks/{task_id}/accept", post(maitu::accept_output))
         .route("/settings", get(handlers::settings_page))
         .route("/ideas", get(handlers::ideas_page))
         .route("/ideas/new", get(handlers::new_idea_page))

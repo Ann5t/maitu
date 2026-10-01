@@ -86,7 +86,7 @@ assert health["name"] == "fudian"' "$runtime_tmp/health.json"
 [[ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$runtime_app")" == true ]]
 
 curl -fsS "$runtime_base/" > "$runtime_tmp/index.html"
-grep -q '浮点' "$runtime_tmp/index.html"
+grep -q '脉图' "$runtime_tmp/index.html"
 curl -fsS "$runtime_base/assets/app.css" > "$runtime_tmp/app.css"
 grep -q -- '--acid' "$runtime_tmp/app.css"
 
@@ -106,7 +106,7 @@ runtime_migrations="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM schema_migrations')"
 runtime_projects="$(docker exec "$runtime_db" \
   psql -U fudian_test -d fudian_test -Atc 'SELECT count(*) FROM projects')"
-[[ "$runtime_migrations" == 14 ]]
+[[ "$runtime_migrations" == 15 ]]
 [[ "$runtime_projects" == 1 ]]
 
-echo "production image passed: non-root, read-only rootfs, 14 migrations and isolated write"
+echo "production image passed: non-root, read-only rootfs, 15 migrations and isolated write"

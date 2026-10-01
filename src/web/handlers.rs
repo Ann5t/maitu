@@ -984,8 +984,15 @@ pub async fn artifact_download(
     );
     headers.insert(
         header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&format!("inline; filename=artifact-{}.md", artifact.id))
-            .expect("ASCII content disposition"),
+        HeaderValue::from_str(&if artifact.kind == "ai_file" {
+            format!(
+                "inline; filename*=UTF-8''{}",
+                urlencoding::encode(&artifact.title)
+            )
+        } else {
+            format!("inline; filename=artifact-{}.md", artifact.id)
+        })
+        .expect("ASCII content disposition"),
     );
     headers.insert(
         header::ETAG,
