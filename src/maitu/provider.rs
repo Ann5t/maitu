@@ -25,7 +25,30 @@ pub struct ProviderConfig {
     pub concurrency: usize,
     pub context_tokens: u32,
     pub max_tokens: u32,
+    #[serde(deserialize_with = "deserialize_thinking_enabled")]
     pub thinking_enabled: bool,
+}
+
+// Older loaded forms submit select values as strings. Persist and expose a
+// canonical boolean, and never infer a mode from unrecognized input.
+fn deserialize_thinking_enabled<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum FormValue {
+        Boolean(bool),
+        Text(String),
+    }
+    match FormValue::deserialize(deserializer)? {
+        FormValue::Boolean(value) => Ok(value),
+        FormValue::Text(value) if value == "true" => Ok(true),
+        FormValue::Text(value) if value == "false" => Ok(false),
+        _ => Err(serde::de::Error::custom(
+            "thinkingEnabled must be true or false",
+        )),
+    }
 }
 
 impl Default for ProviderConfig {
@@ -465,5 +488,23 @@ mod tests {
         assert_eq!(failure.code, "context_budget_exceeded");
         assert!(failure.message.contains("预留输出"));
         assert!(check_context_budget(&config, &"资料".repeat(1000)).is_err());
+    }
+
+    #[test]
+    fn loaded_form_thinking_strings_are_normalized_without_guessing() {
+        for (text, expected) in [("true", true), ("false", false)] {
+            let config: ProviderConfig =
+                serde_json::from_value(json!({"thinkingEnabled":text})).unwrap();
+            assert_eq!(config.thinking_enabled, expected);
+            assert_eq!(
+                serde_json::to_value(config.view()).unwrap()["thinkingEnabled"],
+                expected
+            );
+        }
+        for value in [json!("enabled"), json!(""), json!(1), Value::Null] {
+            assert!(
+                serde_json::from_value::<ProviderConfig>(json!({"thinkingEnabled":value})).is_err()
+            );
+        }
     }
 }

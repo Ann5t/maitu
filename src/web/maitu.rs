@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, State, rejection::JsonRejection},
 };
 use maud::{DOCTYPE, Markup, html};
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     application::projects,
-    error::AppResult,
+    error::{AppError, AppResult},
     maitu::{
         provider::ProviderConfig,
         workflows::{self, AcceptRequest, AddSourceRequest, CreateTaskRequest, StartRequest},
@@ -30,7 +30,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js" defer {}
+                script src="/assets/maitu.js?v=provider-save-2" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -203,8 +203,17 @@ pub async fn provider_config(State(state): State<Arc<AppState>>) -> Json<Value> 
 }
 pub async fn save_provider(
     State(state): State<Arc<AppState>>,
-    Json(input): Json<ProviderConfig>,
+    input: Result<Json<ProviderConfig>, JsonRejection>,
 ) -> AppResult<Json<Value>> {
+    let Json(input) = input.map_err(|rejection| AppError::Operation {
+        status: rejection.status(),
+        code: "invalid_provider_input",
+        message: match rejection.status().as_u16() {
+            413 => "提交的配置过大，请检查填写内容后重试。",
+            415 => "网页提交格式不正确，请刷新模型连接页后重新保存。",
+            _ => "配置格式不正确。请刷新连接页并重新选择思考模式；执行数、上下文预算和输出长度须为整数。",
+        }.into(),
+    })?;
     Ok(Json(json!(state.providers.save(input).await?)))
 }
 pub async fn project_snapshot(

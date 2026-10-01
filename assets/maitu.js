@@ -43,10 +43,25 @@
       const status = await fetch('/auth/status').then(r => r.ok ? r.json() : {}).catch(() => ({}));
       if (status.csrfToken) headers['x-csrf-token'] = status.csrfToken;
     }
-    const response = await fetch(path, {method, headers, body:data === undefined ? undefined : JSON.stringify(data), credentials:'same-origin'});
+    let response;
+    try {
+      response = await fetch(path, {method, headers, body:data === undefined ? undefined : JSON.stringify(data), credentials:'same-origin'});
+    } catch {
+      throw new Error('无法连接本机服务，请确认服务正在运行后重试。');
+    }
+    function unreadableResponse() {
+      const status = response.status;
+      if ([400,415,422].includes(status)) return `填写内容格式不正确（HTTP ${status}）。请刷新页面后检查设置，再保存。`;
+      if ([401,403].includes(status)) return `访问被拒绝（HTTP ${status}）。请重新打开页面并确认登录状态。`;
+      if (status === 404) return '接口不存在（HTTP 404），请刷新页面以加载当前版本。';
+      if (status === 413) return '提交内容过大（HTTP 413），请减少内容后重试。';
+      if (status === 429) return '请求过于频繁（HTTP 429），请稍后重试。';
+      if (status >= 500) return `本机服务暂时无法完成请求（HTTP ${status}），请稍后重试。`;
+      return `服务回复未能读取（HTTP ${status}），请刷新页面核对操作是否已经生效。`;
+    }
     let value;
-    try {value = await response.json();} catch {throw new Error('服务响应无法读取，请检查连接后重试。');}
-    if (!response.ok) throw new Error(value.error || '请求未完成，请稍后重试。');
+    try {value = await response.json();} catch {throw new Error(unreadableResponse());}
+    if (!response.ok) throw new Error(typeof value?.error === 'string' ? value.error : unreadableResponse());
     return value;
   }
   function handle(action) {

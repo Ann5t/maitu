@@ -64,6 +64,17 @@ test('Maitu graph persists real tasks, explains waiting and retains failed attem
   await configForm.locator('[name="baseUrl"]').fill('http://127.0.0.1:1');
   await configForm.locator('[name="apiKey"]').fill('isolated-browser-fixture-key');
   await configForm.locator('[name="maxTokens"]').fill('393216');
+  const plainTextRejection = async route => {
+    if (route.request().method() === 'PUT') {
+      await route.fulfill({status:422, contentType:'text/plain', body:'plain-text fixture rejection'});
+    } else { await route.continue(); }
+  };
+  await page.route('**/api/maitu/provider', plainTextRejection);
+  await configForm.getByRole('button', { name: '保存连接' }).click();
+  await expect(page.locator('#maitu-feedback')).toContainText('填写内容格式不正确（HTTP 422）');
+  await expect(configForm.locator('[name="apiKey"]')).toHaveValue('isolated-browser-fixture-key');
+  await expect(page.locator('#maitu-feedback')).not.toContainText('plain-text fixture rejection');
+  await page.unroute('**/api/maitu/provider', plainTextRejection);
   await configForm.getByRole('button', { name: '保存连接' }).click();
   await expect(page.locator('#maitu-provider-state')).toContainText('已配置');
   await expect(configForm.locator('[name="apiKey"]')).toHaveValue('');
@@ -74,6 +85,23 @@ test('Maitu graph persists real tasks, explains waiting and retains failed attem
   expect(providerView.maxTokens).toBe(393216);
   expect(providerView.contextTokens).toBe(1048576);
   expect(providerView.thinkingEnabled).toBe(true);
+  const loadedFormResponse = await page.request.put('/api/maitu/provider', {
+    data:{...providerView, apiKey:'', thinkingEnabled:'false'},
+  });
+  expect(loadedFormResponse.status()).toBe(200);
+  expect((await loadedFormResponse.json()).thinkingEnabled).toBe(false);
+  const invalidResponse = await page.request.put('/api/maitu/provider', {
+    data:{...providerView, apiKey:'isolated-browser-fixture-key', maxTokens:'not-an-integer'},
+  });
+  expect(invalidResponse.status()).toBe(422);
+  expect(invalidResponse.headers()['content-type']).toContain('application/json');
+  const invalidBody = await invalidResponse.json();
+  expect(invalidBody.error).toContain('须为整数');
+  expect(JSON.stringify(invalidBody)).not.toContain('isolated-browser-fixture-key');
+  const unchangedProvider = await (await page.request.get('/api/maitu/provider')).json();
+  expect(unchangedProvider.thinkingEnabled).toBe(false);
+  expect(unchangedProvider.maxTokens).toBe(393216);
+  expect(unchangedProvider.configured).toBe(true);
   await page.reload();
   await expect(configForm.locator('[name="maxTokens"]')).toHaveValue('393216');
   await configForm.locator('[name="thinkingEnabled"]').selectOption('false');
