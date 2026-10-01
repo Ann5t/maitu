@@ -570,8 +570,14 @@ pub async fn password_submit(
 }
 
 pub async fn auth_status(
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
+    State(state): State<Arc<AppState>>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
 ) -> Json<Value> {
+    let Some(axum::extract::Extension(auth)) = auth else {
+        return Json(
+            json!({"authenticated": false, "securityRequired": state.config.security.required(), "csrfToken": null}),
+        );
+    };
     Json(json!({
         "authenticated": true,
         "username": auth.username,
@@ -1662,6 +1668,7 @@ fn is_high_cost_path(path: &str) -> bool {
         || path.contains("/tool-leases")
         || path.contains("/plugins/install")
         || path.contains("/runner-jobs")
+        || (path.starts_with("/api/maitu/tasks/") && path.ends_with("/start"))
 }
 
 fn is_public_path(path: &str) -> bool {

@@ -269,9 +269,11 @@ assert len(s["proposals"]) == 1
 assert s["proposals"][0]["status"] == "draft"
 assert len(s["branches"]) == 0' "$goal_snapshot"
 
-curl -fsS "$idea_http_base/ideas?view=map" | grep -q '关系图'
-curl -fsS "$idea_http_base/ideas" | grep -q '想法状态看板'
-curl -fsS "$idea_http_base/ideas/$idea_one" | grep -q '从想法形成项目'
-curl -fsS "$idea_http_base/projects/$project_id?tab=goals" | grep -q 'id="goal-workbench"'
+# Consume the complete response: grep -q can close the pipe early and make curl
+# fail with exit 23 under pipefail, despite a valid page and a successful match.
+curl -fsS "$idea_http_base/ideas?view=map" | grep -F '关系图' >/dev/null
+curl -fsS "$idea_http_base/ideas" | grep -F '想法状态看板' >/dev/null
+curl -fsS "$idea_http_base/ideas/$idea_one" | grep -F '从想法形成项目' >/dev/null
+curl -fsS "$idea_http_base/projects/$project_id?tab=goals" | grep -F 'id="goal-workbench"' >/dev/null
 
 echo "idea → ProjectProposal → Project HTTP flow passed with immutable provenance"

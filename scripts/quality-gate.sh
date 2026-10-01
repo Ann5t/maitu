@@ -37,6 +37,7 @@ docker run --rm \
   '
 
 ./scripts/test-goal-migrations.sh
+./scripts/test-maitu-workflow.sh
 ./scripts/test-goal-http.sh
 ./scripts/test-context-http.sh
 ./scripts/test-workspace-runner-http.sh

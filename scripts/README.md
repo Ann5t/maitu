@@ -15,6 +15,7 @@
 ## 领域与 HTTP
 
 - `test-goal-migrations.sh`
+- `test-maitu-workflow.sh`：隔离数据库与 HTTP 测试接口的并行资料任务验证，真实 DeepSeek 调用另行验收
 - `test-goal-http.sh`
 - `test-context-http.sh`
 - `test-ideas-http.sh`

@@ -9,6 +9,7 @@ pub mod goal_models;
 pub mod idea_domain;
 pub mod idea_models;
 pub mod input_artifacts;
+mod maitu;
 mod migrations;
 mod models;
 pub mod scheduler;
@@ -25,6 +26,7 @@ use sqlx::postgres::PgPoolOptions;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::watch,
 };
 use tracing::info;
 
@@ -78,10 +80,26 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .context("初始化 ToolLease 安全代理失败")?;
     let bind = config.bind.clone();
+    let provider_root = std::env::var("MAITU_CONFIG_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            config
+                .artifact_root
+                .parent()
+                .unwrap_or(std::path::Path::new("./data"))
+                .join("maitu-config")
+        });
+    let providers = maitu::provider::ProviderStore::open(provider_root).await?;
     let state = Arc::new(AppState {
         pool,
         config,
         tool_proxy_client,
+        providers,
+    });
+    let (worker_shutdown, worker_signal) = watch::channel(false);
+    let worker_state = state.clone();
+    let worker = tokio::spawn(async move {
+        maitu::workflows::serve_worker(worker_state, worker_signal).await;
     });
     let app = web::router(state);
     let listener = TcpListener::bind(&bind)
@@ -93,9 +111,13 @@ async fn main() -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        let _ = worker_shutdown.send(true);
+    })
     .await
     .context("HTTP 服务异常退出")?;
+    worker.await.context("等待任务执行进程结束失败")?;
     Ok(())
 }
 

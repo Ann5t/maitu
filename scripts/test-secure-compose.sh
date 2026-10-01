@@ -176,10 +176,10 @@ grep -qi '__Host-fudian_session=.*Secure; HttpOnly; SameSite=Strict' \
   "$secure_compose_tmp/setup.headers"
 secure_curl --fail -b "$secure_compose_tmp/session.jar" "$secure_compose_origin/" \
   >"$secure_compose_tmp/dashboard.html"
-grep -q '最近项目' "$secure_compose_tmp/dashboard.html"
+grep -q 'id="maitu-project-create"' "$secure_compose_tmp/dashboard.html"
 
 secure_compose_migrations="$(secure_compose exec -T postgres \
   psql -U fudian -d fudian -Atc 'SELECT count(*) FROM schema_migrations;')"
-[[ "$secure_compose_migrations" == 14 ]]
+[[ "$secure_compose_migrations" == 15 ]]
 
 echo "secure compose passed: file secrets, internal networks, no app/database ports, HTTPS-only gateway, non-root read-only services and bounded resources"
