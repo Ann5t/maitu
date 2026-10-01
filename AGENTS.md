@@ -1,6 +1,8 @@
 # 脉图开发规则
 
-本仓库是脉图 Maitu 的开发根目录。先阅读 [README](README.md)、[首版范围](docs/product/maitu-scope.md)和[实施进度](docs/development/maitu-progress.md)。运行基础来自浮点；旧设计中的计划不能当成已实现功能。
+本仓库是脉图 Maitu 的开发根目录。先阅读 [README](README.md)、[整体完成路线](docs/product/completion-roadmap.md)、[首轮范围](docs/product/maitu-scope.md)和[实施进度](docs/development/maitu-progress.md)。运行基础来自浮点；旧设计中的计划不能当成已实现功能。
+
+最终目标是本仓库成为用户日常使用的个人 AI 工作台，再收拢五个旧库的功能、资料和可保存历史。首轮资料任务的 Goal 完成不表示整个产品完成。[旧库迁移方案](docs/operations/legacy-repository-migration.md)定义逐库恢复验收与删除准备，当前不删除旧库。优先围绕真实完整使用流程补能力，不用新增页面或生成文件数量代替验收。
 
 ## 先归类再分支
 

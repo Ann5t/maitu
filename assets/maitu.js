@@ -8,10 +8,18 @@
   let selectedTask;
   let selectedAttempt;
   let taskRequestId;
+  let planGenerateRequestId;
+  let planReviewRecord;
+  let codeImportRequestId;
+  let codeImportFiles=[];
+  let codeImportSource;
+  let retryTaskId;
+  let retryRequestId;
   let refreshing = false;
   let initialMapLayout = true;
   const outputCache = new Map();
   const startRequests = new Map();
+  const openOperations = new Set();
 
   function requestId() {
     if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -171,7 +179,7 @@
       columns.get(depth).push(task);
     }
     const rows = Math.max(1,...Array.from(columns.values(), tasks => tasks.length));
-    const height = Math.max(380, rows*210+70);
+    let height = Math.max(380, rows*210+70);
     const width = Math.max(650,(Math.max(0,...depths.values())+2)*304+30);
     map.style.width = `${width}px`;
     map.style.height = `${height}px`;
@@ -192,15 +200,6 @@
       path.setAttribute('d',`M${from.x},${from.y} C${mid},${from.y} ${mid},${to.y} ${to.x},${to.y}`);
       path.setAttribute('class','maitu-edge'); svg.append(path);
     }
-    for (const task of snapshot.tasks) {
-      const position = locations.get(task.id);
-      const parents = snapshot.dependencies.filter(item => item.taskId === task.id);
-      if (!parents.length) edge({x:272,y:height/2},{x:position.x,y:position.y+80});
-      for (const parent of parents) {
-        const previous = locations.get(parent.parentTaskId);
-        edge({x:previous.x+248,y:previous.y+80},{x:position.x,y:position.y+80});
-      }
-    }
     map.prepend(svg);
     for (const task of snapshot.tasks) {
       const position = locations.get(task.id);
@@ -210,14 +209,36 @@
       const select = element('button','maitu-node-select');
       select.type='button'; select.dataset.selectTask=task.id;
       select.setAttribute('aria-pressed',String(task.id===selectedTask));
-      select.append(element('span',`maitu-status maitu-status--${task.status}`,statusNames[task.status]||task.status),element('strong','',task.title),element('p','',task.waitReason||task.instruction));
+      const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
+      select.append(element('span',`maitu-status maitu-status--${task.status}`,`${kindName} · ${statusNames[task.status]||task.status}`),element('strong','',task.title),element('p','',task.waitReason||task.instruction));
       select.addEventListener('click',()=>selectTask(task.id));
       node.append(select);
       const actions=element('div','maitu-node-actions');
       if (!['running','queued'].includes(task.status)) actions.append(button(task.status==='draft'?'执行':task.status==='produced'?'再执行一次':'重试',()=>startTask(task.id)));
       actions.append(button('记录与成果',()=>selectTask(task.id)));
       if (task.acceptedAttemptId) actions.append(element('span','maitu-adopted','已采用成果'));
-      node.append(actions); map.append(node);
+      node.append(actions); map.append(node); position.node=node;
+    }
+    for(const position of locations.values()) position.height=position.node.getBoundingClientRect().height;
+    height=380;
+    for(const tasks of columns.values()) {
+      let y=35;
+      for(const task of tasks) {
+        const position=locations.get(task.id);position.y=y;position.node.style.top=y+'px';y+=position.height+26;
+      }
+      height=Math.max(height,y+30);
+    }
+    map.style.height=height+'px';origin.style.top=(height/2-origin.getBoundingClientRect().height/2)+'px';
+    svg.setAttribute('height',height);
+    for(const task of snapshot.tasks) {
+      const position=locations.get(task.id);
+      const target={x:position.x,y:position.y+position.height/2};
+      const parents=snapshot.dependencies.filter(item=>item.taskId===task.id);
+      if(!parents.length) edge({x:272,y:height/2},target);
+      for(const parent of parents) {
+        const previous=locations.get(parent.parentTaskId);
+        edge({x:previous.x+248,y:previous.y+previous.height/2},target);
+      }
     }
     if (!snapshot.tasks.length) {
       const empty=element('div','maitu-map-empty');
@@ -266,8 +287,14 @@
     const oldScroll=panel.scrollTop;
     panel.replaceChildren();
     panel.append(element('p','maitu-eyebrow','任务详情'),element('h2','',detail.task.title),element('p','maitu-detail-instruction',detail.task.instruction));
+    if (detail.task.acceptanceCriteria) panel.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
     if (detail.task.waitReason) panel.append(element('p','maitu-wait',detail.task.waitReason));
-    if (!['running','queued'].includes(detail.task.status)) panel.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
+    if (!['running','queued'].includes(detail.task.status)) {
+      panel.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
+      panel.append(button('补充要求再执行',()=> {
+        retryTaskId=id;retryRequestId=requestId();$('#maitu-retry-form').reset();$('#maitu-retry-dialog').showModal();
+      }));
+    }
     panel.append(element('h3','','历次尝试'));
     if (!detail.attempts.length) panel.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
     for (const attempt of detail.attempts) {
@@ -280,17 +307,54 @@
       if (attempt.requestStartedAt) section.append(element('p','maitu-note',`请求开始：${time(attempt.requestStartedAt)}`));
       if (attempt.responseReceivedAt) section.append(element('p','maitu-note',`结果收到：${time(attempt.responseReceivedAt)}`));
       if (attempt.errorMessage) section.append(element('p','maitu-error',attempt.errorMessage));
+      if(attempt.inputSnapshot?.additionalInstruction) section.append(element('p','maitu-note','本次补充：'+attempt.inputSnapshot.additionalInstruction));
       const events=element('ol','maitu-timeline');
       for (const event of detail.events[attempt.id]||[]) {
         const item=element('li'); item.append(element('span','',event.message),element('time','',new Date(event.createdAt).toLocaleTimeString())); events.append(item);
       }
       section.append(events);
+      const codeAttempt=(detail.codeAttempts||[]).find(record=>record.attemptId===attempt.id);
+      if(codeAttempt) {
+        section.append(element('p','maitu-note','代码基线：'+codeAttempt.baseCommit.slice(0,12)));
+        if(codeAttempt.candidateCommit) section.append(element('p','maitu-note','成果版本：'+codeAttempt.candidateCommit.slice(0,12)));
+        if(codeAttempt.adoptedAt) section.append(element('p','maitu-note','曾采用：'+time(codeAttempt.adoptedAt)));
+        if(codeAttempt.patchArtifactId) section.append(button('查看代码差异',()=>showOutput({artifactId:codeAttempt.patchArtifactId},'代码差异')));
+        else section.append(button('查看当前改动',async()=> {
+          const result=await api('/api/maitu/tasks/'+id+'/attempts/'+attempt.id+'/diff');
+          showContent('本次工作区的当前改动',result.content||'当前没有代码差异。');
+        }));
+      }
+      const operations=(detail.operations||[]).filter(record=>record.attemptId===attempt.id);
+      if(operations.length) {
+        section.append(element('h4','','实际操作'));
+        const list=element('div','maitu-operations');
+        const operationNames={running:'执行中',succeeded:'成功',failed:'失败',interrupted:'中断'};
+        for(const operation of operations) {
+          const row=element('details','maitu-operation');
+          row.open=openOperations.has(operation.id);
+          row.addEventListener('toggle',()=> {if(row.open) openOperations.add(operation.id); else openOperations.delete(operation.id);});
+          const result=operation.output;
+          row.append(element('summary','',operation.label+' · '+(operationNames[operation.status]||operation.status)));
+          row.append(element('p','maitu-note',time(operation.startedAt)+' → '+time(operation.completedAt)));
+          if(operation.kind==='check' && result?.command) {
+            row.append(element('p','maitu-note','退出码：'+(result.exitCode??'未确定')+' · '+result.durationMs+' ms'));
+            row.append(element('pre','',result.stdout||'没有标准输出'));
+            if(result.stderr) row.append(element('pre','maitu-error',result.stderr));
+            if(result.error) row.append(element('p','maitu-error',result.error));
+          } else if(result?.error) row.append(element('p','maitu-error',result.error));
+          row.append(button('查看操作记录',()=>showContent(operation.label,JSON.stringify({input:operation.input,output:result},null,2))));
+          list.append(row);
+        }
+        section.append(list);
+      }
       if (attempt.inputSnapshot) section.append(button('查看本次输入',()=>showContent(`第 ${attempt.number} 次输入`,JSON.stringify(attempt.inputSnapshot,null,2))));
       if (attempt.artifactId) {
         const actions=element('div','maitu-result-actions');
         actions.append(button('打开成果',()=>showOutput(attempt,detail.task.outputFilename)));
         const download=element('a','maitu-button maitu-button--small','下载'); download.href=`/artifacts/${attempt.artifactId}`; download.download=detail.task.outputFilename; actions.append(download);
-        if (detail.task.acceptedAttemptId!==attempt.id) actions.append(button('采用这次成果',async()=> {
+        const plan=(detail.plans||[]).find(record=>record.attemptId===attempt.id);
+        if (plan) actions.append(button(plan.adoptedAt?'查看采用的计划':'调整并加入任务图',()=>openPlanReview(plan),!plan.adoptedAt));
+        if (attempt.status==='produced' && detail.task.taskKind!=='plan' && detail.task.acceptedAttemptId!==attempt.id && !codeAttempt?.adoptedAt) actions.append(button(detail.task.taskKind==='code'?'合并检查并采用':'采用这次成果',async()=> {
           await api(`/api/maitu/tasks/${id}/accept`,'POST',{attemptId:attempt.id});
           feedback('已采用这次成果；等待它的后续任务可以继续。'); await refresh();
         },true));
@@ -302,6 +366,51 @@
     panel.scrollTop=oldScroll;
   }
 
+  function planField(parent,title,name,value,multiline=false) {
+    const label=element('label','maitu-plan-field',title);
+    const input=element(multiline?'textarea':'input'); input.name=name; input.value=value; input.required=true;
+    if(multiline) input.rows=name==='instruction'?4:2;
+    label.append(input); parent.append(label); return input;
+  }
+  function openPlanReview(record) {
+    planReviewRecord=record;
+    const plan=record.adoptedProposal||record.proposal;
+    const form=$('#maitu-plan-review-form');
+    form.elements.summary.value=plan.summary;
+    const questions=$('#maitu-plan-questions'); questions.replaceChildren();
+    if(plan.questions.length) {
+      questions.append(element('h3','','仍需明确的信息'));
+      const list=element('ul','maitu-note');
+      for(const question of plan.questions) list.append(element('li','',question));
+      questions.append(list);
+    }
+    const target=$('#maitu-plan-edit-tasks'); target.replaceChildren();
+    for(const task of plan.tasks) {
+      const card=element('fieldset','maitu-plan-task'); card.dataset.planKey=task.key;
+      card.append(element('legend','',task.title));
+      planField(card,'任务名称','title',task.title);
+      const label=element('label','maitu-plan-field','任务类型');
+      const kind=element('select'); kind.name='kind';
+      for(const [value,title] of [['file','读取资料并产出文件'],['code','修改代码并运行检查']]) {
+        const option=element('option','',title); option.value=value; kind.append(option);
+      }
+      kind.value=task.kind; label.append(kind); card.append(label);
+      planField(card,'具体要求','instruction',task.instruction,true);
+      planField(card,task.kind==='code'?'成果说明文件名（不含路径）':'成果文件名（不含路径）','outputFilename',task.outputFilename);
+      planField(card,'验收要求','acceptanceCriteria',task.acceptanceCriteria,true);
+      card.append(element('p','maitu-note','等待哪些前序任务？没有真实依赖时可以独立执行。'));
+      const dependencies=element('div','maitu-checks');
+      for(const parent of plan.tasks.filter(item=>item.key!==task.key)) {
+        const row=element('label'); const check=element('input'); check.type='checkbox'; check.name='dependsOn'; check.value=parent.key; check.checked=task.dependsOn.includes(parent.key);
+        row.append(check,element('span','',parent.title)); dependencies.append(row);
+      }
+      card.append(dependencies); target.append(card);
+    }
+    for(const control of form.querySelectorAll('input,textarea,select,button[type="submit"]')) control.disabled=Boolean(record.adoptedAt);
+    $('button[type="submit"]',form).textContent=record.adoptedAt?'这份计划已经加入图中':'加入任务图';
+    $('#maitu-plan-review-dialog').showModal();
+  }
+
   async function refresh() {
     if (refreshing) return;
     refreshing=true;
@@ -311,10 +420,64 @@
       $('#maitu-capacity').textContent=snapshot.provider.configured?`全局 ${snapshot.activeTasks} / ${snapshot.provider.concurrency} 执行中`:'先连接 DeepSeek';
       $('#maitu-project-status').textContent=`${snapshot.tasks.length} 个任务 · ${produced} 个已产出`;
       renderMap(); renderSources(); await renderDetail();
+      const code=snapshot.codeProject;
+      $('#maitu-code-state').textContent=code
+        ? code.sourceName+' · '+code.fileCount+' 个文件 · 当前采用版本 '+code.acceptedCommit.slice(0,12)+' · '+code.checks.map(check=>check.label).join('、')
+        : '导入代码副本后，可以在图上真实修改代码并运行检查。';
+      $('#maitu-import-code').hidden=Boolean(code);
+      $('#maitu-export-code').hidden=!code;
     } finally {refreshing=false;}
   }
 
   if (mode==='project') {
+    $('#maitu-retry-form').addEventListener('submit',async event=> {
+      event.preventDefault();const form=event.currentTarget;const submit=$('button[type="submit"]',form);submit.disabled=true;
+      try {
+        await api('/api/maitu/tasks/'+retryTaskId+'/start','POST',{requestId:retryRequestId,additionalInstruction:form.elements.additionalInstruction.value});
+        $('#maitu-retry-dialog').close();selectedTask=retryTaskId;selectedAttempt=undefined;await refresh();feedback('新的尝试已排队，原记录仍可查看。');
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
+    const codeForm=$('#maitu-code-import-form');
+    $('#maitu-import-code').addEventListener('click',()=> {
+      codeImportRequestId=requestId(); codeImportFiles=[]; codeForm.reset();
+      $('#maitu-code-import-dialog').showModal();
+    });
+    codeForm.elements.checkProgram.addEventListener('change',()=> {
+      codeForm.elements.checkArgs.value={node:'--test',python3:'-m\nunittest\ndiscover',cargo:'test\n--offline'}[codeForm.elements.checkProgram.value];
+    });
+    $('#maitu-code-files').addEventListener('change',async event=> {
+      const files=Array.from(event.currentTarget.files); codeImportFiles=[];
+      const submit=$('button[type="submit"]',codeForm); submit.disabled=true;
+      let skipped=0; let bytes=0;
+      try {
+        codeImportSource=files[0]?.webkitRelativePath.split('/')[0]||'项目代码';
+        const decoder=new TextDecoder('utf-8',{fatal:true});
+        for(const file of files) {
+          const path=(file.webkitRelativePath||file.name).split('/').slice(1).join('/');
+          const parts=path.toLowerCase().split('/');
+          if(!path || parts.some(part=>['.git','node_modules','target','.ssh','.aws','__pycache__','.env'].includes(part)||part.startsWith('.maitu-write-')||(part.startsWith('.env.')&&!part.endsWith('.example')))) {skipped++;continue;}
+          if(file.size>1024*1024) {skipped++;continue;}
+          let content;
+          try {content=decoder.decode(await file.arrayBuffer());} catch {skipped++;continue;}
+          if(content.includes('\0')) {skipped++;continue;}
+          bytes+=new TextEncoder().encode(content).length;
+          if(bytes>20*1024*1024 || codeImportFiles.length>=2000) throw new Error('代码文本超过 2,000 件或 20 MiB，请选较小的源代码目录。');
+          codeImportFiles.push({path,content});
+        }
+        $('#maitu-code-import-count').textContent=codeImportSource+'：将导入 '+codeImportFiles.length+' 个文本文件，'+(bytes/1024).toFixed(1)+' KiB；跳过 '+skipped+' 件缓存、配置或非文本原件。';
+      } catch(error) {codeImportFiles=[];feedback(error.message,true);} finally {submit.disabled=false;}
+    });
+    codeForm.addEventListener('submit',async event=> {
+      event.preventDefault(); const submit=$('button[type="submit"]',codeForm); submit.disabled=true;
+      try {
+        if(!codeImportFiles.length) throw new Error('先选择包含可用文本代码的文件夹。');
+        const checks=[{id:'project-check',label:codeForm.elements.checkLabel.value,program:codeForm.elements.checkProgram.value,
+          args:codeForm.elements.checkArgs.value.split('\n').map(arg=>arg.trim()).filter(Boolean)}];
+        await api('/api/maitu/projects/'+projectId+'/code','POST',{requestId:codeImportRequestId,sourceName:codeImportSource,files:codeImportFiles,checks});
+        $('#maitu-code-import-dialog').close(); codeImportFiles=[]; await refresh();
+        feedback('代码基线已保存，现在可以生成编码计划或添加编码任务。');
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
     function checkList(target,items,name,label) {
       target.replaceChildren();
       if (!items.length) target.append(element('span','maitu-note','暂无可选项'));
@@ -331,6 +494,33 @@
       $('#maitu-task-dialog').showModal();
     });
     $('#maitu-add-source').addEventListener('click',()=>$('#maitu-source-dialog').showModal());
+    $('#maitu-generate-plan').addEventListener('click',()=> {
+      if(!snapshot) return;
+      planGenerateRequestId=requestId();
+      checkList($('#maitu-plan-sources'),snapshot.sources,'sourceIds',source=>source.filename);
+      $('#maitu-plan-generate-dialog').showModal();
+    });
+    $('#maitu-plan-generate-form').addEventListener('submit',async event=> {
+      event.preventDefault(); const form=event.currentTarget; const submit=$('button[type="submit"]',form); submit.disabled=true;
+      try {
+        const data=new FormData(form);
+        const task=await api(`/api/maitu/projects/${projectId}/plans`,'POST',{requestId:planGenerateRequestId,instruction:data.get('instruction'),sourceIds:data.getAll('sourceIds')});
+        $('#maitu-plan-generate-dialog').close(); selectedTask=task.id; selectedAttempt=undefined; await refresh(); feedback('计划已开始生成，完成后可以调整并加入任务图。');
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
+    $('#maitu-plan-review-form').addEventListener('submit',async event=> {
+      event.preventDefault(); const form=event.currentTarget; const submit=$('button[type="submit"]',form); submit.disabled=true;
+      try {
+        const plan=JSON.parse(JSON.stringify(planReviewRecord.proposal)); plan.summary=form.elements.summary.value;
+        plan.tasks=Array.from(form.querySelectorAll('[data-plan-key]'),card=> ({
+          key:card.dataset.planKey,title:$('[name="title"]',card).value,kind:$('[name="kind"]',card).value,instruction:$('[name="instruction"]',card).value,
+          outputFilename:$('[name="outputFilename"]',card).value,acceptanceCriteria:$('[name="acceptanceCriteria"]',card).value,
+          dependsOn:Array.from(card.querySelectorAll('[name="dependsOn"]:checked'),input=>input.value)
+        }));
+        const result=await api(`/api/maitu/projects/${projectId}/plans/adopt`,'POST',{attemptId:planReviewRecord.attemptId,plan});
+        $('#maitu-plan-review-dialog').close(); selectedTask=result.taskIds[0]; selectedAttempt=undefined; await refresh(); feedback(`${result.taskIds.length} 个节点已加入图中，你可以决定开始执行。`);
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
     $('#maitu-start-ready').addEventListener('click',handle(async()=> {
       const tasks=snapshot.tasks.filter(task=>task.status==='draft');
       if (!tasks.length) {feedback('没有待启动任务。失败或已产出的任务可在节点上单独重试。'); return;}
@@ -343,7 +533,7 @@
       const data=new FormData(form);
       try {
         const task=await api(`/api/maitu/projects/${projectId}/tasks`,'POST',{
-          requestId:taskRequestId,title:data.get('title'),instruction:data.get('instruction'),outputFilename:data.get('outputFilename'),sourceIds:data.getAll('sourceIds'),dependencyIds:data.getAll('dependencyIds')
+          requestId:taskRequestId,title:data.get('title'),instruction:data.get('instruction'),outputFilename:data.get('outputFilename'),taskKind:data.get('taskKind'),acceptanceCriteria:data.get('acceptanceCriteria'),sourceIds:data.getAll('sourceIds'),dependencyIds:data.getAll('dependencyIds')
         });
         $('#maitu-task-dialog').close(); selectedTask=task.id; selectedAttempt=undefined; await refresh(); feedback('任务已加入图中，可以从节点上执行。');
       } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}

@@ -24,5 +24,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Reserve space for isolated builds on the disposable hosted runner
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          # These preinstalled SDKs are unused by the Docker-based quality gate.
+          # Keep this cleanup out of local scripts and self-hosted runners.
+          sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet
+          df -h /
+
       - name: Run the complete isolated quality gate
         run: ./scripts/quality-gate.sh

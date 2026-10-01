@@ -55,3 +55,8 @@
 状态使用 `Proposed`、`Accepted`、`Rejected`、`Superseded`。已接受记录保持追加式；改变方向时创建新记录并链接被替代记录。
 
 - [0049 脉图以 Docker 网页版继续推进](0049-maitu-docker-web-bootstrap.md)
+
+## 脉图工作流决定
+
+- [Maitu 0001：并行资料任务](maitu-0001-parallel-file-workflows.md)
+- [Maitu 0002：目标、任务图与真实编码](maitu-0002-goal-to-code-workflow.md)

@@ -107,7 +107,7 @@ docker run --rm --network none --read-only \
   --mount "type=volume,src=$restore_repository_volume,dst=/repositories,readonly" \
   --entrypoint sh "$restore_git_image" -ec '
     found=0
-    for repository in /repositories/projects/*.git; do
+    for repository in /repositories/projects/*.git /repositories/maitu-code/*/repository.git; do
       [ -d "$repository" ] || continue
       found=1
       git --git-dir "$repository" fsck --strict

@@ -30,6 +30,8 @@ pub struct TaskRecord {
     pub title: String,
     pub instruction: String,
     pub output_filename: String,
+    pub task_kind: String,
+    pub acceptance_criteria: String,
     pub source_ids: Json<Vec<Uuid>>,
     pub status: String,
     pub wait_reason: Option<String>,
@@ -106,6 +108,7 @@ pub struct WorkflowSnapshot {
     pub sources: Vec<SourceSummary>,
     pub provider: super::provider::ProviderView,
     pub active_tasks: i64,
+    pub code_project: Option<super::code::CodeProject>,
 }
 
 #[derive(Serialize)]
@@ -114,6 +117,9 @@ pub struct TaskDetail {
     pub task: TaskRecord,
     pub attempts: Vec<AttemptRecord>,
     pub events: HashMap<Uuid, Vec<AttemptEvent>>,
+    pub plans: Vec<super::plans::PlanRecord>,
+    pub code_attempts: Vec<super::code::CodeAttempt>,
+    pub operations: Vec<super::code::Operation>,
 }
 
 #[derive(Deserialize)]
@@ -123,10 +129,18 @@ pub struct CreateTaskRequest {
     pub title: String,
     pub instruction: String,
     pub output_filename: String,
+    #[serde(default = "file_kind")]
+    pub task_kind: String,
+    #[serde(default)]
+    pub acceptance_criteria: String,
     #[serde(default)]
     pub source_ids: Vec<Uuid>,
     #[serde(default)]
     pub dependency_ids: Vec<Uuid>,
+}
+
+fn file_kind() -> String {
+    "file".into()
 }
 
 #[derive(Deserialize)]
@@ -140,6 +154,8 @@ pub struct AddSourceRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StartRequest {
     pub request_id: Uuid,
+    #[serde(default)]
+    pub additional_instruction: String,
 }
 
 #[derive(Deserialize)]
@@ -171,6 +187,7 @@ pub async fn snapshot(
             .bind(id).fetch_all(pool).await?,
         provider: providers.get().await.view(),
         active_tasks: sqlx::query_scalar("SELECT count(*) FROM maitu_tasks WHERE status='running'").fetch_one(pool).await?,
+        code_project: super::code::project(pool,id).await?,
     })
 }
 
@@ -198,10 +215,13 @@ pub async fn detail(pool: &PgPool, id: Uuid) -> AppResult<TaskDetail> {
         task,
         attempts,
         events,
+        plans: super::plans::for_task(pool, id).await?,
+        code_attempts: super::code::attempts(pool, id).await?,
+        operations: super::code::operations(pool, id).await?,
     })
 }
 
-fn validate_filename(name: &str) -> AppResult<()> {
+pub(super) fn validate_filename(name: &str) -> AppResult<()> {
     if name.trim().is_empty()
         || name.len() > 200
         || name.starts_with('.')
@@ -263,6 +283,8 @@ pub async fn create_task(
         || input.instruction.len() > 32 * 1024
         || input.source_ids.len() > 64
         || input.dependency_ids.len() > 32
+        || !matches!(input.task_kind.as_str(), "file" | "plan" | "code")
+        || input.acceptance_criteria.len() > 8000
     {
         return Err(AppError::bad_request(
             "invalid_task",
@@ -298,6 +320,8 @@ pub async fn create_task(
             || existing.title != input.title
             || existing.instruction != input.instruction
             || existing.output_filename != input.output_filename
+            || existing.task_kind != input.task_kind
+            || existing.acceptance_criteria != input.acceptance_criteria
             || existing.source_ids.0 != input.source_ids
             || parents != input.dependency_ids
         {
@@ -326,9 +350,9 @@ pub async fn create_task(
             "资料与前序任务必须来自当前项目",
         ));
     }
-    let task = sqlx::query_as("INSERT INTO maitu_tasks(id,project_id,title,instruction,output_filename,source_ids) VALUES($1,$2,$3,$4,$5,$6) RETURNING *")
+    let task = sqlx::query_as("INSERT INTO maitu_tasks(id,project_id,title,instruction,output_filename,source_ids,task_kind,acceptance_criteria) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *")
         .bind(input.request_id).bind(project_id).bind(input.title).bind(input.instruction).bind(input.output_filename)
-        .bind(Json(input.source_ids)).fetch_one(&mut *tx).await?;
+        .bind(Json(input.source_ids)).bind(&input.task_kind).bind(&input.acceptance_criteria).fetch_one(&mut *tx).await?;
     for parent in input.dependency_ids {
         sqlx::query("INSERT INTO maitu_task_dependencies(project_id,task_id,parent_task_id) VALUES($1,$2,$3)")
             .bind(project_id).bind(input.request_id).bind(parent).execute(&mut *tx).await?;
@@ -338,6 +362,22 @@ pub async fn create_task(
 }
 
 pub async fn start(pool: &PgPool, task_id: Uuid, request_id: Uuid) -> AppResult<AttemptRecord> {
+    start_with_instruction(pool, task_id, request_id, "").await
+}
+
+pub async fn start_with_instruction(
+    pool: &PgPool,
+    task_id: Uuid,
+    request_id: Uuid,
+    additional: &str,
+) -> AppResult<AttemptRecord> {
+    let additional = additional.trim();
+    if additional.len() > 8000 {
+        return Err(AppError::bad_request(
+            "instruction_limit",
+            "补充要求不能超过 8,000 字节",
+        ));
+    }
     let mut tx = pool.begin().await?;
     let current: TaskRecord = sqlx::query_as("SELECT * FROM maitu_tasks WHERE id=$1 FOR UPDATE")
         .bind(task_id)
@@ -356,9 +396,27 @@ pub async fn start(pool: &PgPool, task_id: Uuid, request_id: Uuid) -> AppResult<
                 "此请求编号已用于另一项执行",
             ));
         }
+        if existing
+            .input_snapshot
+            .as_ref()
+            .and_then(|value| value.0["additionalInstruction"].as_str())
+            .unwrap_or("")
+            != additional
+        {
+            return Err(AppError::conflict(
+                "request_reused",
+                "此执行编号已用于另一份要求，请新建一次尝试",
+            ));
+        }
         return Ok(existing);
     }
     if matches!(current.status.as_str(), "queued" | "running") {
+        if !additional.is_empty() {
+            return Err(AppError::conflict(
+                "task_already_started",
+                "任务已经在等待或执行，补充要求请用于下一次尝试",
+            ));
+        }
         return Ok(sqlx::query_as("SELECT * FROM maitu_attempts WHERE id=$1")
             .bind(current.latest_attempt_id)
             .fetch_one(&mut *tx)
@@ -366,7 +424,16 @@ pub async fn start(pool: &PgPool, task_id: Uuid, request_id: Uuid) -> AppResult<
     }
     let sources: Vec<SourceRecord> = sqlx::query_as("SELECT * FROM maitu_sources WHERE project_id=$1 AND (cardinality($2::uuid[])=0 OR id=ANY($2)) ORDER BY created_at,id")
         .bind(current.project_id).bind(&current.source_ids.0).fetch_all(&mut *tx).await?;
-    let snapshot = json!({"title":current.title,"instruction":current.instruction,"outputFilename":current.output_filename,"sources":sources,"upstream":[]});
+    let code_project: Option<Json<Value>> = sqlx::query_scalar("SELECT jsonb_build_object('baseCommit',accepted_commit,'checks',checks,'sourceName',source_name,'fileCount',file_count) FROM maitu_code_projects WHERE project_id=$1")
+        .bind(current.project_id).fetch_optional(&mut *tx).await?;
+    if current.task_kind == "code" && code_project.is_none() {
+        return Err(AppError::conflict(
+            "code_project_required",
+            "请先导入代码项目及检查方式，再启动编码任务",
+        ));
+    }
+    let snapshot = json!({"title":current.title,"instruction":current.instruction,"outputFilename":current.output_filename,
+        "taskKind":current.task_kind,"acceptanceCriteria":current.acceptance_criteria,"additionalInstruction":additional,"sources":sources,"upstream":[],"codeProject":code_project});
     if snapshot.to_string().len() > MAX_INPUT_BYTES {
         return Err(AppError::bad_request(
             "input_limit",
@@ -397,6 +464,18 @@ pub async fn accept(pool: &PgPool, task_id: Uuid, attempt_id: Uuid) -> AppResult
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::not_found("任务不存在"))?;
+    if current.task_kind == "plan" {
+        return Err(AppError::conflict(
+            "plan_requires_adoption",
+            "请调整推进计划后，将它加入任务图",
+        ));
+    }
+    if current.task_kind == "code" {
+        return Err(AppError::conflict(
+            "code_requires_integration",
+            "编码成果需要经过合并和实际检查后采用",
+        ));
+    }
     let valid: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM maitu_attempts WHERE id=$1 AND task_id=$2 AND status='produced' AND artifact_id IS NOT NULL)")
         .bind(attempt_id).bind(task_id).fetch_one(&mut *tx).await?;
     if !valid {
@@ -422,7 +501,12 @@ pub async fn accept(pool: &PgPool, task_id: Uuid, attempt_id: Uuid) -> AppResult
     Ok(result)
 }
 
-async fn event(pool: &PgPool, attempt: Uuid, phase: &str, message: &str) -> AppResult<()> {
+pub(super) async fn event(
+    pool: &PgPool,
+    attempt: Uuid,
+    phase: &str,
+    message: &str,
+) -> AppResult<()> {
     sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,$2,$3)")
         .bind(attempt)
         .bind(phase)
@@ -534,7 +618,13 @@ async fn claim(
                     continue 'candidates;
                 }
             };
-            outputs.push(json!({"taskId":parent,"attemptId":source_attempt,"artifactId":artifact_id,"title":title,"filename":filename,"sha256":hash,"content":content}));
+            let adopted_plan:Option<Json<Value>>=sqlx::query_scalar("SELECT adopted_proposal FROM maitu_plans WHERE attempt_id=$1 AND adopted_at IS NOT NULL")
+                .bind(source_attempt).fetch_optional(&mut *tx).await?.flatten();
+            let kind: String = sqlx::query_scalar("SELECT task_kind FROM maitu_tasks WHERE id=$1")
+                .bind(parent)
+                .fetch_one(&mut *tx)
+                .await?;
+            outputs.push(json!({"taskId":parent,"taskKind":kind,"attemptId":source_attempt,"artifactId":artifact_id,"title":title,"filename":filename,"sha256":hash,"content":content,"adoptedPlan":adopted_plan}));
         }
         snapshot.0["upstream"] = json!(outputs);
         snapshot.0["provider"] = json!(config.view());
@@ -614,13 +704,25 @@ async fn finish_failed(
     Ok(())
 }
 
-fn prompt(snapshot: &Value) -> String {
+pub(super) fn prompt(snapshot: &Value) -> String {
     let mut text = format!(
         "任务：{}\n要求：{}\n成果文件：{}\n\n",
         snapshot["title"].as_str().unwrap_or(""),
         snapshot["instruction"].as_str().unwrap_or(""),
         snapshot["outputFilename"].as_str().unwrap_or("")
     );
+    if let Some(additional) = snapshot["additionalInstruction"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+    {
+        text.push_str(&format!("本次补充要求：{additional}\n"));
+    }
+    if let Some(criteria) = snapshot["acceptanceCriteria"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+    {
+        text.push_str(&format!("验收要求：{criteria}\n"));
+    }
     for (field, label) in [("sources", "项目资料"), ("upstream", "已采用的前序成果")] {
         if let Some(items) = snapshot[field].as_array() {
             for item in items {
@@ -629,6 +731,12 @@ fn prompt(snapshot: &Value) -> String {
                     item["filename"].as_str().unwrap_or(""),
                     item["content"].as_str().unwrap_or("")
                 ));
+                if !item["adoptedPlan"].is_null() {
+                    text.push_str(&format!(
+                        "\n此计划已由用户调整并采用，以以下版本及当前任务要求为准：\n{}\n",
+                        item["adoptedPlan"]
+                    ));
+                }
             }
         }
     }
@@ -641,28 +749,51 @@ async fn execute(
     task: TaskRecord,
     attempt: AttemptRecord,
 ) -> AppResult<()> {
-    event(
-        &state.pool,
-        attempt.id,
-        "request",
-        "开始向模型服务发起独立请求",
-    )
-    .await?;
-    sqlx::query("UPDATE maitu_attempts SET request_started_at=now() WHERE id=$1")
-        .bind(attempt.id)
-        .execute(&state.pool)
+    if task.task_kind != "code" {
+        event(
+            &state.pool,
+            attempt.id,
+            "request",
+            "开始向模型服务发起独立请求",
+        )
         .await?;
-    let response = provider::complete(
-        &config,
-        &prompt(
-            &attempt
-                .input_snapshot
-                .as_ref()
-                .expect("claimed input snapshot")
-                .0,
-        ),
-    )
-    .await;
+        sqlx::query("UPDATE maitu_attempts SET request_started_at=now() WHERE id=$1")
+            .bind(attempt.id)
+            .execute(&state.pool)
+            .await?;
+    }
+    let input = &attempt
+        .input_snapshot
+        .as_ref()
+        .expect("claimed input snapshot")
+        .0;
+    let response = if task.task_kind == "code" {
+        let result = super::agent::execute(&state, &config, &task, &attempt).await;
+        match result {
+            Ok(response) => Ok(response),
+            Err(error) => return Err(error),
+        }
+    } else if task.task_kind == "plan" {
+        let mut input = input.clone();
+        if let Some(base) = input["codeProject"]["baseCommit"].as_str() {
+            input["codeContext"] =
+                super::code::planning_context(&state, task.project_id, base).await?;
+        }
+        sqlx::query("UPDATE maitu_attempts SET input_snapshot=$2 WHERE id=$1")
+            .bind(attempt.id)
+            .bind(Json(&input))
+            .execute(&state.pool)
+            .await?;
+        provider::complete_with_system(
+            &config,
+            super::plans::SYSTEM_PROMPT,
+            &super::plans::prompt_context(&input),
+            true,
+        )
+        .await
+    } else {
+        provider::complete(&config, &prompt(input)).await
+    };
     if response.is_ok() {
         sqlx::query("UPDATE maitu_attempts SET response_received_at=now() WHERE id=$1")
             .bind(attempt.id)
@@ -702,6 +833,37 @@ async fn execute(
     sqlx::query("INSERT INTO artifacts(id,project_id,title,kind,storage_path,media_type,sha256,version,status) VALUES($1,$2,$3,'ai_file',$4,'text/plain; charset=utf-8',$5,$6,'review')")
         .bind(artifact_id).bind(task.project_id).bind(&task.output_filename).bind(stored.storage_path)
         .bind(stored.sha256).bind(attempt.number).execute(&mut *tx).await?;
+    if task.task_kind == "plan" {
+        let parsed = super::plans::Plan::parse(&response.content).and_then(|plan| {
+            plan.validate(!input["codeProject"].is_null())?;
+            Ok(plan)
+        });
+        match parsed {
+            Ok(plan) => {
+                sqlx::query(
+                    "INSERT INTO maitu_plans(attempt_id,project_id,proposal) VALUES($1,$2,$3)",
+                )
+                .bind(attempt.id)
+                .bind(task.project_id)
+                .bind(Json(plan))
+                .execute(&mut *tx)
+                .await?;
+            }
+            Err(failure) => {
+                sqlx::query("UPDATE maitu_attempts SET artifact_id=$2,usage=$3 WHERE id=$1 AND status='running'")
+                    .bind(attempt.id).bind(artifact_id).bind(Json(response.usage)).execute(&mut *tx).await?;
+                tx.commit().await?;
+                return finish_failed(
+                    &state.pool,
+                    task.id,
+                    attempt.id,
+                    failure.code(),
+                    &failure.public_message(),
+                )
+                .await;
+            }
+        }
+    }
     let changed = sqlx::query("UPDATE maitu_attempts SET status='produced',artifact_id=$2,usage=$3,completed_at=now() WHERE id=$1 AND status='running'")
         .bind(attempt.id).bind(artifact_id).bind(Json(response.usage)).execute(&mut *tx).await?;
     if changed.rows_affected() != 1 {
@@ -724,6 +886,8 @@ async fn execute(
 
 async fn interrupt_running(pool: &PgPool) -> AppResult<()> {
     let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE maitu_execution_operations SET status='interrupted',completed_at=now(),output=jsonb_build_object('error','执行进程中断；已有现场保留，不自动重复操作','resultUncertain',true) WHERE status='running'")
+        .execute(&mut *tx).await?;
     sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) SELECT id,'interrupted','执行进程已停止，服务端结果可能仍已产生；请检查后决定是否重试' FROM maitu_attempts WHERE status='running'")
         .execute(&mut *tx).await?;
     sqlx::query("UPDATE maitu_attempts SET status='interrupted',error_code='process_interrupted',error_message='执行进程已停止，模型侧是否完成尚不确定',completed_at=now() WHERE status='running'")

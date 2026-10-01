@@ -44,6 +44,8 @@ docker run -d --name "$browser_app" --network "$browser_network" \
   -e DATABASE_URL=postgres://fudian_test:fudian_test_only@browser-db:5432/fudian_test \
   -e FUDIAN_SECURITY_MODE=disabled \
   -e FUDIAN_BIND=0.0.0.0:3000 -e ARTIFACT_ROOT=/tmp/fudian-browser-artifacts \
+  -e REPOSITORY_ROOT=/tmp/fudian-browser-repositories -e WORKTREE_ROOT=/tmp/fudian-browser-worktrees \
+  -e RUNNER_OUTPUT_ROOT=/tmp/fudian-browser-runner \
   -e FUDIAN_WORKER_BOOTSTRAP_TOKEN="$browser_worker_bootstrap" \
   -e RUST_LOG=fudian=info \
   --mount "type=bind,src=$browser_repo_root,dst=/app" \
@@ -56,6 +58,9 @@ for browser_attempt in $(seq 1 60); do
   [[ "$browser_attempt" == 60 ]] && docker logs "$browser_app" && exit 1
   sleep 1
 done
+
+docker exec -i "$browser_db" psql -v ON_ERROR_STOP=1 -U fudian_test -d fudian_test \
+  < "$browser_repo_root/tests/sql/maitu_plan_browser_fixture.sql" >/dev/null
 
 docker run --rm --init --ipc=host --network "$browser_network" \
   -e BASE_URL=http://browser-app:3000 \

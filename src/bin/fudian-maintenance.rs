@@ -548,6 +548,30 @@ async fn observe_directory(
         if relative == ".fudian-quarantine" {
             continue;
         }
+        // Preserve crash recovery workspaces and uncertain process receipts until
+        // there is a dedicated Maitu retention policy.
+        if matches!(
+            (root_kind, relative.as_str()),
+            (
+                StorageRoot::Repositories | StorageRoot::Worktrees,
+                "maitu-code"
+            ) | (StorageRoot::RunnerOutputs, "code-checks")
+        ) {
+            let physical = physical_metadata(&path).await?;
+            observations.push(Observation {
+                root: root_kind,
+                storage_class: default_class(root_kind).to_owned(),
+                relative_path: relative,
+                state: "referenced".to_owned(),
+                content_digest: physical.0,
+                size_bytes: physical.1,
+                observed_mtime: physical.2,
+                eligible_after: None,
+                quarantine_path: None,
+                detail: json!({"retainedForMaituRecovery":true}),
+            });
+            continue;
+        }
         let metadata = fs::symlink_metadata(&path).await?;
         let exact = references
             .iter()
