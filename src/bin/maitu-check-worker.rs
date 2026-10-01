@@ -22,6 +22,7 @@ use tokio::{
 
 struct Worker {
     docker: reqwest::Client,
+    api_version: String,
     token_hash: [u8; 32],
     image: String,
     volume: String,
@@ -43,9 +44,10 @@ impl Worker {
         path: &str,
         body: Option<Value>,
     ) -> anyhow::Result<Vec<u8>> {
-        let mut request = self
-            .docker
-            .request(method, format!("http://localhost/v1.51{path}"));
+        let mut request = self.docker.request(
+            method,
+            format!("http://localhost/v{}{path}", self.api_version),
+        );
         if let Some(body) = body {
             request = request
                 .header("content-type", "application/json")
@@ -243,6 +245,24 @@ async fn check(
     Ok(Json(result))
 }
 
+fn negotiate_api_version(max: &str, min: Option<&str>) -> anyhow::Result<String> {
+    fn minor(value: &str) -> anyhow::Result<u16> {
+        value
+            .strip_prefix("1.")
+            .context("Docker 接口版本格式无法读取")?
+            .parse()
+            .context("Docker 接口版本格式无法读取")
+    }
+    let max = minor(max)?;
+    let min = min.map(minor).transpose()?.unwrap_or(0);
+    let selected = max.min(51);
+    // Volume subpaths require API 1.45. Never fall back to mounting the whole volume.
+    if selected < 45 || selected < min || min > max {
+        bail!("Docker 不支持所需的隔离检查接口（需要兼容 API 1.45–1.51）");
+    }
+    Ok(format!("1.{selected}"))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let token = fs::read_to_string(
@@ -262,8 +282,21 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
     let tag =
         std::env::var("MAITU_CODE_IMAGE").unwrap_or_else(|_| "maitu-code-runtime:local".into());
+    let version_response = docker
+        .get("http://localhost/version")
+        .send()
+        .await?
+        .error_for_status()?;
+    let version: Value = serde_json::from_slice(&version_response.bytes().await?)?;
+    let api_version = negotiate_api_version(
+        version["ApiVersion"]
+            .as_str()
+            .context("缺少 Docker 接口版本")?,
+        version["MinAPIVersion"].as_str(),
+    )?;
+    eprintln!("检查控制器使用 Docker API {api_version}");
     let response = docker
-        .get(format!("http://localhost/v1.51/images/{tag}/json"))
+        .get(format!("http://localhost/v{api_version}/images/{tag}/json"))
         .send()
         .await?;
     if !response.status().is_success() {
@@ -281,6 +314,7 @@ async fn main() -> anyhow::Result<()> {
     fs::create_dir_all(&root).await?;
     let worker = Arc::new(Worker {
         docker,
+        api_version,
         token_hash: Sha256::digest(token.trim().as_bytes()).into(),
         image,
         root,
@@ -299,4 +333,25 @@ async fn main() -> anyhow::Result<()> {
         .with_state(worker);
     axum::serve(tokio::net::TcpListener::bind("0.0.0.0:3001").await?, router).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::negotiate_api_version;
+
+    #[test]
+    fn supports_older_and_newer_daemons_without_losing_workspace_isolation() {
+        assert_eq!(negotiate_api_version("1.48", Some("1.24")).unwrap(), "1.48");
+        assert_eq!(negotiate_api_version("1.45", None).unwrap(), "1.45");
+        assert_eq!(negotiate_api_version("1.56", Some("1.44")).unwrap(), "1.51");
+        for (max, min) in [
+            ("1.44", None),
+            ("1.56", Some("1.52")),
+            ("1.48", Some("1.49")),
+            ("bad", None),
+            ("2.0", None),
+        ] {
+            assert!(negotiate_api_version(max, min).is_err());
+        }
+    }
 }

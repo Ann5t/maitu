@@ -15,7 +15,10 @@ code_test_controller="${MAITU_CODE_TEST_CONTROLLER:-maitu-code-test-app:local}"
 
 cleanup_code_test() {
   local result="$?"
-  if (( result != 0 )); then docker logs "$code_test_worker" >&2 2>/dev/null || true; fi
+  if (( result != 0 )); then
+    docker version --format 'Docker server: {{.Server.Version}} API {{.Server.APIVersion}}' >&2 || true
+    docker logs "$code_test_worker" >&2 || true
+  fi
   for container in "$code_test_app" "$code_test_worker" "$code_test_db"; do
     [[ "$container" == maitu-code-test-* ]] && docker rm -f "$container" >/dev/null 2>&1 || true
   done
