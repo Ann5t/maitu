@@ -306,18 +306,18 @@ async fn stale_input_reasons(
                 }
             }
         }
-        if reason.is_empty() && !snapshot["codeProject"].is_null() {
-            if let Some(base) = snapshot["codeProject"]["baseCommit"].as_str() {
-                let accepted: Option<String> = sqlx::query_scalar(
-                    "SELECT accepted_commit FROM maitu_code_projects WHERE project_id=$1",
-                )
-                .bind(task.project_id)
-                .fetch_optional(pool)
-                .await?;
-                if accepted.is_some_and(|commit| commit != base) {
-                    reason =
-                        "本次尝试的代码基线已不是项目当前采用版本；差异仍按当时基线记录".into();
-                }
+        if reason.is_empty()
+            && !snapshot["codeProject"].is_null()
+            && let Some(base) = snapshot["codeProject"]["baseCommit"].as_str()
+        {
+            let accepted: Option<String> = sqlx::query_scalar(
+                "SELECT accepted_commit FROM maitu_code_projects WHERE project_id=$1",
+            )
+            .bind(task.project_id)
+            .fetch_optional(pool)
+            .await?;
+            if accepted.is_some_and(|commit| commit != base) {
+                reason = "本次尝试的代码基线已不是项目当前采用版本；差异仍按当时基线记录".into();
             }
         }
         if !reason.is_empty() {
