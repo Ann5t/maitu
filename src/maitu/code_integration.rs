@@ -331,18 +331,22 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
             .any(|op| op.kind == "check" && op.status == "succeeded")
     );
     assert!(
-        workflows::accept(&state.pool, ids[0], a.attempts[0].id)
+        workflows::accept(&state.pool, ids[0], a.attempts[0].id, "隔离检查")
             .await
             .is_err()
     );
-    code::adopt(&state, ids[0], a.attempts[0].id).await.unwrap();
-    code::adopt(&state, ids[1], b.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[0], a.attempts[0].id, "检查通过且改动最小")
+        .await
+        .unwrap();
+    code::adopt(&state, ids[1], b.attempts[0].id, "")
+        .await
+        .unwrap();
     let before = code::project(&state.pool, project)
         .await
         .unwrap()
         .unwrap()
         .accepted_commit;
-    let conflict = code::adopt(&state, c.task.id, c.attempts[0].id)
+    let conflict = code::adopt(&state, c.task.id, c.attempts[0].id, "")
         .await
         .unwrap_err();
     assert_eq!(conflict.code(), "code_merge_conflict");
@@ -369,13 +373,17 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
             .iter()
             .any(|source| source["attemptId"] == b.attempts[0].id.to_string())
     );
-    code::adopt(&state, ids[2], d.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[2], d.attempts[0].id, "")
+        .await
+        .unwrap();
     let final_commit = code::project(&state.pool, project)
         .await
         .unwrap()
         .unwrap()
         .accepted_commit;
-    code::adopt(&state, ids[0], a.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[0], a.attempts[0].id, "检查通过且改动最小")
+        .await
+        .unwrap();
     assert_eq!(
         code::project(&state.pool, project)
             .await

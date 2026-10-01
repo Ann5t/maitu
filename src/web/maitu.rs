@@ -132,9 +132,20 @@ pub async fn project_page(
                 a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
+        section id="maitu-attention" class="maitu-attention" aria-labelledby="maitu-attention-title" hidden {
+            div class="maitu-section-head" { h2 id="maitu-attention-title" { "需要你处理" } span id="maitu-attention-count" {} }
+            div id="maitu-attention-list" {}
+        }
         div class="maitu-workspace" {
             section class="maitu-map-panel" aria-labelledby="maitu-map-title" {
                 div class="maitu-section-head" { h2 id="maitu-map-title" { "任务图" } span id="maitu-project-status" { "加载中" } }
+                div class="maitu-map-toolbar" {
+                    button id="maitu-zoom-out" type="button" class="maitu-button maitu-button--small" aria-label="缩小" { "−" }
+                    span id="maitu-zoom-level" { "100%" }
+                    button id="maitu-zoom-in" type="button" class="maitu-button maitu-button--small" aria-label="放大" { "+" }
+                    button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置视图" }
+                    button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
+                }
                 div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
                 p class="maitu-map-hint" { "左右滑动查看任务，点击节点查看记录与成果。" }
                 div class="maitu-map-scroll" tabindex="0" aria-label="可横向滚动的项目任务图" {
@@ -213,6 +224,14 @@ pub async fn project_page(
                 label { "资料文件名" input name="filename" required value="资料.txt" maxlength="80"; }
                 label { "资料内容" textarea name="content" required rows="7" maxlength="250000" {} }
                 button type="submit" class="maitu-button maitu-button--primary" { "保存到项目" }
+            }
+        }
+        dialog id="maitu-adopt-dialog" class="maitu-dialog" {
+            form id="maitu-adopt-form" {
+                div class="maitu-section-head" { h2 { "采用这次成果" } button type="button" class="maitu-close" data-close-dialog="maitu-adopt-dialog" aria-label="关闭采用" { "×" } }
+                p class="maitu-note" { "采用理由会与决定一起保留在任务历史中，之后重开项目时也能看到为什么选这一版。" }
+                label { "采用理由（可选）" textarea name="reason" rows="3" maxlength="2000" placeholder="例如：检查通过且改动最小；后续任务引用这一版。" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "确认采用" }
             }
         }
         dialog id="maitu-retry-dialog" class="maitu-dialog" {
@@ -362,6 +381,13 @@ pub async fn task_detail(
 ) -> AppResult<Json<Value>> {
     Ok(Json(json!(workflows::detail(&state.pool, id).await?)))
 }
+pub async fn cancel_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(json!(workflows::cancel(&state.pool, id).await?)))
+}
+
 pub async fn start_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -384,9 +410,9 @@ pub async fn accept_output(
 ) -> AppResult<Json<Value>> {
     let task = workflows::task(&state.pool, id).await?;
     let result = if task.task_kind == "code" {
-        code::adopt(&state, id, input.attempt_id).await?
+        code::adopt(&state, id, input.attempt_id, &input.reason).await?
     } else {
-        workflows::accept(&state.pool, id, input.attempt_id).await?
+        workflows::accept(&state.pool, id, input.attempt_id, &input.reason).await?
     };
     Ok(Json(json!(result)))
 }

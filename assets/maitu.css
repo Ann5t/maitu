@@ -146,3 +146,14 @@ pre { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.8 Consolas,"Micr
 .maitu-connection-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .maitu-connection-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .maitu-check-line{display:flex;align-items:center;gap:8px;font-weight:400}
+
+/* 日常历史：需要处理面板、图工具栏 */
+.maitu-attention{margin:18px 0 0;border:1px solid #d9843b33;background:#d9843b14;border-radius:14px;padding:14px 18px}
+.maitu-attention-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 0;border-top:1px dashed #d9843b33}
+.maitu-attention-row:first-child{border-top:none}
+.maitu-attention-row strong{min-width:140px}
+.maitu-attention-row .maitu-note{flex:1}
+.maitu-attention-actions{display:flex;gap:8px}
+.maitu-map-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+#maitu-zoom-level{min-width:44px;text-align:center;font-size:12px;color:inherit}
+.maitu-map{transform-origin:0 0}

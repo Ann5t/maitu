@@ -320,7 +320,7 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
     );
     assert!(input["estimatedInputTokens"].as_u64().unwrap() > 0);
     assert!(!input.to_string().contains(&fixture_key("test")));
-    workflows::accept(&state.pool, a.id, a_attempt.id)
+    workflows::accept(&state.pool, a.id, a_attempt.id, "")
         .await
         .unwrap();
     for _ in 0..100 {
@@ -348,7 +348,7 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         .await
         .unwrap();
     wait_status(&state, a.id, "produced").await;
-    workflows::accept(&state.pool, a.id, second_a.id)
+    workflows::accept(&state.pool, a.id, second_a.id, "")
         .await
         .unwrap();
     let second_b = workflows::start(&state.pool, b.id, Uuid::new_v4())
@@ -365,7 +365,7 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         retry_b.attempts[1].connection_key, retry_b.attempts[2].connection_key,
         "a single-connection store retries on the same connection"
     );
-    workflows::accept(&state.pool, b.id, second_b.id)
+    workflows::accept(&state.pool, b.id, second_b.id, "")
         .await
         .unwrap();
     let joined_e = wait_status(&state, e.id, "produced").await;
@@ -573,6 +573,19 @@ async fn parallel_files_retry_pinned_dependencies_and_process_recovery() {
         calls_before,
         "an over-budget task must fail before sending a provider request"
     );
+    // Cancelling a queued attempt must not send any provider request.
+    let j = new_task(&state, project, "J", "cancel before request", vec![]).await;
+    workflows::start(&state.pool, j.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    workflows::cancel(&state.pool, j.id).await.unwrap();
+    let cancelled = wait_status(&state, j.id, "cancelled").await;
+    assert_eq!(cancelled.attempts[0].status, "cancelled");
+    assert!(
+        cancelled.attempts[0].request_started_at.is_none(),
+        "a queued cancellation must not reach the provider"
+    );
+
     shutdown.send(true).unwrap();
     recovered_worker.await.unwrap();
     app_server.abort();

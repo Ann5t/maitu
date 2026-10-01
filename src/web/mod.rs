@@ -88,6 +88,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/maitu/sources/{source_id}", get(maitu::source))
         .route("/api/maitu/tasks/{task_id}", get(maitu::task_detail))
         .route("/api/maitu/tasks/{task_id}/start", post(maitu::start_task))
+        .route("/api/maitu/tasks/{task_id}/cancel", post(maitu::cancel_task))
         .route("/api/maitu/tasks/{task_id}/accept", post(maitu::accept_output))
         .route("/api/maitu/tasks/{task_id}/attempts/{attempt_id}/diff", get(maitu::code_diff))
         .route("/settings", get(handlers::settings_page))

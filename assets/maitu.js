@@ -17,6 +17,42 @@
   let retryRequestId;
   let refreshing = false;
   let initialMapLayout = true;
+  let mapZoom = 1;
+  let adoptTaskId;
+  let adoptAttemptId;
+
+  function layoutMemory() {
+    try {
+      const raw = localStorage.getItem('maitu-map-' + projectId);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function saveLayout(patch) {
+    try {
+      const merged = Object.assign(layoutMemory(), patch);
+      localStorage.setItem('maitu-map-' + projectId, JSON.stringify(merged));
+    } catch { /* layout stays for this page only */ }
+  }
+  function applyZoom() {
+    const map = $('#maitu-map');
+    if (!map) return;
+    map.style.transformOrigin = '0 0';
+    map.style.transform = `scale(${mapZoom})`;
+    const level = $('#maitu-zoom-level');
+    if (level) level.textContent = Math.round(mapZoom * 100) + '%';
+  }
+  function setZoom(value) {
+    mapZoom = Math.min(2.5, Math.max(0.4, value));
+    applyZoom();
+    saveLayout({zoom: mapZoom});
+  }
+  function focusSelected() {
+    if (!selectedTask) {feedback('先选择一个节点，再聚焦。', true); return;}
+    const node = document.querySelector(`[data-select-task="${selectedTask}"]`);
+    if (!node) return;
+    node.scrollIntoView({behavior:'smooth', inline:'center', block:'center'});
+    saveLayout({focus: selectedTask});
+  }
   const outputCache = new Map();
   const startRequests = new Map();
   const openOperations = new Set();
@@ -361,6 +397,7 @@
       if (attempt.requestStartedAt) section.append(element('p','maitu-note',`请求开始：${time(attempt.requestStartedAt)}`));
       if (attempt.responseReceivedAt) section.append(element('p','maitu-note',`结果收到：${time(attempt.responseReceivedAt)}`));
       if (attempt.errorMessage) section.append(element('p','maitu-error',attempt.errorMessage));
+      if (detail.staleInputs?.[attempt.id]) section.append(element('p','maitu-wait','输入已过期：'+detail.staleInputs[attempt.id]));
       if(attempt.inputSnapshot?.additionalInstruction) section.append(element('p','maitu-note','本次补充：'+attempt.inputSnapshot.additionalInstruction));
       const events=element('ol','maitu-timeline');
       for (const event of detail.events[attempt.id]||[]) {
@@ -408,16 +445,82 @@
         const download=element('a','maitu-button maitu-button--small','下载'); download.href=`/artifacts/${attempt.artifactId}`; download.download=detail.task.outputFilename; actions.append(download);
         const plan=(detail.plans||[]).find(record=>record.attemptId===attempt.id);
         if (plan) actions.append(button(plan.adoptedAt?'查看采用的计划':'调整并加入任务图',()=>openPlanReview(plan),!plan.adoptedAt));
-        if (attempt.status==='produced' && detail.task.taskKind!=='plan' && detail.task.acceptedAttemptId!==attempt.id && !codeAttempt?.adoptedAt) actions.append(button(detail.task.taskKind==='code'?'合并检查并采用':'采用这次成果',async()=> {
-          await api(`/api/maitu/tasks/${id}/accept`,'POST',{attemptId:attempt.id});
-          feedback('已采用这次成果；等待它的后续任务可以继续。'); await refresh();
+        if (attempt.status==='produced' && detail.task.taskKind!=='plan' && detail.task.acceptedAttemptId!==attempt.id && !codeAttempt?.adoptedAt) actions.append(button(detail.task.taskKind==='code'?'合并检查并采用':'采用这次成果',()=> {
+          adoptTaskId=id; adoptAttemptId=attempt.id;
+          $('#maitu-adopt-form').elements.reason.value='';
+          $('#maitu-adopt-dialog').showModal();
         },true));
         section.append(actions);
       }
       if (attempt.usage?.total_tokens) section.append(element('p','maitu-note',`本次用量：${attempt.usage.total_tokens} Token`));
       panel.append(section);
     }
+    const withOutput=detail.attempts.filter(attempt=>attempt.artifactId);
+    if (withOutput.length>=2 && detail.task.taskKind==='file') {
+      panel.append(button('比较两次成果',async()=> {
+        const contents=await Promise.all(withOutput.slice(0,2).map(async attempt=> {
+          if (!outputCache.has(attempt.artifactId)) {
+            const response=await fetch(`/artifacts/${attempt.artifactId}`);
+            if (!response.ok) throw new Error('成果文件暂时无法打开。');
+            outputCache.set(attempt.artifactId,await response.text());
+          }
+          return {attempt,content:outputCache.get(attempt.artifactId)};
+        }));
+        showContent(`成果比较：第 ${contents[0].attempt.number} 次 ↔ 第 ${contents[1].attempt.number} 次`,lineDiff(contents[0].content,contents[1].content));
+      }));
+    }
     panel.scrollTop=oldScroll;
+  }
+
+  function lineDiff(oldText,newText) {
+    const a=oldText.split('
+'), b=newText.split('
+');
+    const m=a.length, n=b.length;
+    const table=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+    for (let i=m-1;i>=0;i--) for (let j=n-1;j>=0;j--)
+      table[i][j]=a[i]===b[j]?table[i+1][j+1]+1:Math.max(table[i+1][j],table[i][j+1]);
+    const rows=[];
+    let i=0,j=0;
+    while (i<m&&j<n) {
+      if (a[i]===b[j]) {rows.push('  '+a[i]);i++;j++;}
+      else if (table[i+1][j]>=table[i][j+1]) {rows.push('- '+a[i]);i++;}
+      else {rows.push('+ '+b[j]);j++;}
+    }
+    while (i<m) {rows.push('- '+a[i]);i++;}
+    while (j<n) {rows.push('+ '+b[j]);j++;}
+    return rows.length?('第 1 次与第 2 次成果按行比较（- 旧 / + 新）：
+'+rows.join('
+')):'两次成果没有文本。';
+  }
+
+  function renderAttention() {
+    const section=$('#maitu-attention');
+    const list=$('#maitu-attention-list');
+    if (!section||!list) return;
+    const pinnedUnusable=snapshot.tasks.filter(t=>t.status==='queued'&&t.waitReason&&t.waitReason.includes('指定的模型连接当前不可用'));
+    const items=snapshot.tasks.filter(t=>['failed','interrupted'].includes(t.status))
+      .concat(pinnedUnusable)
+      .concat(snapshot.tasks.filter(t=>t.status==='produced'&&!t.acceptedAttemptId&&t.taskKind!=='plan'));
+    const seen=new Set(); const unique=items.filter(t=>!seen.has(t.id)&&seen.add(t.id));
+    section.hidden=!unique.length;
+    $('#maitu-attention-count').textContent=unique.length?unique.length+' 项':'';
+    list.replaceChildren();
+    for (const task of unique) {
+      const row=element('div','maitu-attention-row');
+      const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
+      row.append(element('strong','',task.title),element('span','maitu-note',
+        (kindName+' · '+(statusNames[task.status]||task.status)+(task.waitReason?' · '+task.waitReason:' · 等待你查看并采用'))));
+      const actions=element('div','maitu-attention-actions');
+      actions.append(button('查看任务',()=>selectTask(task.id)));
+      if (['queued','running'].includes(task.status)) actions.append(button('取消',async()=> {
+        if (!confirm(`取消任务「${task.title}」？排队中的尝试不会发出请求；执行中的请求不会中断但不会保存成果。`)) return;
+        await api(`/api/maitu/tasks/${task.id}/cancel`,'POST',{});
+        feedback('取消已处理。'); await refresh();
+      }));
+      row.append(actions);
+      list.append(row);
+    }
   }
 
   function planField(parent,title,name,value,multiline=false) {
@@ -485,10 +588,24 @@
         : '导入代码副本后，可以在图上真实修改代码并运行检查。';
       $('#maitu-import-code').hidden=Boolean(code);
       $('#maitu-export-code').hidden=!code;
+      renderAttention();
     } finally {refreshing=false;}
   }
 
   if (mode==='project') {
+    mapZoom = layoutMemory().zoom || 1;
+    $('#maitu-zoom-in').addEventListener('click',()=>setZoom(mapZoom*1.2));
+    $('#maitu-zoom-out').addEventListener('click',()=>setZoom(mapZoom/1.2));
+    $('#maitu-zoom-reset').addEventListener('click',()=> {setZoom(1); $('.maitu-map-scroll').scrollTo({left:0});});
+    $('#maitu-focus-selected').addEventListener('click',focusSelected);
+    $('#maitu-adopt-form').addEventListener('submit',async event=> {
+      event.preventDefault(); const form=event.currentTarget; const submit=$('button[type="submit"]',form); submit.disabled=true;
+      try {
+        await api(`/api/maitu/tasks/${adoptTaskId}/accept`,'POST',{attemptId:adoptAttemptId,reason:form.elements.reason.value});
+        $('#maitu-adopt-dialog').close();
+        feedback('已采用这次成果；理由与决定一起保留。'); await refresh();
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
     $('#maitu-retry-form').addEventListener('submit',async event=> {
       event.preventDefault();const form=event.currentTarget;const submit=$('button[type="submit"]',form);submit.disabled=true;
       try {

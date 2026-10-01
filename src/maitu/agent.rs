@@ -287,6 +287,16 @@ pub async fn execute(
     let mut calls = 0;
     let mut seen_calls = HashSet::new();
     for round in 1..=24 {
+        if sqlx::query_scalar::<_, bool>("SELECT cancel_requested FROM maitu_attempts WHERE id=$1")
+            .bind(attempt.id)
+            .fetch_one(&state.pool)
+            .await?
+        {
+            return Err(AppError::conflict(
+                "user_cancelled",
+                "已按取消请求停止；已完成轮次与用量记录保留，没有保存成果",
+            ));
+        }
         let op = code::begin_operation(
             &state.pool,
             attempt.id,

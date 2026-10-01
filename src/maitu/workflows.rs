@@ -45,6 +45,7 @@ pub struct TaskRecord {
     pub wait_reason: Option<String>,
     pub latest_attempt_id: Option<Uuid>,
     pub accepted_attempt_id: Option<Uuid>,
+    pub accept_note: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -63,6 +64,7 @@ pub struct AttemptRecord {
     pub artifact_id: Option<Uuid>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub cancel_requested: bool,
     pub usage: Option<Json<Value>>,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -137,6 +139,8 @@ pub struct TaskDetail {
     pub plans: Vec<super::plans::PlanRecord>,
     pub code_attempts: Vec<super::code::CodeAttempt>,
     pub operations: Vec<super::code::Operation>,
+    /// Attempt id -> why its fixed inputs no longer reflect the project.
+    pub stale_inputs: HashMap<Uuid, String>,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +187,9 @@ pub struct StartRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AcceptRequest {
     pub attempt_id: Uuid,
+    /// Why this version is adopted; kept with the decision. Optional.
+    #[serde(default)]
+    pub reason: String,
 }
 
 pub async fn project(pool: &PgPool, id: Uuid) -> AppResult<Project> {
@@ -243,6 +250,7 @@ pub async fn detail(pool: &PgPool, id: Uuid) -> AppResult<TaskDetail> {
         events.insert(attempt.id, sqlx::query_as("SELECT id,phase,message,created_at FROM maitu_attempt_events WHERE attempt_id=$1 ORDER BY id")
             .bind(attempt.id).fetch_all(pool).await?);
     }
+    let stale_inputs = stale_input_reasons(pool, &task, &attempts).await?;
     Ok(TaskDetail {
         task,
         attempts,
@@ -250,7 +258,73 @@ pub async fn detail(pool: &PgPool, id: Uuid) -> AppResult<TaskDetail> {
         plans: super::plans::for_task(pool, id).await?,
         code_attempts: super::code::attempts(pool, id).await?,
         operations: super::code::operations(pool, id).await?,
+        stale_inputs,
     })
+}
+
+/// An attempt fixed its inputs when it started. Sources edited or removed
+/// afterwards, and code-base advancement for coding tasks, mean the recorded
+/// inputs no longer describe what the project currently offers. Additions do
+/// not stale an attempt: later material simply belongs to later attempts.
+async fn stale_input_reasons(
+    pool: &PgPool,
+    task: &TaskRecord,
+    attempts: &[AttemptRecord],
+) -> AppResult<HashMap<Uuid, String>> {
+    let mut reasons = HashMap::new();
+    for attempt in attempts {
+        let Some(snapshot) = attempt.input_snapshot.as_ref() else {
+            continue;
+        };
+        let snapshot = &snapshot.0;
+        let mut reason = String::new();
+        if let Some(sources) = snapshot["sources"].as_array() {
+            for source in sources {
+                let Some(source_id) = source["id"].as_str().and_then(|v| Uuid::parse_str(v).ok())
+                else {
+                    continue;
+                };
+                let current_sha: Option<String> = sqlx::query_scalar(
+                    "SELECT sha256 FROM maitu_sources WHERE id=$1 AND project_id=$2",
+                )
+                .bind(source_id)
+                .bind(task.project_id)
+                .fetch_optional(pool)
+                .await?;
+                match current_sha {
+                    None => {
+                        reason =
+                            "本次输入引用的资料已被删除；记录保留，可按原输入理解这次成果".into();
+                    }
+                    Some(sha) if sha != source["sha256"].as_str().unwrap_or_default() => {
+                        reason = "本次输入固定后，引用的资料内容已被更新；记录保留".into();
+                    }
+                    Some(_) => {}
+                }
+                if !reason.is_empty() {
+                    break;
+                }
+            }
+        }
+        if reason.is_empty() && !snapshot["codeProject"].is_null() {
+            if let Some(base) = snapshot["codeProject"]["baseCommit"].as_str() {
+                let accepted: Option<String> = sqlx::query_scalar(
+                    "SELECT accepted_commit FROM maitu_code_projects WHERE project_id=$1",
+                )
+                .bind(task.project_id)
+                .fetch_optional(pool)
+                .await?;
+                if accepted.is_some_and(|commit| commit != base) {
+                    reason =
+                        "本次尝试的代码基线已不是项目当前采用版本；差异仍按当时基线记录".into();
+                }
+            }
+        }
+        if !reason.is_empty() {
+            reasons.insert(attempt.id, reason);
+        }
+    }
+    Ok(reasons)
 }
 
 pub(super) fn validate_filename(name: &str) -> AppResult<()> {
@@ -498,7 +572,12 @@ pub async fn start_with_instruction(
     Ok(attempt)
 }
 
-pub async fn accept(pool: &PgPool, task_id: Uuid, attempt_id: Uuid) -> AppResult<TaskRecord> {
+pub async fn accept(
+    pool: &PgPool,
+    task_id: Uuid,
+    attempt_id: Uuid,
+    reason: &str,
+) -> AppResult<TaskRecord> {
     let mut tx = pool.begin().await?;
     let current: TaskRecord = sqlx::query_as("SELECT * FROM maitu_tasks WHERE id=$1 FOR UPDATE")
         .bind(task_id)
@@ -525,9 +604,33 @@ pub async fn accept(pool: &PgPool, task_id: Uuid, attempt_id: Uuid) -> AppResult
             "只能采用此任务已经保存的成果",
         ));
     }
+    let reason = reason.trim();
+    if reason.len() > 2000 {
+        return Err(AppError::bad_request(
+            "reason_limit",
+            "采用理由不能超过 2,000 字",
+        ));
+    }
     if current.accepted_attempt_id != Some(attempt_id) {
-        sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'accepted','你采用了这次成果，可供后续任务引用')")
-            .bind(attempt_id).execute(&mut *tx).await?;
+        let message = if reason.is_empty() {
+            "你采用了这次成果，可供后续任务引用".to_owned()
+        } else {
+            format!("你采用了这次成果并记录理由：{reason}")
+        };
+        sqlx::query(
+            "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'accepted',$2)",
+        )
+        .bind(attempt_id)
+        .bind(message)
+        .execute(&mut *tx)
+        .await?;
+    }
+    if current.accept_note != reason {
+        sqlx::query("UPDATE maitu_tasks SET accept_note=$2 WHERE id=$1")
+            .bind(task_id)
+            .bind(reason)
+            .execute(&mut *tx)
+            .await?;
     }
     sqlx::query("UPDATE artifacts SET status='approved',approved_at=COALESCE(approved_at,now()) WHERE id=(SELECT artifact_id FROM maitu_attempts WHERE id=$1)")
         .bind(attempt_id).execute(&mut *tx).await?;
@@ -540,6 +643,74 @@ pub async fn accept(pool: &PgPool, task_id: Uuid, attempt_id: Uuid) -> AppResult
     .await?;
     tx.commit().await?;
     Ok(result)
+}
+
+/// Cancels a task. A queued attempt stops before any provider request; a
+/// running attempt is marked so the executor stops before its next provider
+/// call and never saves an output after cancellation. Records stay immutable.
+pub async fn cancel(pool: &PgPool, task_id: Uuid) -> AppResult<TaskRecord> {
+    let mut tx = pool.begin().await?;
+    let current: TaskRecord = sqlx::query_as("SELECT * FROM maitu_tasks WHERE id=$1 FOR UPDATE")
+        .bind(task_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("任务不存在"))?;
+    match current.status.as_str() {
+        "cancelled" => return Ok(current),
+        "queued" | "running" => {}
+        other => {
+            return Err(AppError::conflict(
+                "not_cancellable",
+                format!("任务当前为「{other}」，没有正在等待或执行的工作可取消"),
+            ));
+        }
+    }
+    let attempt_id = current.latest_attempt_id;
+    if current.status == "queued" {
+        if let Some(attempt_id) = attempt_id {
+            sqlx::query("UPDATE maitu_attempts SET status='cancelled',error_code='user_cancelled',error_message='你在执行前取消了这次尝试；输入快照保留',completed_at=now() WHERE id=$1 AND status='queued'")
+                .bind(attempt_id).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'cancelled','排队中的尝试已按你的要求取消，没有发出模型请求')")
+                .bind(attempt_id).execute(&mut *tx).await?;
+        }
+    } else if let Some(attempt_id) = attempt_id {
+        sqlx::query(
+            "UPDATE maitu_attempts SET cancel_requested=true WHERE id=$1 AND status='running'",
+        )
+        .bind(attempt_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'cancelled','已请求取消；正在进行的模型请求不会中断，结果不会保存为成果')")
+            .bind(attempt_id).execute(&mut *tx).await?;
+    }
+    let wait_reason = if current.status == "running" {
+        Some("已请求取消；等待执行中的请求结束后生效".to_owned())
+    } else {
+        None
+    };
+    let result = sqlx::query_as(
+        "UPDATE maitu_tasks SET status='cancelled',wait_reason=$2,updated_at=now() WHERE id=$1 RETURNING *",
+    )
+    .bind(task_id)
+    .bind(wait_reason)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+/// Applies a previously requested cancellation: the attempt ends as cancelled
+/// and no artifact is saved. Provider usage already spent stays on the record.
+async fn finish_cancelled(pool: &PgPool, task: Uuid, attempt: Uuid) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE maitu_attempts SET status='cancelled',error_code='user_cancelled',error_message='已按取消请求停止；已发出的请求记录保留，没有保存成果',completed_at=now() WHERE id=$1 AND status='running'")
+        .bind(attempt).execute(&mut *tx).await?;
+    sqlx::query("UPDATE maitu_tasks SET status='cancelled',wait_reason=NULL,updated_at=now() WHERE id=$1 AND latest_attempt_id=$2")
+        .bind(task).bind(attempt).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'cancelled','取消已生效：没有保存成果，之前的操作与用量记录保留')")
+        .bind(attempt).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub(super) async fn event(
@@ -708,6 +879,15 @@ async fn claim(
             }
         };
         snapshot.0["estimatedInputTokens"] = json!(estimated_tokens);
+        if sqlx::query_scalar::<_, bool>("SELECT cancel_requested FROM maitu_attempts WHERE id=$1")
+            .bind(attempt_id)
+            .fetch_one(&mut *tx)
+            .await?
+        {
+            tx.commit().await?;
+            finish_cancelled(&state.pool, current.id, attempt_id).await?;
+            continue;
+        }
         let attempt = sqlx::query_as("UPDATE maitu_attempts SET status='running',started_at=now(),input_snapshot=$2,connection_key=$3,provider_base_url=$4,model=$5 WHERE id=$1 AND status='queued' RETURNING *")
             .bind(attempt_id).bind(snapshot).bind(&config.key).bind(&config.base_url).bind(&config.model).fetch_one(&mut *tx).await?;
         sqlx::query(
@@ -909,6 +1089,14 @@ async fn execute(
     attempt: AttemptRecord,
 ) -> AppResult<()> {
     if task.task_kind != "code" {
+        let cancelled: bool =
+            sqlx::query_scalar("SELECT cancel_requested FROM maitu_attempts WHERE id=$1")
+                .bind(attempt.id)
+                .fetch_one(&state.pool)
+                .await?;
+        if cancelled {
+            return finish_cancelled(&state.pool, task.id, attempt.id).await;
+        }
         event(
             &state.pool,
             attempt.id,
@@ -960,6 +1148,15 @@ async fn execute(
             .await?;
         // A served request proves the connection works again.
         cooldowns().clear(&attempt.connection_key).await;
+    }
+    if sqlx::query_scalar::<_, bool>("SELECT cancel_requested FROM maitu_attempts WHERE id=$1")
+        .bind(attempt.id)
+        .fetch_one(&state.pool)
+        .await?
+    {
+        // The request completed, but the user cancelled meanwhile: keep the
+        // records, never save an adopted-candidate output against that wish.
+        return finish_cancelled(&state.pool, task.id, attempt.id).await;
     }
     let response = match response {
         Ok(response) => response,
