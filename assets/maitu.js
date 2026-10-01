@@ -3,7 +3,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const mode = document.body.dataset.maituMode;
   const projectId = document.body.dataset.projectId;
-  const statusNames = {draft:'待启动',queued:'等待执行',running:'执行中',produced:'已产出',failed:'执行失败',interrupted:'执行中断'};
+  const statusNames = {draft:'待启动',queued:'等待执行',running:'执行中',produced:'已产出',failed:'执行失败',interrupted:'执行中断',cancelled:'已取消'};
   let snapshot;
   let selectedTask;
   let selectedAttempt;
@@ -473,9 +473,7 @@
   }
 
   function lineDiff(oldText,newText) {
-    const a=oldText.split('
-'), b=newText.split('
-');
+    const a=oldText.split('\n'), b=newText.split('\n');
     const m=a.length, n=b.length;
     const table=Array.from({length:m+1},()=>new Array(n+1).fill(0));
     for (let i=m-1;i>=0;i--) for (let j=n-1;j>=0;j--)
@@ -489,9 +487,7 @@
     }
     while (i<m) {rows.push('- '+a[i]);i++;}
     while (j<n) {rows.push('+ '+b[j]);j++;}
-    return rows.length?('第 1 次与第 2 次成果按行比较（- 旧 / + 新）：
-'+rows.join('
-')):'两次成果没有文本。';
+    return rows.length?('第 1 次与第 2 次成果按行比较（- 旧 / + 新）：\n'+rows.join('\n')):'两次成果没有文本。';
   }
 
   function renderAttention() {
