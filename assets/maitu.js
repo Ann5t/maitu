@@ -161,7 +161,7 @@
     function setEditing(connection) {
       form.elements.originalKey.value = connection ? connection.key : '';
       form.elements.key.value = connection ? connection.key : '';
-      form.elements.key.readOnly = Boolean(connection);
+      form.elements.key.disabled = Boolean(connection);
       form.elements.label.value = connection ? connection.label : '';
       form.elements.baseUrl.value = connection ? connection.baseUrl : 'https://api.deepseek.com';
       form.elements.model.value = connection ? connection.model : 'deepseek-flash';
@@ -217,7 +217,9 @@
       submit.disabled = true;
       const data = Object.fromEntries(new FormData(form));
       const payload = {
-        key: data.key, label: data.label, baseUrl: data.baseUrl, model: data.model,
+        // 编辑时编号输入为 disabled，FormData 不包含它，改从隐藏域读取
+        key: form.elements.key.disabled ? form.elements.originalKey.value : data.key,
+        label: data.label, baseUrl: data.baseUrl, model: data.model,
         apiKey: data.apiKey, concurrency: Number(data.concurrency),
         contextTokens: Number(data.contextTokens), maxTokens: Number(data.maxTokens),
         thinkingEnabled: data.thinkingEnabled === 'true', enabled: form.elements.enabled.checked

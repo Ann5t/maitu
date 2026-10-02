@@ -36,6 +36,7 @@ maitu_test_run_app() {
     -e FUDIAN_SECURITY_MODE=disabled \
     -e ARTIFACT_ROOT=/tmp/maitu-test-artifacts \
     -e MAITU_CONFIG_ROOT=/tmp/maitu-test-settings \
+    -e MAITU_CHECK_WORKER_TOKEN_FILE=/tmp/maitu-test-absent-check-worker \
     -e NO_PROXY=localhost,127.0.0.1,maitu-test-db \
     --mount "type=bind,src=$maitu_test_root,dst=/app" \
     --mount "type=volume,src=${MAITU_TEST_REGISTRY:-fudian_rust_cargo_registry},dst=/usr/local/cargo/registry" \

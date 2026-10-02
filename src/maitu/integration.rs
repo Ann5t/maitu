@@ -31,6 +31,7 @@ use crate::{
     application::projects, artifacts::ArtifactStore, config::Config, domain::ProjectIntake,
     migrations, web::AppState,
 };
+use fudian::code_check_protocol::CheckCommand;
 
 /// Fixture credentials are assembled at run time so no literal key text lives
 /// in this file; they only authenticate against the local fixture server.
@@ -826,6 +827,147 @@ async fn rate_limited_connection_fails_over_bounded_and_records_usage_per_connec
             <= queued_done.attempts[0].request_started_at.unwrap(),
         "the pinned task must wait for the busy connection's free slot"
     );
+
+    // 编码任务在检查服务未运行时，点击执行必须立即以未调用模型的状态失败，
+    // 而不是排队等待连接或调度节奏；补充要求后的再次尝试同样保留输入与结论。
+    let code_task = workflows::create_task(
+        &state.pool,
+        &state.providers,
+        project,
+        CreateTaskRequest {
+            request_id: Uuid::new_v4(),
+            title: "code-entry".into(),
+            instruction: "修改 a.js 并运行检查".into(),
+            output_filename: "code-entry.md".into(),
+            task_kind: "code".into(),
+            acceptance_criteria: String::new(),
+            source_ids: Vec::new(),
+            dependency_ids: Vec::new(),
+            connection_key: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO maitu_code_projects(project_id,import_request_id,source_name,import_hash,initial_commit,accepted_commit,checks,file_count,size_bytes) VALUES($1,$2,'fixture-source','fixture-hash','fixture','fixture',$3,1,16)",
+    )
+    .bind(project)
+    .bind(Uuid::new_v4())
+    .bind(sqlx::types::Json(vec![CheckCommand {
+        id: "node".into(),
+        label: "node".into(),
+        program: "node".into(),
+        args: vec!["--version".into()],
+    }]))
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let refused = workflows::start(&state.pool, code_task.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(refused.status, "failed");
+    assert_eq!(
+        refused.error_code.as_deref(),
+        Some("code_worker_unavailable")
+    );
+    assert!(
+        refused.request_started_at.is_none() && refused.started_at.is_none(),
+        "预检失败不能占用执行或调用模型的时序"
+    );
+    let retried = workflows::start_with_instruction(
+        &state.pool,
+        code_task.id,
+        Uuid::new_v4(),
+        "环境就绪后再处理；原尝试保留",
+    )
+    .await
+    .unwrap();
+    assert_eq!(retried.number, 2);
+    assert!(retried.request_started_at.is_none());
+    let code_detail = workflows::detail(&state.pool, code_task.id).await.unwrap();
+    assert_eq!(code_detail.task.status, "failed");
+    assert_eq!(code_detail.attempts.len(), 2);
+    assert!(
+        code_detail
+            .attempts
+            .iter()
+            .all(|attempt| attempt.request_started_at.is_none())
+    );
+    assert!(
+        code_detail.attempts[0].input_snapshot.as_ref().unwrap().0["additionalInstruction"]
+            == json!("环境就绪后再处理；原尝试保留")
+    );
+    assert!(fixture_state.calls.lock().await.get("code-entry").is_none());
+
+    // 两个持续限流的固定任务让 flaky 长时间处于退避；steady 短暂失败一次的
+    // 时间窗内所有连接都在冷却，自动选择连接的排队任务必须说明真实原因，
+    // 退避结束后恢复常规提示并正常执行。
+    let mut hold_ids = Vec::new();
+    for name in ["flaky-hold-a", "flaky-hold-b"] {
+        let hold = new_task(&state, project, name, "Occupy flaky with failures", vec![]).await;
+        sqlx::query("UPDATE maitu_tasks SET connection_key='flaky' WHERE id=$1")
+            .bind(hold.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        workflows::start(&state.pool, hold.id, Uuid::new_v4())
+            .await
+            .unwrap();
+        hold_ids.push(hold.id);
+    }
+    wait_attempt_error(&state, hold_ids[0], "provider_rate_limit").await;
+    wait_attempt_error(&state, hold_ids[1], "provider_rate_limit").await;
+    let blip = new_task(
+        &state,
+        project,
+        "steady-blip",
+        "[fail-once] Fail once on steady",
+        vec![],
+    )
+    .await;
+    sqlx::query("UPDATE maitu_tasks SET connection_key='steady' WHERE id=$1")
+        .bind(blip.id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    workflows::start(&state.pool, blip.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let cooling_wait = new_task(
+        &state,
+        project,
+        "cooling-wait",
+        "Explain why automatic tasks wait",
+        vec![],
+    )
+    .await;
+    workflows::start(&state.pool, cooling_wait.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let mut saw_cooling_reason = false;
+    for _ in 0..200 {
+        let task = workflows::task(&state.pool, cooling_wait.id).await.unwrap();
+        if task
+            .wait_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("所有可用连接都在限流退避"))
+        {
+            saw_cooling_reason = true;
+            break;
+        }
+        if task.status == "produced" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        saw_cooling_reason,
+        "所有连接退避时，自动任务的等待原因必须说明限流退避"
+    );
+    let cooled_done = wait_status(&state, cooling_wait.id, "produced").await;
+    assert!(cooled_done.attempts.len() <= 4);
+    let blip_done = wait_status(&state, blip.id, "produced").await;
+    assert!(blip_done.attempts.len() <= 2);
 
     let graph = workflows::snapshot(&state.pool, &state.providers, project)
         .await

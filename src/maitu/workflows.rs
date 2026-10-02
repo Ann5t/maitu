@@ -493,6 +493,17 @@ pub async fn start_with_instruction(
             "补充要求不能超过 8,000 字节",
         ));
     }
+    // 编码任务在入队前同步确认检查服务可用：点击执行立即得到环境结论，
+    // 不依赖连接冷却或调度节奏，也保证失败的尝试确实没有调用模型。
+    let worker_ready: AppResult<()> =
+        match sqlx::query_scalar::<_, String>("SELECT task_kind FROM maitu_tasks WHERE id=$1")
+            .bind(task_id)
+            .fetch_optional(pool)
+            .await?
+        {
+            Some(kind) if kind == "code" => super::code::ensure_worker_ready().await,
+            _ => Ok(()),
+        };
     let mut tx = pool.begin().await?;
     let current: TaskRecord = sqlx::query_as("SELECT * FROM maitu_tasks WHERE id=$1 FOR UPDATE")
         .bind(task_id)
@@ -560,6 +571,33 @@ pub async fn start_with_instruction(
             .bind(task_id)
             .fetch_one(&mut *tx)
             .await?;
+    if let Err(failure) = &worker_ready {
+        // 预检未通过：本次尝试直接以未调用模型的状态留档，输入仍然固定可查。
+        let attempt = sqlx::query_as(
+            "INSERT INTO maitu_attempts(id,task_id,number,status,input_snapshot,error_code,error_message,completed_at) VALUES($1,$2,$3,'failed',$4,$5,$6,now()) RETURNING *")
+            .bind(request_id)
+            .bind(task_id)
+            .bind(number)
+            .bind(&snapshot)
+            .bind(failure.code())
+            .bind(failure.public_message())
+            .fetch_one(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'failed',$2)",
+        )
+        .bind(request_id)
+        .bind(failure.public_message())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE maitu_tasks SET status='failed',latest_attempt_id=$2,wait_reason=NULL,updated_at=now() WHERE id=$1")
+            .bind(task_id)
+            .bind(request_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(attempt);
+    }
     let attempt = sqlx::query_as("INSERT INTO maitu_attempts(id,task_id,number,status,input_snapshot) VALUES($1,$2,$3,'queued',$4) RETURNING *")
         .bind(request_id).bind(task_id).bind(number).bind(Json(snapshot)).fetch_one(&mut *tx).await?;
     sqlx::query("INSERT INTO maitu_attempt_dependencies(attempt_id,parent_task_id,source_attempt_id) SELECT $1,d.parent_task_id,p.accepted_attempt_id FROM maitu_task_dependencies d JOIN maitu_tasks p ON p.id=d.parent_task_id WHERE d.task_id=$2")
@@ -1356,6 +1394,27 @@ pub async fn run_worker(
                     let keys: Vec<String> = connections.iter().map(|c| c.key.clone()).collect();
                     sqlx::query("UPDATE maitu_tasks t SET wait_reason='指定的模型连接当前不可用；请在设置中检查，或将任务改为自动选择连接' WHERE t.status='queued' AND t.connection_key <> '' AND NOT (t.connection_key = ANY($1)) AND t.wait_reason IS DISTINCT FROM '指定的模型连接当前不可用；请在设置中检查，或将任务改为自动选择连接'")
                         .bind(&keys).execute(&state.pool).await?;
+                    // 所有连接都在退避时，自动选择连接的排队任务也要说明实际原因，
+                    // 否则只显示笼统的等待空位；退避结束后恢复常规提示。
+                    let mut cooling = 0;
+                    for connection in &connections {
+                        if cooldowns.active(&connection.key).await {
+                            cooling += 1;
+                        }
+                    }
+                    if cooling == connections.len() {
+                        sqlx::query(
+                            "UPDATE maitu_tasks SET wait_reason='所有可用连接都在限流退避中，稍后自动重试' WHERE status='queued' AND connection_key='' AND wait_reason IS DISTINCT FROM '所有可用连接都在限流退避中，稍后自动重试'",
+                        )
+                        .execute(&state.pool)
+                        .await?;
+                    } else {
+                        sqlx::query(
+                            "UPDATE maitu_tasks SET wait_reason='等待执行空位或前序成果' WHERE status='queued' AND connection_key='' AND wait_reason='所有可用连接都在限流退避中，稍后自动重试'",
+                        )
+                        .execute(&state.pool)
+                        .await?;
+                    }
                     for connection in &connections {
                         if cooldowns.active(&connection.key).await {
                             sqlx::query("UPDATE maitu_tasks t SET wait_reason='此任务等待连接冷却后自动重试' WHERE t.status='queued' AND t.connection_key=$1 AND t.wait_reason IS DISTINCT FROM '此任务等待连接冷却后自动重试'")
