@@ -342,7 +342,7 @@ recovery_upgraded_state="$(docker exec "$recovery_target_db" psql -U fudian -d f
                  (SELECT count(*) FROM goal_branches), chr(58),
                  (SELECT count(*) FROM artifacts), chr(58),
                  (SELECT count(*) FROM app_users));')"
-[[ "$recovery_upgraded_state" == 16:1:1:1:0 ]]
+[[ "$recovery_upgraded_state" == 18:1:1:1:0 ]]
 recovery_restored_digest="$(docker exec "$recovery_current_app" \
   sha256sum /data/artifacts/recovery/artifact.txt | awk '{print $1}')"
 [[ "$recovery_restored_digest" == "$recovery_artifact_digest" ]]
@@ -358,9 +358,9 @@ recovery_rollback_state="$(docker exec "$recovery_target_db" psql -U fudian -d f
                  (SELECT count(*) FROM projects), chr(58),
                  (SELECT count(*) FROM goal_branches), chr(58),
                  (SELECT count(*) FROM artifacts));')"
-[[ "$recovery_rollback_state" == 16:1:1:1 ]]
+[[ "$recovery_rollback_state" == 18:1:1:1 ]]
 
-echo "backup recovery passed: BP08 backup, empty labeled restore, 12-to-16 upgrade, hash preservation and BP08 application rollback"
+echo "backup recovery passed: BP08 backup, empty labeled restore, 12-to-18 upgrade, hash preservation and BP08 application rollback"
 
 # A Maitu-only instance has no projects/*.git. Exercise the actual backup/restore
 # scripts with its managed code repository, rather than letting a legacy repo
