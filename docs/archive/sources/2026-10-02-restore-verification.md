@@ -30,6 +30,8 @@
 
 重新认证读取五库 GitHub 的全部分支、标签、Issue/PR 与 Release：与迁移快照逐条比对，五库 refs **零新增、零缺失、零变更**；project1 的 19 条 PR 与其余四库的 0 条 Issue/PR、0 个 Release 保持一致。迁移期间原库无新增内容，无需补迁。
 
+同日稍后（多连接分支修复推送后）再次核对：五库全部权威 refs（分支、标签、`refs/pull/*/head`）与本机镜像仍逐条一致；`HEAD` 伪引用指向各自默认分支且值相同；project1 的 `refs/pull/*/merge` 与快照不同，该类引用是 GitHub 依当前默认分支动态重算的合并预览，base 前进即变化，不产生新对象，属预期现象而非新增内容。Release `legacy-sources-2026-10-02` 的 9 件资产仍在。
+
 ## 结论
 
 五库满足[删除条件](../../operations/legacy-repository-migration.md)：产品日用验收（阶段 0–4）+ 全部可保留内容迁移 + 从 Release 的独立恢复验收 + 末尾增量核对。**删除 GitHub 仓库与清理本地目录由用户另行决定并执行。**
