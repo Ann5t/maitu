@@ -120,6 +120,7 @@ async fn model(State(fixture): State<Arc<Fixture>>, Json(request): Json<Value>) 
 async fn task(state: &AppState, project: Uuid, title: &str) -> workflows::TaskRecord {
     workflows::create_task(
         &state.pool,
+        &state.providers,
         project,
         CreateTaskRequest {
             request_id: Uuid::new_v4(),
@@ -130,6 +131,7 @@ async fn task(state: &AppState, project: Uuid, title: &str) -> workflows::TaskRe
             acceptance_criteria: "实际检查通过".into(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await
@@ -215,12 +217,14 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
     let worker = tokio::spawn(workflows::run_worker(state.clone(), signal));
     let planner = plans::generate(
         &state.pool,
+        &state.providers,
         project,
         plans::GeneratePlanRequest {
             request_id: Uuid::new_v4(),
             instruction: "并行修改 A B，再整合".into(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await
@@ -255,12 +259,14 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
     invalid.tasks[0].depends_on.push("d".into());
     let newer = plans::generate(
         &state.pool,
+        &state.providers,
         project,
         plans::GeneratePlanRequest {
             request_id: Uuid::new_v4(),
             instruction: String::new(),
             source_ids: vec![],
             dependency_ids: vec![],
+            connection_key: String::new(),
         },
     )
     .await
@@ -325,18 +331,22 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
             .any(|op| op.kind == "check" && op.status == "succeeded")
     );
     assert!(
-        workflows::accept(&state.pool, ids[0], a.attempts[0].id)
+        workflows::accept(&state.pool, ids[0], a.attempts[0].id, "隔离检查")
             .await
             .is_err()
     );
-    code::adopt(&state, ids[0], a.attempts[0].id).await.unwrap();
-    code::adopt(&state, ids[1], b.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[0], a.attempts[0].id, "检查通过且改动最小")
+        .await
+        .unwrap();
+    code::adopt(&state, ids[1], b.attempts[0].id, "")
+        .await
+        .unwrap();
     let before = code::project(&state.pool, project)
         .await
         .unwrap()
         .unwrap()
         .accepted_commit;
-    let conflict = code::adopt(&state, c.task.id, c.attempts[0].id)
+    let conflict = code::adopt(&state, c.task.id, c.attempts[0].id, "")
         .await
         .unwrap_err();
     assert_eq!(conflict.code(), "code_merge_conflict");
@@ -363,13 +373,17 @@ async fn plan_to_parallel_code_checks_adoption_conflict_and_recovery() {
             .iter()
             .any(|source| source["attemptId"] == b.attempts[0].id.to_string())
     );
-    code::adopt(&state, ids[2], d.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[2], d.attempts[0].id, "")
+        .await
+        .unwrap();
     let final_commit = code::project(&state.pool, project)
         .await
         .unwrap()
         .unwrap()
         .accepted_commit;
-    code::adopt(&state, ids[0], a.attempts[0].id).await.unwrap();
+    code::adopt(&state, ids[0], a.attempts[0].id, "检查通过且改动最小")
+        .await
+        .unwrap();
     assert_eq!(
         code::project(&state.pool, project)
             .await

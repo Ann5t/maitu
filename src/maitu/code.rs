@@ -742,6 +742,7 @@ pub async fn adopt(
     state: &AppState,
     task_id: Uuid,
     attempt: Uuid,
+    reason: &str,
 ) -> AppResult<super::workflows::TaskRecord> {
     let current = super::workflows::task(&state.pool, task_id).await?;
     if current.task_kind != "code" {
@@ -826,10 +827,15 @@ pub async fn adopt(
             .bind(attempt).bind(&integrated).execute(&mut *tx).await?;
         sqlx::query("UPDATE artifacts SET status='approved',approved_at=COALESCE(approved_at,now()) WHERE id=$1 OR id=(SELECT artifact_id FROM maitu_attempts WHERE id=$2)")
             .bind(candidate.patch_artifact_id).bind(attempt).execute(&mut *tx).await?;
-        let task=sqlx::query_as("UPDATE maitu_tasks SET accepted_attempt_id=$2,updated_at=now() WHERE id=$1 RETURNING *")
-            .bind(task_id).bind(attempt).fetch_one(&mut *tx).await?;
-        sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'accepted','编码成果已合并且实际检查通过，成为当前项目版本')")
-            .bind(attempt).execute(&mut *tx).await?;
+        let task=sqlx::query_as("UPDATE maitu_tasks SET accepted_attempt_id=$2,accept_note=$3,updated_at=now() WHERE id=$1 RETURNING *")
+            .bind(task_id).bind(attempt).bind(reason.trim()).fetch_one(&mut *tx).await?;
+        let message = if reason.trim().is_empty() {
+            "编码成果已合并且实际检查通过，成为当前项目版本".to_owned()
+        } else {
+            format!("编码成果已合并且实际检查通过，成为当前项目版本；采用理由：{}", reason.trim())
+        };
+        sqlx::query("INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'accepted',$2)")
+            .bind(attempt).bind(message).execute(&mut *tx).await?;
         sqlx::query("UPDATE maitu_execution_operations SET status='succeeded',output=$2,completed_at=now() WHERE id=$1")
             .bind(op).bind(Json(json!({"adoptedCommit":integrated,"checks":checks}))).execute(&mut *tx).await?;
         tx.commit().await?;

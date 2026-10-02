@@ -55,6 +55,9 @@ pub struct GeneratePlanRequest {
     pub source_ids: Vec<Uuid>,
     #[serde(default)]
     pub dependency_ids: Vec<Uuid>,
+    /// Empty means automatic scheduling across usable connections.
+    #[serde(default)]
+    pub connection_key: String,
 }
 
 #[derive(Deserialize)]
@@ -169,12 +172,14 @@ impl Plan {
 
 pub async fn generate(
     pool: &PgPool,
+    providers: &super::provider::ProviderStore,
     project: Uuid,
     input: GeneratePlanRequest,
 ) -> AppResult<TaskRecord> {
     let project_record = workflows::project(pool, project).await?;
     let task = workflows::create_task(
         pool,
+        providers,
         project,
         CreateTaskRequest {
             request_id: input.request_id,
@@ -188,6 +193,7 @@ pub async fn generate(
             dependency_ids: input.dependency_ids,
             task_kind: "plan".into(),
             acceptance_criteria: "计划包含具体成果、验收要求和有效依赖，并由用户调整后采用".into(),
+            connection_key: input.connection_key,
         },
     )
     .await?;

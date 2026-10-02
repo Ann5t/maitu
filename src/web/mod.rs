@@ -9,7 +9,7 @@ use axum::{
     Router,
     http::{HeaderName, HeaderValue},
     middleware,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use sqlx::PgPool;
 use tower_http::{
@@ -75,7 +75,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/maitu", get(maitu::dashboard))
         .route("/maitu/settings", get(maitu::settings))
         .route("/maitu/projects/{project_id}", get(maitu::project_page))
-        .route("/api/maitu/provider", get(maitu::provider_config).put(maitu::save_provider))
+        .route("/api/maitu/connections", get(maitu::connections).post(maitu::save_connection))
+        .route("/api/maitu/connections/{key}", delete(maitu::delete_connection))
+        .route("/api/maitu/provider", get(maitu::provider_config))
         .route("/api/maitu/projects/{project_id}", get(maitu::project_snapshot))
         .route("/api/maitu/projects/{project_id}/tasks", post(maitu::create_task))
         .route("/api/maitu/projects/{project_id}/plans", post(maitu::generate_plan))
@@ -86,6 +88,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/maitu/sources/{source_id}", get(maitu::source))
         .route("/api/maitu/tasks/{task_id}", get(maitu::task_detail))
         .route("/api/maitu/tasks/{task_id}/start", post(maitu::start_task))
+        .route("/api/maitu/tasks/{task_id}/cancel", post(maitu::cancel_task))
         .route("/api/maitu/tasks/{task_id}/accept", post(maitu::accept_output))
         .route("/api/maitu/tasks/{task_id}/attempts/{attempt_id}/diff", get(maitu::code_diff))
         .route("/settings", get(handlers::settings_page))

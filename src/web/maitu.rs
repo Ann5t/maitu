@@ -32,7 +32,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js?v=project-execution-1" defer {}
+                script src="/assets/maitu.js?v=multi-connection-1" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -66,12 +66,18 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> AppResult<Markup> 
         .into_iter()
         .map(|(id, total, running)| (id, (total, running)))
         .collect();
-    let provider = state.providers.get().await.view();
+    let connections = state.providers.list().await;
+    let usable = connections.iter().filter(|c| c.usable()).count();
+    let capacity: usize = connections
+        .iter()
+        .filter(|c| c.usable())
+        .map(|c| c.concurrency)
+        .sum();
     let content = html! {
         header class="maitu-page-head" {
             div { p class="maitu-eyebrow" { "你的个人工作区" } h1 { "项目" } p { "把资料变成任务，让独立的工作同时推进。" } }
             a class="maitu-link-button" href="/maitu/settings" {
-                @if provider.configured { "DeepSeek 已配置 · 最多 " (provider.concurrency) " 项并行" } @else { "连接 DeepSeek" }
+                @if usable > 0 { (connections.len()) " 个连接 · " (usable) " 个可用 · 最多 " (capacity) " 项并行" } @else { "连接模型 API" }
             }
         }
         section class="maitu-intake" aria-labelledby="maitu-intake-title" {
@@ -126,9 +132,20 @@ pub async fn project_page(
                 a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
+        section id="maitu-attention" class="maitu-attention" aria-labelledby="maitu-attention-title" hidden {
+            div class="maitu-section-head" { h2 id="maitu-attention-title" { "需要你处理" } span id="maitu-attention-count" {} }
+            div id="maitu-attention-list" {}
+        }
         div class="maitu-workspace" {
             section class="maitu-map-panel" aria-labelledby="maitu-map-title" {
                 div class="maitu-section-head" { h2 id="maitu-map-title" { "任务图" } span id="maitu-project-status" { "加载中" } }
+                div class="maitu-map-toolbar" {
+                    button id="maitu-zoom-out" type="button" class="maitu-button maitu-button--small" aria-label="缩小" { "−" }
+                    span id="maitu-zoom-level" { "100%" }
+                    button id="maitu-zoom-in" type="button" class="maitu-button maitu-button--small" aria-label="放大" { "+" }
+                    button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置视图" }
+                    button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
+                }
                 div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
                 p class="maitu-map-hint" { "左右滑动查看任务，点击节点查看记录与成果。" }
                 div class="maitu-map-scroll" tabindex="0" aria-label="可横向滚动的项目任务图" {
@@ -157,6 +174,9 @@ pub async fn project_page(
                 label { "怎样算完成" textarea name="acceptanceCriteria" rows="2" maxlength="8000" placeholder="例如：原有行为保留，新增情况有验证，项目检查通过。" {} }
                 fieldset { legend { "使用哪些资料" } p class="maitu-note" { "未选择时，使用启动时项目的全部资料。" } div id="maitu-task-sources" class="maitu-checks" {} }
                 fieldset { legend { "依赖哪些前序任务" } p class="maitu-note" { "等待前序成果被采用后执行，引用的成果版本会保留在记录中。" } div id="maitu-task-dependencies" class="maitu-checks" {} }
+                label { "使用连接" select name="connectionKey" id="maitu-task-connection" {
+                    option value="" { "自动选择可用连接" }
+                } }
                 button type="submit" class="maitu-button maitu-button--primary" { "加入任务图" }
             }
         }
@@ -206,6 +226,14 @@ pub async fn project_page(
                 button type="submit" class="maitu-button maitu-button--primary" { "保存到项目" }
             }
         }
+        dialog id="maitu-adopt-dialog" class="maitu-dialog" {
+            form id="maitu-adopt-form" {
+                div class="maitu-section-head" { h2 { "采用这次成果" } button type="button" class="maitu-close" data-close-dialog="maitu-adopt-dialog" aria-label="关闭采用" { "×" } }
+                p class="maitu-note" { "采用理由会与决定一起保留在任务历史中，之后重开项目时也能看到为什么选这一版。" }
+                label { "采用理由（可选）" textarea name="reason" rows="3" maxlength="2000" placeholder="例如：检查通过且改动最小；后续任务引用这一版。" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "确认采用" }
+            }
+        }
         dialog id="maitu-retry-dialog" class="maitu-dialog" {
             form id="maitu-retry-form" {
                 div class="maitu-section-head" { h2 { "补充要求后再执行" } button type="button" class="maitu-close" data-close-dialog="maitu-retry-dialog" aria-label="关闭补充要求" { "×" } }
@@ -224,10 +252,18 @@ pub async fn project_page(
 
 pub async fn settings() -> Markup {
     let content = html! {
-        header class="maitu-page-head" { div { p class="maitu-eyebrow" { "执行资源" } h1 { "模型连接" } p { "先连接 DeepSeek，再按可用额度设置并发。" } } }
+        header class="maitu-page-head" { div { p class="maitu-eyebrow" { "执行资源" } h1 { "模型连接" } p { "管理多个 API 连接。独立任务按连接并行执行；一个连接限流或失败时，其他连接继续工作。" } } }
         section class="maitu-settings-panel" {
-            form id="maitu-provider-form" {
-                div class="maitu-section-head" { h2 { "DeepSeek" } span id="maitu-provider-state" { "读取配置…" } }
+            div class="maitu-section-head" { h2 { "已保存的连接" } span id="maitu-connections-state" { "读取配置…" } }
+            div id="maitu-connection-list" {}
+            p class="maitu-note" { "每个连接独立保存密钥、模型、并发与长度设置。任务默认自动选择可用连接；也可以在创建任务时指定固定连接。留空密钥保存会保留当前密钥。" }
+        }
+        section class="maitu-settings-panel" {
+            form id="maitu-connection-form" {
+                div class="maitu-section-head" { h2 id="maitu-connection-form-title" { "添加连接" } button type="button" id="maitu-connection-cancel" class="maitu-button maitu-button--small" hidden { "取消编辑" } }
+                input type="hidden" name="originalKey" value="";
+                label { "连接编号（小写字母、数字、连字符）" input name="key" required maxlength="64" pattern="[a-z][a-z0-9-]*" placeholder="例如 deepseek-main"; }
+                label { "连接名称" input name="label" required maxlength="80" placeholder="例如 DeepSeek 主力账户"; }
                 label { "API 地址" input name="baseUrl" type="url" required value="https://api.deepseek.com"; }
                 label { "模型名称" input name="model" required value="deepseek-flash" list="maitu-models"; }
                 datalist id="maitu-models" { option value="deepseek-flash"; option value="deepseek-v4-pro"; }
@@ -235,20 +271,16 @@ pub async fn settings() -> Markup {
                     option value="true" selected { "开启思考（默认）" }
                     option value="false" { "关闭思考" }
                 } }
-                label { "API 密钥" input name="apiKey" type="password" autocomplete="new-password" placeholder="首次配置时填写；留空可保留当前密钥"; }
-                p class="maitu-note" { "密钥保存在本机专用配置卷，不显示在任务记录中。" }
+                label { "API 密钥" input name="apiKey" type="password" autocomplete="new-password" placeholder="首次配置时填写；编辑时留空保留当前密钥"; }
+                p class="maitu-note" { "密钥保存在本机专用配置卷，不进入数据库备份，也不显示在任务记录中。" }
                 div class="maitu-settings-grid" {
                     label { "同时执行的任务数" input name="concurrency" type="number" min="1" max="64" value="3" required; }
                     label { "上下文预算（Token）" input name="contextTokens" type="number" min="1" max="1048576" value="1048576" required; }
                     label { "最大输出长度（Token）" input name="maxTokens" type="number" min="1" max="393216" value="65536" required; }
                 }
+                label class="maitu-check-line" { input type="checkbox" name="enabled" checked { } "启用此连接（停用后其排队任务等待其他连接）" }
                 p id="maitu-model-limits" class="maitu-note" { "DeepSeek：上下文容量 1,048,576 Token，最大输出 393,216 Token。" }
-                p class="maitu-note" { "上下文预算计入任务要求、资料与预留输出。输入按文本估算，超出预算会提示调整；实际 Token 用量以模型返回为准。输出上限实际传给模型，不代表每次都会写满。" }
-                p class="maitu-note" {
-                    span id="maitu-generation-defaults" { "思考模式：参考默认输出上限 65,536 Token。此额度包含思考与最终正文。" }
-                    a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noopener noreferrer" { "查看官方模型说明" }
-                }
-                p class="maitu-note" { "保存后用于新启动的请求。连接是否可用，以实际任务的执行结果为准；限流时可降低并发。" }
+                p class="maitu-note" { "上下文预算计入任务要求、资料与预留输出。输入按文本估算，超出预算会提示调整；实际 Token 用量以模型返回为准。连接是否可用，以实际任务的执行结果为准。" }
                 button type="submit" class="maitu-button maitu-button--primary" { "保存连接" }
                 a class="maitu-text-link" href="/" { "返回项目" }
             }
@@ -257,10 +289,14 @@ pub async fn settings() -> Markup {
     shell("模型连接", "settings", None, content)
 }
 
-pub async fn provider_config(State(state): State<Arc<AppState>>) -> Json<Value> {
-    Json(json!(state.providers.get().await.view()))
+pub async fn connections(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let list = state.providers.list().await;
+    Json(json!(
+        list.iter().map(ProviderConfig::view).collect::<Vec<_>>()
+    ))
 }
-pub async fn save_provider(
+
+pub async fn save_connection(
     State(state): State<Arc<AppState>>,
     input: Result<Json<ProviderConfig>, JsonRejection>,
 ) -> AppResult<Json<Value>> {
@@ -269,11 +305,25 @@ pub async fn save_provider(
         code: "invalid_provider_input",
         message: match rejection.status().as_u16() {
             413 => "提交的配置过大，请检查填写内容后重试。",
-            415 => "网页提交格式不正确，请刷新模型连接页后重新保存。",
+            415 => "网页提交格式不正确，请刷新连接页后重新保存。",
             _ => "配置格式不正确。请刷新连接页并重新选择思考模式；执行数、上下文预算和输出长度须为整数。",
         }.into(),
     })?;
-    Ok(Json(json!(state.providers.save(input).await?)))
+    Ok(Json(json!(state.providers.save(input).await?.view())))
+}
+
+pub async fn delete_connection(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+) -> AppResult<Json<Value>> {
+    state.providers.delete(&key).await?;
+    Ok(Json(json!({"deleted": key})))
+}
+
+/// Legacy single-connection alias kept for older local scripts: reads the first
+/// saved connection.
+pub async fn provider_config(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!(state.providers.primary().await.view()))
 }
 pub async fn project_snapshot(
     State(state): State<Arc<AppState>>,
@@ -289,7 +339,7 @@ pub async fn create_task(
     Json(input): Json<CreateTaskRequest>,
 ) -> AppResult<Json<Value>> {
     Ok(Json(json!(
-        workflows::create_task(&state.pool, id, input).await?
+        workflows::create_task(&state.pool, &state.providers, id, input).await?
     )))
 }
 pub async fn generate_plan(
@@ -297,7 +347,9 @@ pub async fn generate_plan(
     Path(id): Path<Uuid>,
     Json(input): Json<GeneratePlanRequest>,
 ) -> AppResult<Json<Value>> {
-    Ok(Json(json!(plans::generate(&state.pool, id, input).await?)))
+    Ok(Json(json!(
+        plans::generate(&state.pool, &state.providers, id, input).await?
+    )))
 }
 pub async fn adopt_plan(
     State(state): State<Arc<AppState>>,
@@ -329,6 +381,13 @@ pub async fn task_detail(
 ) -> AppResult<Json<Value>> {
     Ok(Json(json!(workflows::detail(&state.pool, id).await?)))
 }
+pub async fn cancel_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(json!(workflows::cancel(&state.pool, id).await?)))
+}
+
 pub async fn start_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -351,9 +410,9 @@ pub async fn accept_output(
 ) -> AppResult<Json<Value>> {
     let task = workflows::task(&state.pool, id).await?;
     let result = if task.task_kind == "code" {
-        code::adopt(&state, id, input.attempt_id).await?
+        code::adopt(&state, id, input.attempt_id, &input.reason).await?
     } else {
-        workflows::accept(&state.pool, id, input.attempt_id).await?
+        workflows::accept(&state.pool, id, input.attempt_id, &input.reason).await?
     };
     Ok(Json(json!(result)))
 }

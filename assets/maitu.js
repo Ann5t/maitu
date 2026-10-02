@@ -3,7 +3,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const mode = document.body.dataset.maituMode;
   const projectId = document.body.dataset.projectId;
-  const statusNames = {draft:'待启动',queued:'等待执行',running:'执行中',produced:'已产出',failed:'执行失败',interrupted:'执行中断'};
+  const statusNames = {draft:'待启动',queued:'等待执行',running:'执行中',produced:'已产出',failed:'执行失败',interrupted:'执行中断',cancelled:'已取消'};
   let snapshot;
   let selectedTask;
   let selectedAttempt;
@@ -17,6 +17,42 @@
   let retryRequestId;
   let refreshing = false;
   let initialMapLayout = true;
+  let mapZoom = 1;
+  let adoptTaskId;
+  let adoptAttemptId;
+
+  function layoutMemory() {
+    try {
+      const raw = localStorage.getItem('maitu-map-' + projectId);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function saveLayout(patch) {
+    try {
+      const merged = Object.assign(layoutMemory(), patch);
+      localStorage.setItem('maitu-map-' + projectId, JSON.stringify(merged));
+    } catch { /* layout stays for this page only */ }
+  }
+  function applyZoom() {
+    const map = $('#maitu-map');
+    if (!map) return;
+    map.style.transformOrigin = '0 0';
+    map.style.transform = `scale(${mapZoom})`;
+    const level = $('#maitu-zoom-level');
+    if (level) level.textContent = Math.round(mapZoom * 100) + '%';
+  }
+  function setZoom(value) {
+    mapZoom = Math.min(2.5, Math.max(0.4, value));
+    applyZoom();
+    saveLayout({zoom: mapZoom});
+  }
+  function focusSelected() {
+    if (!selectedTask) {feedback('先选择一个节点，再聚焦。', true); return;}
+    const node = document.querySelector(`[data-select-task="${selectedTask}"]`);
+    if (!node) return;
+    node.scrollIntoView({behavior:'smooth', inline:'center', block:'center'});
+    saveLayout({focus: selectedTask});
+  }
   const outputCache = new Map();
   const startRequests = new Map();
   const openOperations = new Set();
@@ -111,41 +147,97 @@
   }
 
   if (mode === 'settings') {
-    const form = $('#maitu-provider-form');
+    const form = $('#maitu-connection-form');
+    const list = $('#maitu-connection-list');
+    for (const name of ['contextTokens','maxTokens']) {
+      form.elements[name].max = name === 'contextTokens' ? 1048576 : 393216;
+    }
     function modeHint() {
-      $('#maitu-generation-defaults').textContent = form.elements.thinkingEnabled.value === 'true'
-        ? '思考模式：参考默认输出上限 65,536 Token。此额度包含思考与最终正文。'
-        : '非思考模式：参考默认输出上限 8,192 Token。切换模式会保留你填写的输出上限。';
+      $('#maitu-model-limits').textContent = form.elements.thinkingEnabled.value === 'true'
+        ? 'DeepSeek：上下文容量 1,048,576 Token，最大输出 393,216 Token。思考模式下参考默认输出上限 65,536 Token。'
+        : 'DeepSeek：上下文容量 1,048,576 Token，最大输出 393,216 Token。非思考模式参考默认输出上限 8,192 Token。';
     }
-    function populate(config) {
-      for (const name of ['baseUrl','model','concurrency','contextTokens','maxTokens']) form.elements[name].value = config[name];
-      form.elements.contextTokens.max = config.maxContextTokens;
-      form.elements.maxTokens.max = config.maxOutputTokens;
-      form.elements.thinkingEnabled.value = String(config.thinkingEnabled);
-      modeHint();
-      $('#maitu-model-limits').textContent = `DeepSeek：上下文容量 ${config.maxContextTokens.toLocaleString('en-US')} Token，最大输出 ${config.maxOutputTokens.toLocaleString('en-US')} Token。`;
-      form.elements.apiKey.value = '';
-      $('#maitu-provider-state').textContent = config.configured ? '已配置 · 用实际任务验证连接' : '等待填写密钥';
-    }
-    api('/api/maitu/provider').then(populate).catch(error => feedback(error.message,true));
     form.elements.thinkingEnabled.addEventListener('change', modeHint);
+    function setEditing(connection) {
+      form.elements.originalKey.value = connection ? connection.key : '';
+      form.elements.key.value = connection ? connection.key : '';
+      form.elements.key.disabled = Boolean(connection);
+      form.elements.label.value = connection ? connection.label : '';
+      form.elements.baseUrl.value = connection ? connection.baseUrl : 'https://api.deepseek.com';
+      form.elements.model.value = connection ? connection.model : 'deepseek-flash';
+      form.elements.thinkingEnabled.value = String(connection ? connection.thinkingEnabled : true);
+      form.elements.concurrency.value = connection ? connection.concurrency : 3;
+      form.elements.contextTokens.value = connection ? connection.contextTokens : 1048576;
+      form.elements.maxTokens.value = connection ? connection.maxTokens : 65536;
+      form.elements.enabled.checked = connection ? connection.enabled : true;
+      form.elements.apiKey.value = '';
+      form.elements.apiKey.placeholder = connection ? '留空保留当前密钥' : '首次配置时填写';
+      $('#maitu-connection-form-title').textContent = connection ? `编辑连接 ${connection.label}` : '添加连接';
+      $('#maitu-connection-cancel').hidden = !connection;
+      modeHint();
+    }
+    $('#maitu-connection-cancel').addEventListener('click', () => setEditing(null));
+    function render(connections) {
+      list.replaceChildren();
+      if (!connections.length) list.append(element('p','maitu-note','还没有连接。请先添加一个。'));
+      for (const connection of connections) {
+        const card = element('div','maitu-connection-card');
+        if (!connection.enabled) card.classList.add('is-disabled');
+        const head = element('div','maitu-connection-head');
+        head.append(
+          element('strong','',connection.label + ' '),
+          element('span','maitu-note',connection.key + ' · ' + connection.model),
+          element('span','maitu-status ' + (connection.configured && connection.enabled ? 'maitu-status--produced' : 'maitu-status--failed'),
+            connection.configured ? (connection.enabled ? '已启用' : '已停用') : '待填写密钥')
+        );
+        card.append(head, element('p','maitu-note',
+          `${connection.baseUrl} · 并发 ${connection.concurrency} · 上下文 ${connection.contextTokens.toLocaleString('en-US')} · 输出上限 ${connection.maxTokens.toLocaleString('en-US')} Token`));
+        const actions = element('div','maitu-connection-actions');
+        actions.append(button('编辑',() => setEditing(connection)));
+        actions.append(button(connection.enabled ? '停用' : '启用', async () => {
+          await api('/api/maitu/connections','POST',{...connection,enabled:!connection.enabled,apiKey:''});
+          await load(); feedback(connection.enabled ? '连接已停用，其排队任务会等待其他连接。' : '连接已启用。');
+        }));
+        actions.append(button('删除', async () => {
+          if (!confirm(`删除连接「${connection.label}」？历史记录保留，但排队中的任务将等待其他连接。`)) return;
+          await api(`/api/maitu/connections/${encodeURIComponent(connection.key)}`,'DELETE');
+          await load(); feedback('连接已删除。');
+        }));
+        card.append(actions);
+        list.append(card);
+      }
+    }
+    async function load() {
+      render(await api('/api/maitu/connections'));
+      $('#maitu-connections-state').textContent = '以实际任务结果验证连接是否可用。';
+    }
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const submit = $('button[type="submit"]',form);
       submit.disabled = true;
       const data = Object.fromEntries(new FormData(form));
-      for (const key of ['concurrency','contextTokens','maxTokens']) data[key] = Number(data[key]);
-      data.thinkingEnabled = data.thinkingEnabled === 'true';
-      if (data.maxTokens >= data.contextTokens) {
+      const payload = {
+        // 编辑时编号输入为 disabled，FormData 不包含它，改从隐藏域读取
+        key: form.elements.key.disabled ? form.elements.originalKey.value : data.key,
+        label: data.label, baseUrl: data.baseUrl, model: data.model,
+        apiKey: data.apiKey, concurrency: Number(data.concurrency),
+        contextTokens: Number(data.contextTokens), maxTokens: Number(data.maxTokens),
+        thinkingEnabled: data.thinkingEnabled === 'true', enabled: form.elements.enabled.checked
+      };
+      if (payload.maxTokens >= payload.contextTokens) {
         feedback('最大输出长度须小于上下文预算，为任务要求和资料保留输入空间。', true);
         submit.disabled = false;
         return;
       }
       try {
-        populate(await api('/api/maitu/provider','PUT',data));
+        await api('/api/maitu/connections','POST',payload);
+        setEditing(null);
+        await load();
         feedback('连接已保存，新启动的模型请求使用此配置。');
       } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
     });
+    setEditing(null);
+    load().catch(error => feedback(error.message,true));
   }
 
   async function startTask(id) {
@@ -303,10 +395,11 @@
       section.addEventListener('toggle',()=> {if(section.open) selectedAttempt=attempt.id;});
       const summary=element('summary','',`第 ${attempt.number} 次 · ${statusNames[attempt.status]||attempt.status}${detail.task.acceptedAttemptId===attempt.id?' · 已采用':''}`);
       section.append(summary,element('p','maitu-note',`创建：${time(attempt.createdAt)}`));
-      if (attempt.model) section.append(element('p','maitu-note',`模型：${attempt.model}`));
+      if (attempt.model) section.append(element('p','maitu-note',`模型：${attempt.model}${attempt.connectionKey?` · 连接：${attempt.connectionKey}`:''}`));
       if (attempt.requestStartedAt) section.append(element('p','maitu-note',`请求开始：${time(attempt.requestStartedAt)}`));
       if (attempt.responseReceivedAt) section.append(element('p','maitu-note',`结果收到：${time(attempt.responseReceivedAt)}`));
       if (attempt.errorMessage) section.append(element('p','maitu-error',attempt.errorMessage));
+      if (detail.staleInputs?.[attempt.id]) section.append(element('p','maitu-wait','输入已过期：'+detail.staleInputs[attempt.id]));
       if(attempt.inputSnapshot?.additionalInstruction) section.append(element('p','maitu-note','本次补充：'+attempt.inputSnapshot.additionalInstruction));
       const events=element('ol','maitu-timeline');
       for (const event of detail.events[attempt.id]||[]) {
@@ -354,16 +447,78 @@
         const download=element('a','maitu-button maitu-button--small','下载'); download.href=`/artifacts/${attempt.artifactId}`; download.download=detail.task.outputFilename; actions.append(download);
         const plan=(detail.plans||[]).find(record=>record.attemptId===attempt.id);
         if (plan) actions.append(button(plan.adoptedAt?'查看采用的计划':'调整并加入任务图',()=>openPlanReview(plan),!plan.adoptedAt));
-        if (attempt.status==='produced' && detail.task.taskKind!=='plan' && detail.task.acceptedAttemptId!==attempt.id && !codeAttempt?.adoptedAt) actions.append(button(detail.task.taskKind==='code'?'合并检查并采用':'采用这次成果',async()=> {
-          await api(`/api/maitu/tasks/${id}/accept`,'POST',{attemptId:attempt.id});
-          feedback('已采用这次成果；等待它的后续任务可以继续。'); await refresh();
+        if (attempt.status==='produced' && detail.task.taskKind!=='plan' && detail.task.acceptedAttemptId!==attempt.id && !codeAttempt?.adoptedAt) actions.append(button(detail.task.taskKind==='code'?'合并检查并采用':'采用这次成果',()=> {
+          adoptTaskId=id; adoptAttemptId=attempt.id;
+          $('#maitu-adopt-form').elements.reason.value='';
+          $('#maitu-adopt-dialog').showModal();
         },true));
         section.append(actions);
       }
       if (attempt.usage?.total_tokens) section.append(element('p','maitu-note',`本次用量：${attempt.usage.total_tokens} Token`));
       panel.append(section);
     }
+    const withOutput=detail.attempts.filter(attempt=>attempt.artifactId);
+    if (withOutput.length>=2 && detail.task.taskKind==='file') {
+      panel.append(button('比较两次成果',async()=> {
+        const contents=await Promise.all(withOutput.slice(0,2).map(async attempt=> {
+          if (!outputCache.has(attempt.artifactId)) {
+            const response=await fetch(`/artifacts/${attempt.artifactId}`);
+            if (!response.ok) throw new Error('成果文件暂时无法打开。');
+            outputCache.set(attempt.artifactId,await response.text());
+          }
+          return {attempt,content:outputCache.get(attempt.artifactId)};
+        }));
+        showContent(`成果比较：第 ${contents[0].attempt.number} 次 ↔ 第 ${contents[1].attempt.number} 次`,lineDiff(contents[0].content,contents[1].content));
+      }));
+    }
     panel.scrollTop=oldScroll;
+  }
+
+  function lineDiff(oldText,newText) {
+    const a=oldText.split('\n'), b=newText.split('\n');
+    const m=a.length, n=b.length;
+    const table=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+    for (let i=m-1;i>=0;i--) for (let j=n-1;j>=0;j--)
+      table[i][j]=a[i]===b[j]?table[i+1][j+1]+1:Math.max(table[i+1][j],table[i][j+1]);
+    const rows=[];
+    let i=0,j=0;
+    while (i<m&&j<n) {
+      if (a[i]===b[j]) {rows.push('  '+a[i]);i++;j++;}
+      else if (table[i+1][j]>=table[i][j+1]) {rows.push('- '+a[i]);i++;}
+      else {rows.push('+ '+b[j]);j++;}
+    }
+    while (i<m) {rows.push('- '+a[i]);i++;}
+    while (j<n) {rows.push('+ '+b[j]);j++;}
+    return rows.length?('第 1 次与第 2 次成果按行比较（- 旧 / + 新）：\n'+rows.join('\n')):'两次成果没有文本。';
+  }
+
+  function renderAttention() {
+    const section=$('#maitu-attention');
+    const list=$('#maitu-attention-list');
+    if (!section||!list) return;
+    const pinnedUnusable=snapshot.tasks.filter(t=>t.status==='queued'&&t.waitReason&&t.waitReason.includes('指定的模型连接当前不可用'));
+    const items=snapshot.tasks.filter(t=>['failed','interrupted'].includes(t.status))
+      .concat(pinnedUnusable)
+      .concat(snapshot.tasks.filter(t=>t.status==='produced'&&!t.acceptedAttemptId&&t.taskKind!=='plan'));
+    const seen=new Set(); const unique=items.filter(t=>!seen.has(t.id)&&seen.add(t.id));
+    section.hidden=!unique.length;
+    $('#maitu-attention-count').textContent=unique.length?unique.length+' 项':'';
+    list.replaceChildren();
+    for (const task of unique) {
+      const row=element('div','maitu-attention-row');
+      const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
+      row.append(element('strong','',task.title),element('span','maitu-note',
+        (kindName+' · '+(statusNames[task.status]||task.status)+(task.waitReason?' · '+task.waitReason:' · 等待你查看并采用'))));
+      const actions=element('div','maitu-attention-actions');
+      actions.append(button('查看任务',()=>selectTask(task.id)));
+      if (['queued','running'].includes(task.status)) actions.append(button('取消',async()=> {
+        if (!confirm(`取消任务「${task.title}」？排队中的尝试不会发出请求；执行中的请求不会中断但不会保存成果。`)) return;
+        await api(`/api/maitu/tasks/${task.id}/cancel`,'POST',{});
+        feedback('取消已处理。'); await refresh();
+      }));
+      row.append(actions);
+      list.append(row);
+    }
   }
 
   function planField(parent,title,name,value,multiline=false) {
@@ -417,7 +572,12 @@
     try {
       snapshot=await api(`/api/maitu/projects/${projectId}`);
       const produced=snapshot.tasks.filter(task=>task.status==='produced').length;
-      $('#maitu-capacity').textContent=snapshot.provider.configured?`全局 ${snapshot.activeTasks} / ${snapshot.provider.concurrency} 执行中`:'先连接 DeepSeek';
+      const usable=(snapshot.connections||[]).filter(c=>c.enabled&&c.configured);
+      const capacity=usable.reduce((sum,c)=>sum+c.concurrency,0);
+      const load=new Map((snapshot.connectionLoad||[]).map(item=>[item.key,item.running]));
+      $('#maitu-capacity').textContent=usable.length
+        ?`${snapshot.activeTasks} 项执行中 · 容量 ${capacity}（`+usable.map(c=>`${c.label} ${load.get(c.key)||0}/${c.concurrency}`).join('，')+'）'
+        :'先在设置中配置可用的模型连接';
       $('#maitu-project-status').textContent=`${snapshot.tasks.length} 个任务 · ${produced} 个已产出`;
       renderMap(); renderSources(); await renderDetail();
       const code=snapshot.codeProject;
@@ -426,10 +586,24 @@
         : '导入代码副本后，可以在图上真实修改代码并运行检查。';
       $('#maitu-import-code').hidden=Boolean(code);
       $('#maitu-export-code').hidden=!code;
+      renderAttention();
     } finally {refreshing=false;}
   }
 
   if (mode==='project') {
+    mapZoom = layoutMemory().zoom || 1;
+    $('#maitu-zoom-in').addEventListener('click',()=>setZoom(mapZoom*1.2));
+    $('#maitu-zoom-out').addEventListener('click',()=>setZoom(mapZoom/1.2));
+    $('#maitu-zoom-reset').addEventListener('click',()=> {setZoom(1); $('.maitu-map-scroll').scrollTo({left:0});});
+    $('#maitu-focus-selected').addEventListener('click',focusSelected);
+    $('#maitu-adopt-form').addEventListener('submit',async event=> {
+      event.preventDefault(); const form=event.currentTarget; const submit=$('button[type="submit"]',form); submit.disabled=true;
+      try {
+        await api(`/api/maitu/tasks/${adoptTaskId}/accept`,'POST',{attemptId:adoptAttemptId,reason:form.elements.reason.value});
+        $('#maitu-adopt-dialog').close();
+        feedback('已采用这次成果；理由与决定一起保留。'); await refresh();
+      } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}
+    });
     $('#maitu-retry-form').addEventListener('submit',async event=> {
       event.preventDefault();const form=event.currentTarget;const submit=$('button[type="submit"]',form);submit.disabled=true;
       try {
@@ -486,11 +660,23 @@
         row.append(input,element('span','',label(item))); target.append(row);
       }
     }
+    function connectionOptions(select) {
+      const current=select.value;
+      select.replaceChildren(element('option','','自动选择可用连接'));
+      select.firstChild.value='';
+      for (const connection of (snapshot.connections||[]).filter(c=>c.enabled)) {
+        const option=element('option','',connection.label+'（'+connection.key+'）');
+        option.value=connection.key; select.append(option);
+      }
+      select.value=current;
+      if (select.value!==current) select.value='';
+    }
     $('#maitu-new-task').addEventListener('click',()=> {
       if (!snapshot) return;
       const form=$('#maitu-task-create'); form.reset(); taskRequestId=requestId();
       checkList($('#maitu-task-sources'),snapshot.sources,'sourceIds',source=>source.filename);
       checkList($('#maitu-task-dependencies'),snapshot.tasks,'dependencyIds',task=>task.title);
+      connectionOptions($('#maitu-task-connection'));
       $('#maitu-task-dialog').showModal();
     });
     $('#maitu-add-source').addEventListener('click',()=>$('#maitu-source-dialog').showModal());
@@ -533,7 +719,7 @@
       const data=new FormData(form);
       try {
         const task=await api(`/api/maitu/projects/${projectId}/tasks`,'POST',{
-          requestId:taskRequestId,title:data.get('title'),instruction:data.get('instruction'),outputFilename:data.get('outputFilename'),taskKind:data.get('taskKind'),acceptanceCriteria:data.get('acceptanceCriteria'),sourceIds:data.getAll('sourceIds'),dependencyIds:data.getAll('dependencyIds')
+          requestId:taskRequestId,title:data.get('title'),instruction:data.get('instruction'),outputFilename:data.get('outputFilename'),taskKind:data.get('taskKind'),acceptanceCriteria:data.get('acceptanceCriteria'),sourceIds:data.getAll('sourceIds'),dependencyIds:data.getAll('dependencyIds'),connectionKey:data.get('connectionKey')||''
         });
         $('#maitu-task-dialog').close(); selectedTask=task.id; selectedAttempt=undefined; await refresh(); feedback('任务已加入图中，可以从节点上执行。');
       } catch(error) {feedback(error.message,true);} finally {submit.disabled=false;}

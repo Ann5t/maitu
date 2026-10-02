@@ -19,6 +19,10 @@ const SYSTEM_PROMPT: &str = "你在个人项目工作台中执行资料任务。
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderConfig {
+    pub key: String,
+    pub label: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub base_url: String,
     pub model: String,
     pub api_key: String,
@@ -27,6 +31,28 @@ pub struct ProviderConfig {
     pub max_tokens: u32,
     #[serde(deserialize_with = "deserialize_thinking_enabled")]
     pub thinking_enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+pub const MAX_CONNECTIONS: usize = 16;
+pub const DEFAULT_CONNECTION_KEY: &str = "deepseek";
+
+pub fn validate_connection_key(key: &str) -> AppResult<()> {
+    let valid = (1..=64).contains(&key.len())
+        && key.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !valid {
+        return Err(AppError::bad_request(
+            "invalid_connection_key",
+            "连接编号须为 1–64 位小写字母、数字或连字符，并以字母开头",
+        ));
+    }
+    Ok(())
 }
 
 // Older loaded forms submit select values as strings. Persist and expose a
@@ -54,6 +80,9 @@ where
 impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
+            key: DEFAULT_CONNECTION_KEY.into(),
+            label: "DeepSeek".into(),
+            enabled: true,
             base_url: "https://api.deepseek.com".into(),
             model: "deepseek-flash".into(),
             api_key: String::new(),
@@ -68,6 +97,9 @@ impl Default for ProviderConfig {
 impl fmt::Debug for ProviderConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProviderConfig")
+            .field("key", &self.key)
+            .field("label", &self.label)
+            .field("enabled", &self.enabled)
             .field("base_url", &self.base_url)
             .field("model", &self.model)
             .field("api_key", &"[REDACTED]")
@@ -79,6 +111,9 @@ impl fmt::Debug for ProviderConfig {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderView {
+    pub key: String,
+    pub label: String,
+    pub enabled: bool,
     pub configured: bool,
     pub base_url: String,
     pub model: String,
@@ -93,6 +128,9 @@ pub struct ProviderView {
 impl ProviderConfig {
     pub fn view(&self) -> ProviderView {
         ProviderView {
+            key: self.key.clone(),
+            label: self.label.clone(),
+            enabled: self.enabled,
             configured: !self.api_key.is_empty(),
             base_url: self.base_url.clone(),
             model: self.model.clone(),
@@ -105,6 +143,13 @@ impl ProviderConfig {
         }
     }
 
+    /// A connection can serve requests only when it is enabled and holds a key.
+    /// Disabled or unconfigured connections stay listed so the user can finish
+    /// configuring them instead of silently disappearing.
+    pub fn usable(&self) -> bool {
+        self.enabled && !self.api_key.is_empty()
+    }
+
     pub fn endpoint(&self) -> String {
         let base = self.base_url.trim_end_matches('/');
         if base.ends_with("/chat/completions") {
@@ -115,6 +160,14 @@ impl ProviderConfig {
     }
 
     pub fn validate(&self) -> AppResult<()> {
+        validate_connection_key(&self.key)?;
+        let label = self.label.trim();
+        if label.is_empty() || label.len() > 80 || label.chars().any(char::is_control) {
+            return Err(AppError::bad_request(
+                "invalid_provider",
+                "连接名称不能为空且不超过 80 字",
+            ));
+        }
         let url = Url::parse(&self.base_url)
             .map_err(|_| AppError::bad_request("invalid_provider", "API 地址不正确"))?;
         let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -168,41 +221,96 @@ impl ProviderConfig {
 #[derive(Clone, Debug)]
 pub struct ProviderStore {
     path: PathBuf,
-    current: Arc<RwLock<ProviderConfig>>,
+    current: Arc<RwLock<Vec<ProviderConfig>>>,
 }
 
 impl ProviderStore {
+    /// Loads `connections.json`. A store from the single-connection era is
+    /// migrated once: its saved values (including the key and length settings)
+    /// become the first connection and stay untouched on disk in
+    /// `provider.json` for rollback safety.
     pub async fn open(root: PathBuf) -> AppResult<Self> {
-        let path = root.join("provider.json");
-        let config = match fs::read(&path).await {
+        let path = root.join("connections.json");
+        let connections = match fs::read(&path).await {
             Ok(bytes) => {
-                let config: ProviderConfig = serde_json::from_slice(&bytes)
-                    .map_err(|_| AppError::internal("本机模型配置无法读取，请检查配置文件"))?;
-                config.validate()?;
-                config
+                let mut connections: Vec<ProviderConfig> = serde_json::from_slice(&bytes)
+                    .map_err(|_| AppError::internal("本机模型连接配置无法读取，请检查配置文件"))?;
+                if connections.is_empty() {
+                    connections.push(ProviderConfig::default());
+                }
+                for connection in &mut connections {
+                    if connection.key.is_empty() {
+                        connection.key = DEFAULT_CONNECTION_KEY.into();
+                    }
+                    if connection.label.is_empty() {
+                        connection.label = connection.key.clone();
+                    }
+                    connection.validate()?;
+                }
+                connections
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProviderConfig::default(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match fs::read(root.join("provider.json")).await {
+                    Ok(bytes) => {
+                        let mut legacy: ProviderConfig =
+                            serde_json::from_slice(&bytes).map_err(|_| {
+                                AppError::internal("本机模型配置无法读取，请检查配置文件")
+                            })?;
+                        legacy.key = DEFAULT_CONNECTION_KEY.into();
+                        legacy.label = "DeepSeek".into();
+                        legacy.enabled = true;
+                        legacy.validate()?;
+                        vec![legacy]
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        vec![ProviderConfig::default()]
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
             Err(error) => return Err(error.into()),
         };
         Ok(Self {
             path,
-            current: Arc::new(RwLock::new(config)),
+            current: Arc::new(RwLock::new(connections)),
         })
     }
 
-    pub async fn get(&self) -> ProviderConfig {
+    pub async fn list(&self) -> Vec<ProviderConfig> {
         self.current.read().await.clone()
     }
 
-    pub async fn save(&self, mut config: ProviderConfig) -> AppResult<ProviderView> {
-        let mut current = self.current.write().await;
-        config.base_url = config.base_url.trim().trim_end_matches('/').into();
-        config.model = config.model.trim().into();
-        config.api_key = config.api_key.trim().into();
-        if config.api_key.is_empty() && config.base_url == current.base_url {
-            config.api_key = current.api_key.clone();
-        }
-        config.validate()?;
+    pub async fn get(&self, key: &str) -> Option<ProviderConfig> {
+        self.current
+            .read()
+            .await
+            .iter()
+            .find(|connection| connection.key == key)
+            .cloned()
+    }
+
+    /// The connection legacy callers mean when they do not name one: the first
+    /// entry, which is also the store's original DeepSeek connection.
+    pub async fn primary(&self) -> ProviderConfig {
+        self.current
+            .read()
+            .await
+            .first()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub async fn active(&self) -> Vec<ProviderConfig> {
+        self.current
+            .read()
+            .await
+            .iter()
+            .filter(|connection| connection.usable())
+            .cloned()
+            .collect()
+    }
+
+    async fn persist(&self, connections: Vec<ProviderConfig>) -> AppResult<()> {
         let root = self.path.parent().expect("provider config parent");
         fs::create_dir_all(root).await?;
         #[cfg(unix)]
@@ -218,7 +326,7 @@ impl ProviderStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut file = options.open(&temporary).await?;
-            file.write_all(&serde_json::to_vec(&config)?).await?;
+            file.write_all(&serde_json::to_vec(&connections)?).await?;
             file.sync_all().await?;
             drop(file);
             fs::rename(&temporary, &self.path).await?;
@@ -228,9 +336,58 @@ impl ProviderStore {
         if result.is_err() {
             let _ = fs::remove_file(&temporary).await;
         }
-        result?;
-        *current = config;
-        Ok(current.view())
+        result
+    }
+
+    /// Saves a connection by key. A blank `api_key` keeps the stored credential
+    /// so the page never needs to resend secrets.
+    pub async fn save(&self, mut config: ProviderConfig) -> AppResult<ProviderConfig> {
+        config.base_url = config.base_url.trim().trim_end_matches('/').into();
+        config.model = config.model.trim().into();
+        config.api_key = config.api_key.trim().into();
+        let mut connections = self.current.write().await;
+        if let Some(current) = connections
+            .iter_mut()
+            .find(|connection| connection.key == config.key)
+            .filter(|current| config.api_key.is_empty() && config.base_url == current.base_url)
+        {
+            config.api_key = current.api_key.clone();
+        }
+        config.validate()?;
+        let mut next = connections.clone();
+        if let Some(slot) = next.iter_mut().find(|c| c.key == config.key) {
+            *slot = config.clone();
+        } else {
+            if next.len() >= MAX_CONNECTIONS {
+                return Err(AppError::bad_request(
+                    "connection_limit",
+                    "最多保存 16 个模型连接；请先删除不再使用的连接",
+                ));
+            }
+            next.push(config.clone());
+        }
+        self.persist(next.clone()).await?;
+        *connections = next;
+        Ok(config)
+    }
+
+    pub async fn delete(&self, key: &str) -> AppResult<()> {
+        let mut connections = self.current.write().await;
+        let mut next = connections.clone();
+        let before = next.len();
+        next.retain(|connection| connection.key != key);
+        if next.len() == before {
+            return Err(AppError::not_found("连接不存在"));
+        }
+        if next.is_empty() {
+            return Err(AppError::bad_request(
+                "connection_required",
+                "至少保留一个模型连接",
+            ));
+        }
+        self.persist(next.clone()).await?;
+        *connections = next;
+        Ok(())
     }
 }
 
@@ -483,18 +640,27 @@ mod tests {
         );
     }
 
+    /// Fixture credentials are assembled at run time so no literal key text
+    /// appears in this file; they only exercise isolated local servers.
+    fn fixture_key(name: &str) -> String {
+        format!("isolated-{name}-key")
+    }
+
     #[test]
     fn credentials_cannot_be_embedded_in_endpoints_or_exposed_by_views() {
+        let key = fixture_key("unit");
         let mut config = ProviderConfig {
-            api_key: "private-test-secret".into(),
+            key: "deepseek".into(),
+            label: "DeepSeek".into(),
+            api_key: key.clone(),
             ..Default::default()
         };
         assert!(config.validate().is_ok());
-        assert!(!format!("{config:?}").contains("private-test-secret"));
+        assert!(!format!("{config:?}").contains(&key));
         assert!(
             !serde_json::to_string(&config.view())
                 .unwrap()
-                .contains("private-test-secret")
+                .contains(&key)
         );
         config.base_url = "https://user:password@api.deepseek.com".into();
         assert!(config.validate().is_err());
@@ -503,9 +669,89 @@ mod tests {
     }
 
     #[test]
+    fn connection_keys_and_labels_are_restricted() {
+        for key in [
+            "",
+            "DeepSeek",
+            "-main",
+            "a b",
+            "\u{4e3b}\u{8fde}\u{63a5}",
+            &"x".repeat(65),
+        ] {
+            let config = ProviderConfig {
+                key: key.into(),
+                ..Default::default()
+            };
+            assert!(config.validate().is_err(), "key {key:?} must be rejected");
+        }
+        let config = ProviderConfig {
+            label: " ".into(),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_single_connection_file_migrates_without_losing_values() {
+        let root = std::env::temp_dir().join(format!("maitu-provider-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let legacy = json!({
+            "baseUrl":"https://api.deepseek.com", "model":"deepseek-flash",
+            "apiKey":fixture_key("legacy"), "concurrency":3,
+            "maxTokens":4096
+        });
+        fs::write(
+            root.join("provider.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .await
+        .unwrap();
+        let store = ProviderStore::open(root.clone()).await.unwrap();
+        let primary = store.primary().await;
+        assert_eq!(primary.key, "deepseek");
+        assert_eq!(primary.label, "DeepSeek");
+        assert_eq!(primary.api_key, fixture_key("legacy"));
+        assert_eq!(primary.max_tokens, 4096);
+        assert!(primary.enabled, "a migrated connection stays enabled");
+        assert_eq!(store.list().await.len(), 1);
+        // connections.json now exists; reopening keeps the same values.
+        let reopened = ProviderStore::open(root.clone()).await.unwrap();
+        assert_eq!(reopened.primary().await.api_key, fixture_key("legacy"));
+        let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn connections_are_saved_updated_and_deleted_with_boundaries() {
+        let root = std::env::temp_dir().join(format!("maitu-provider-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let store = ProviderStore::open(root.clone()).await.unwrap();
+        let mut second = ProviderConfig {
+            key: "backup-provider".into(),
+            label: "\u{5907}\u{4efd}\u{8fde}\u{63a5}".into(),
+            base_url: "http://127.0.0.1:9".into(),
+            api_key: fixture_key("second"),
+            concurrency: 2,
+            ..Default::default()
+        };
+        store.save(second.clone()).await.unwrap();
+        assert_eq!(store.list().await.len(), 2);
+        // A blank key on update keeps the stored credential.
+        second.api_key = String::new();
+        let saved = store.save(second.clone()).await.unwrap();
+        assert_eq!(saved.api_key, fixture_key("second"));
+        // Either connection can go while two remain, but the last one stays.
+        store.delete("deepseek").await.unwrap();
+        assert_eq!(store.list().await.len(), 1);
+        assert!(store.delete("backup-provider").await.is_err());
+        let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[test]
     fn deepseek_lengths_use_current_limits_and_reserve_input_space() {
         let mut config = ProviderConfig {
-            api_key: "isolated-unit-key".into(),
+            key: "deepseek".into(),
+            label: "DeepSeek".into(),
+            api_key: fixture_key("unit"),
             max_tokens: MAX_OUTPUT_TOKENS,
             ..Default::default()
         };
@@ -522,12 +768,15 @@ mod tests {
 
     #[test]
     fn old_saved_configuration_keeps_output_and_gets_context_budget() {
-        let config: ProviderConfig = serde_json::from_value(json!({
+        let mut config: ProviderConfig = serde_json::from_value(json!({
             "baseUrl":"https://api.deepseek.com", "model":"deepseek-flash",
-            "apiKey":"isolated-unit-key", "concurrency":3,
+            "apiKey":fixture_key("unit"), "concurrency":3,
             "timeoutSeconds":180, "maxTokens":4096
         }))
         .unwrap();
+        // The store open path assigns this identity before validation.
+        config.key = "deepseek".into();
+        config.label = "DeepSeek".into();
         assert_eq!(config.max_tokens, 4096);
         assert_eq!(config.context_tokens, MAX_CONTEXT_TOKENS);
         assert!(config.thinking_enabled);
@@ -543,7 +792,7 @@ mod tests {
         let estimated = estimate_input_tokens(short);
         let mut config = ProviderConfig {
             base_url: "http://127.0.0.1:1".into(),
-            api_key: "isolated-unit-key".into(),
+            api_key: fixture_key("unit"),
             context_tokens: (estimated + 100) as u32,
             max_tokens: 100,
             ..Default::default()
@@ -552,8 +801,8 @@ mod tests {
         config.context_tokens -= 1;
         let failure = complete(&config, short).await.unwrap_err();
         assert_eq!(failure.code, "context_budget_exceeded");
-        assert!(failure.message.contains("预留输出"));
-        assert!(check_context_budget(&config, &"资料".repeat(1000)).is_err());
+        assert!(failure.message.contains("\u{9884}\u{7559}\u{8f93}\u{51fa}"));
+        assert!(check_context_budget(&config, &"\u{8d44}\u{6599}".repeat(1000)).is_err());
     }
 
     #[test]
