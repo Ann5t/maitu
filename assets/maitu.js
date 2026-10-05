@@ -268,6 +268,19 @@
     memo.set(taskId, depth);
     return depth;
   }
+  function kindIcon(kind) {
+    // 图标只用 rect/line/polyline：测试以「#maitu-map svg path」数量断言连线数，不能混入 path。
+    const shapes = {
+      file: '<rect x="3" y="2" width="10" height="12" rx="1.5"/><polyline points="9,2 9,6 13,6"/><line x1="5.5" y1="9.5" x2="10.5" y2="9.5"/><line x1="5.5" y1="12" x2="8.5" y2="12"/>',
+      code: '<polyline points="5.5,4.5 2.5,8 5.5,11.5"/><polyline points="10.5,4.5 13.5,8 10.5,11.5"/>',
+      plan: '<line x1="5.5" y1="3.5" x2="14" y2="3.5"/><line x1="5.5" y1="8" x2="14" y2="8"/><line x1="5.5" y1="12.5" x2="14" y2="12.5"/><polyline points="2,3.2 2.9,4.1 4.6,2.9"/><polyline points="2,7.7 2.9,8.6 4.6,7.4"/><polyline points="2,12.2 2.9,13.1 4.6,11.9"/>'
+    };
+    const span = document.createElement('span');
+    span.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + (shapes[kind] || shapes.file) + '</svg>';
+    return span;
+  }
+
   function renderMap() {
     const map = $('#maitu-map');
     const previousFocus = document.activeElement?.dataset.selectTask;
@@ -295,11 +308,28 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
     svg.setAttribute('width',width); svg.setAttribute('height',height); svg.setAttribute('aria-hidden','true');
     svg.classList.add('maitu-edges');
-    function edge(from,to) {
+    const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+    for (const status of ['neutral','running','produced','failed','interrupted','queued']) {
+      const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
+      marker.setAttribute('id',`maitu-arrow-${status}`);
+      marker.setAttribute('viewBox','0 0 8 8');
+      marker.setAttribute('refX','7'); marker.setAttribute('refY','4');
+      marker.setAttribute('markerWidth','6.5'); marker.setAttribute('markerHeight','6.5');
+      marker.setAttribute('orient','auto-start-reverse');
+      const arrow = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+      arrow.setAttribute('points','0,0.8 7.2,4 0,7.2');
+      arrow.setAttribute('class',`maitu-edge-arrow${status==='neutral'?'':'--'+status}`);
+      marker.append(arrow); defs.append(marker);
+    }
+    svg.append(defs);
+    function edge(from,to,status) {
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
       const mid = (from.x+to.x)/2;
       path.setAttribute('d',`M${from.x},${from.y} C${mid},${from.y} ${mid},${to.y} ${to.x},${to.y}`);
-      path.setAttribute('class','maitu-edge'); svg.append(path);
+      const kind = ['running','produced','failed','interrupted','queued'].includes(status) ? status : 'neutral';
+      path.setAttribute('class',`maitu-edge${kind==='neutral'?'':' maitu-edge--'+kind}`);
+      path.setAttribute('marker-end',`url(#maitu-arrow-${kind})`);
+      svg.append(path);
     }
     map.prepend(svg);
     for (const task of snapshot.tasks) {
@@ -312,7 +342,7 @@
       select.setAttribute('aria-pressed',String(task.id===selectedTask));
       const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
       const meta=element('span',`maitu-node-meta maitu-node-meta--${task.status}`);
-      meta.append(element('i',`maitu-dot maitu-dot--${task.status}`),element('span','',`${kindName} · ${statusNames[task.status]||task.status}`));
+      meta.append(kindIcon(task.taskKind),element('i',`maitu-dot maitu-dot--${task.status}`),element('span','',`${kindName} · ${statusNames[task.status]||task.status}`));
       select.append(meta,element('strong','',task.title),element('p','',task.waitReason||task.instruction));
       select.addEventListener('click',()=>selectTask(task.id));
       node.append(select);
@@ -324,10 +354,10 @@
     }
     for(const position of locations.values()) position.height=position.node.getBoundingClientRect().height;
     height=380;
-    for(const tasks of columns.values()) {
+      for(const tasks of columns.values()) {
       let y=35;
       for(const task of tasks) {
-        const position=locations.get(task.id);position.y=y;position.node.style.top=y+'px';y+=position.height+26;
+        const position=locations.get(task.id);position.y=y;position.node.style.top=y+'px';y+=position.height+34;
       }
       height=Math.max(height,y+30);
     }
@@ -337,10 +367,10 @@
       const position=locations.get(task.id);
       const target={x:position.x,y:position.y+position.height/2};
       const parents=snapshot.dependencies.filter(item=>item.taskId===task.id);
-      if(!parents.length) edge({x:272,y:height/2},target);
+      if(!parents.length) edge({x:272,y:height/2},target,task.status);
       for(const parent of parents) {
         const previous=locations.get(parent.parentTaskId);
-        edge({x:previous.x+248,y:previous.y+previous.height/2},target);
+        edge({x:previous.x+248,y:previous.y+previous.height/2},target,task.status);
       }
     }
     if (!snapshot.tasks.length) {
@@ -389,19 +419,25 @@
     const panel=$('#maitu-detail');
     const oldScroll=panel.scrollTop;
     panel.replaceChildren();
-    panel.append(element('p','maitu-eyebrow','任务详情'),element('h2','',detail.task.title),element('p','maitu-detail-instruction',detail.task.instruction));
-    if (detail.task.acceptanceCriteria) panel.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
-    if (detail.task.waitReason) panel.append(element('p','maitu-wait',detail.task.waitReason));
+    const head=element('div','maitu-detail-head');
+    head.append(element('p','maitu-eyebrow','任务详情'));
+    const title=element('h2','',detail.task.title);
+    title.append(element('span',`maitu-chip maitu-chip--${detail.task.status}`,statusNames[detail.task.status]||detail.task.status));
+    head.append(title);
+    const body=element('div','maitu-detail-body');
+    body.append(element('p','maitu-detail-instruction',detail.task.instruction));
+    if (detail.task.acceptanceCriteria) body.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
+    if (detail.task.waitReason) body.append(element('p','maitu-wait',detail.task.waitReason));
     if (!['running','queued'].includes(detail.task.status)) {
       const actions=element('div','maitu-detail-actions');
       actions.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
       actions.append(button('补充要求再执行',()=> {
         retryTaskId=id;retryRequestId=requestId();$('#maitu-retry-form').reset();$('#maitu-retry-dialog').showModal();
       }));
-      panel.append(actions);
+      body.append(actions);
     }
-    panel.append(element('h3','','历次尝试'));
-    if (!detail.attempts.length) panel.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
+    body.append(element('h3','','历次尝试'));
+    if (!detail.attempts.length) body.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
     for (const attempt of detail.attempts) {
       const section=element('details','maitu-attempt');
       section.open=selectedAttempt ? selectedAttempt===attempt.id : attempt.id===detail.attempts[0].id;
@@ -470,11 +506,11 @@
         section.append(actions);
       }
       if (attempt.usage?.total_tokens) section.append(element('p','maitu-note',`本次用量：${attempt.usage.total_tokens} Token`));
-      panel.append(section);
+      body.append(section);
     }
     const withOutput=detail.attempts.filter(attempt=>attempt.artifactId);
     if (withOutput.length>=2 && detail.task.taskKind==='file') {
-      panel.append(button('比较两次成果',async()=> {
+      body.append(button('比较两次成果',async()=> {
         const contents=await Promise.all(withOutput.slice(0,2).map(async attempt=> {
           if (!outputCache.has(attempt.artifactId)) {
             const response=await fetch(`/artifacts/${attempt.artifactId}`);
@@ -486,6 +522,7 @@
         showContent(`成果比较：第 ${contents[0].attempt.number} 次 ↔ 第 ${contents[1].attempt.number} 次`,lineDiff(contents[0].content,contents[1].content));
       }));
     }
+    panel.append(head,body);
     panel.scrollTop=oldScroll;
   }
 

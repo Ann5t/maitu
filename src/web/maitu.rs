@@ -52,7 +52,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js?v=ui-2" defer {}
+                script src="/assets/maitu.js?v=ui-3" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -178,7 +178,7 @@ pub async fn project_page(
                     button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置" }
                     button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
                 }
-                div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
+                div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--queued" {} "等待执行" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
                 p class="maitu-map-hint" { "左右滑动查看任务，点击节点查看记录与成果。" }
                 div class="maitu-map-scroll" tabindex="0" aria-label="可横向滚动的项目任务图" {
                     div id="maitu-map" class="maitu-map" {}
