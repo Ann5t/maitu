@@ -63,6 +63,7 @@ pub(crate) fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: 
                 script src="/assets/theme.js" defer {}
                 script src="/assets/maitu.js?v=ui-4" defer {}
                 @if mode == "ideas" || mode == "idea" { script src="/assets/maitu-ideas.js?v=2" defer {} }
+                @if mode == "project" { script src="/assets/maitu-goals.js?v=2" defer {} }
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -178,7 +179,11 @@ pub async fn project_page(
                 a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
-        div class="maitu-workspace" {
+        div class="maitu-view-toggle" role="tablist" aria-label="项目视图" {
+            button id="maitu-view-tasks" type="button" class="is-active" role="tab" aria-selected="true" aria-controls="maitu-workspace-tasks" { "任务图" }
+            button id="maitu-view-goals" type="button" role="tab" aria-selected="false" aria-controls="maitu-workspace-goals" { "目标分支" }
+        }
+        div id="maitu-workspace-tasks" class="maitu-workspace" {
             section class="maitu-map-panel" aria-labelledby="maitu-map-title" {
                 div class="maitu-section-head" { h2 id="maitu-map-title" { "任务图" } span id="maitu-project-status" { "加载中" } }
                 div class="maitu-map-bar" {
@@ -203,6 +208,22 @@ pub async fn project_page(
             }
             aside id="maitu-detail" class="maitu-detail" aria-label="任务详情" {
                 div class="maitu-empty" { strong { "选择一个任务" } p { "查看要求、历次尝试、输入来源和成果；也可以从节点上启动或重试。" } }
+            }
+        }
+        section id="maitu-workspace-goals" class="maitu-goals" hidden aria-label="目标分支工作台" {
+            div class="maitu-section-head" {
+                h2 { "目标分支" }
+                div class="maitu-head-actions" {
+                    span id="maitu-goals-summary" { "读取中…" }
+                    button id="maitu-goal-proposal-new" type="button" class="maitu-button" { "提出目标提案" }
+                }
+            }
+            div id="maitu-goals-proposals" {}
+            div class="maitu-goals-layout" {
+                nav id="maitu-goals-branches" class="maitu-goals-branches" aria-label="目标分支列表" {}
+                div id="maitu-goals-workspace" class="maitu-goals-workspace" {
+                    div class="maitu-empty" { strong { "选择一个目标分支" } p { "查看契约、会话记录、证据与合入门禁；也可以从这里推进下一步。" } }
+                }
             }
         }
         dialog id="maitu-task-dialog" class="maitu-dialog" {
@@ -290,6 +311,7 @@ pub async fn project_page(
             div class="maitu-section-head" { h2 id="maitu-output-title" {} button type="button" class="maitu-close" data-close-dialog="maitu-output-dialog" aria-label="关闭内容" { "×" } }
             pre id="maitu-output-content" {}
         }
+        dialog id="maitu-goal-dialog" class="maitu-dialog maitu-dialog--wide" {}
     };
     Ok(shell(&project.title, "project", Some(id), content))
 }
