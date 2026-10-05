@@ -50,6 +50,7 @@ SKIP_PLUGIN_IMAGE_SMOKE=1 ./scripts/test-real-plugins-http.sh
 ./scripts/test-inputs-http.sh
 ./scripts/test-workbench-http.sh
 SCREENSHOT_DIR="$quality_tmp/screenshots" ./scripts/test-workbench-browser.sh
+SCREENSHOT_DIR="$quality_tmp/screenshots" ./scripts/test-workbench-large.sh
 ./scripts/test-production-image.sh
 ./scripts/test-storage-reconciliation.sh
 SCREENSHOT_DIR="$quality_tmp/security-screenshots" ./scripts/test-security-https.sh
