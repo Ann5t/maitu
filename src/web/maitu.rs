@@ -52,7 +52,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js?v=ui-3" defer {}
+                script src="/assets/maitu.js?v=ui-4" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -67,7 +67,6 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                                 button type="button" data-theme-set="light" aria-label="浅色主题" { "浅色" }
                                 button type="button" data-theme-set="dark" aria-label="深色主题" { "深色" }
                             }
-                            a href="/legacy" { "早期工作台" }
                         }
                     }
                     main class="maitu-main" { (content) }
@@ -157,6 +156,10 @@ pub async fn project_page(
                 button id="maitu-new-task" type="button" class="maitu-button maitu-button--primary" { "+ 添加任务" }
             }
         }
+        section id="maitu-attention" class="maitu-attention" aria-labelledby="maitu-attention-title" hidden {
+            div class="maitu-section-head" { h2 id="maitu-attention-title" { "需要你处理" } span id="maitu-attention-count" {} }
+            div id="maitu-attention-list" {}
+        }
         section id="maitu-code-project" class="maitu-code-project" {
             div { strong { "项目代码" } p id="maitu-code-state" class="maitu-note" { "可以导入代码副本，让节点真实修改并运行检查。" } }
             div class="maitu-head-actions" {
@@ -164,21 +167,19 @@ pub async fn project_page(
                 a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
-        section id="maitu-attention" class="maitu-attention" aria-labelledby="maitu-attention-title" hidden {
-            div class="maitu-section-head" { h2 id="maitu-attention-title" { "需要你处理" } span id="maitu-attention-count" {} }
-            div id="maitu-attention-list" {}
-        }
         div class="maitu-workspace" {
             section class="maitu-map-panel" aria-labelledby="maitu-map-title" {
                 div class="maitu-section-head" { h2 id="maitu-map-title" { "任务图" } span id="maitu-project-status" { "加载中" } }
-                div class="maitu-map-toolbar" {
-                    button id="maitu-zoom-out" type="button" class="maitu-button maitu-button--small" aria-label="缩小" { "−" }
-                    span id="maitu-zoom-level" { "100%" }
-                    button id="maitu-zoom-in" type="button" class="maitu-button maitu-button--small" aria-label="放大" { "+" }
-                    button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置" }
-                    button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
+                div class="maitu-map-bar" {
+                    div class="maitu-map-toolbar" {
+                        button id="maitu-zoom-out" type="button" class="maitu-button maitu-button--small" aria-label="缩小" { "−" }
+                        span id="maitu-zoom-level" { "100%" }
+                        button id="maitu-zoom-in" type="button" class="maitu-button maitu-button--small" aria-label="放大" { "+" }
+                        button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置" }
+                        button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
+                    }
+                    div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--queued" {} "等待执行" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
                 }
-                div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--queued" {} "等待执行" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
                 p class="maitu-map-hint" { "左右滑动查看任务，点击节点查看记录与成果。" }
                 div class="maitu-map-scroll" tabindex="0" aria-label="可横向滚动的项目任务图" {
                     div id="maitu-map" class="maitu-map" {}
@@ -294,15 +295,19 @@ pub async fn settings() -> Markup {
             form id="maitu-connection-form" {
                 div class="maitu-section-head" { h2 id="maitu-connection-form-title" { "添加连接" } button type="button" id="maitu-connection-cancel" class="maitu-button maitu-button--small" hidden { "取消编辑" } }
                 input type="hidden" name="originalKey" value="";
-                label { "连接编号（小写字母、数字、连字符）" input name="key" required maxlength="64" pattern="[a-z][a-z0-9-]*" placeholder="例如 deepseek-main"; }
-                label { "连接名称" input name="label" required maxlength="80" placeholder="例如 DeepSeek 主力账户"; }
+                div class="maitu-form-row" {
+                    label { "连接编号" input name="key" required maxlength="64" pattern="[a-z][a-z0-9-]*" placeholder="例如 deepseek-main"; }
+                    label { "连接名称" input name="label" required maxlength="80" placeholder="例如 DeepSeek 主力账户"; }
+                }
                 label { "API 地址" input name="baseUrl" type="url" required value="https://api.deepseek.com"; }
-                label { "模型名称" input name="model" required value="deepseek-flash" list="maitu-models"; }
                 datalist id="maitu-models" { option value="deepseek-flash"; option value="deepseek-v4-pro"; }
-                label { "思考模式" select name="thinkingEnabled" {
-                    option value="true" selected { "开启思考（默认）" }
-                    option value="false" { "关闭思考" }
-                } }
+                div class="maitu-form-row" {
+                    label { "模型名称" input name="model" required value="deepseek-flash" list="maitu-models"; }
+                    label { "思考模式" select name="thinkingEnabled" {
+                        option value="true" selected { "开启思考（默认）" }
+                        option value="false" { "关闭思考" }
+                    } }
+                }
                 label { "API 密钥" input name="apiKey" type="password" autocomplete="new-password" placeholder="首次配置时填写；编辑时留空保留当前密钥"; }
                 p class="maitu-note" { "密钥保存在本机专用配置卷，不进入数据库备份，也不显示在任务记录中。" }
                 div class="maitu-settings-grid" {

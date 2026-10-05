@@ -16,6 +16,7 @@
   let retryTaskId;
   let retryRequestId;
   let refreshing = false;
+  let lastSnapshotJson = '';
   let initialMapLayout = true;
   let mapZoom = 1;
   let adoptTaskId;
@@ -324,8 +325,8 @@
     svg.append(defs);
     function edge(from,to,status) {
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-      const mid = (from.x+to.x)/2;
-      path.setAttribute('d',`M${from.x},${from.y} C${mid},${from.y} ${mid},${to.y} ${to.x},${to.y}`);
+      const reach=Math.min(130,Math.max(36,(to.x-from.x)*0.5));
+      path.setAttribute('d',`M${from.x},${from.y} C${from.x+reach},${from.y} ${to.x-reach},${to.y} ${to.x},${to.y}`);
       const kind = ['running','produced','failed','interrupted','queued'].includes(status) ? status : 'neutral';
       path.setAttribute('class',`maitu-edge${kind==='neutral'?'':' maitu-edge--'+kind}`);
       path.setAttribute('marker-end',`url(#maitu-arrow-${kind})`);
@@ -416,6 +417,10 @@
     const id=selectedTask;
     const detail=await api(`/api/maitu/tasks/${id}`);
     if (selectedTask!==id) return;
+    // 内容未变时跳过重建，避免轮询打断面板内悬停与滚动。
+    const detailJson=JSON.stringify(detail);
+    if (detailJson===renderDetail.lastJson) return;
+    renderDetail.lastJson=detailJson;
     const panel=$('#maitu-detail');
     const oldScroll=panel.scrollTop;
     panel.replaceChildren();
@@ -631,14 +636,19 @@
         ?`${snapshot.activeTasks} 项执行中 · 容量 ${capacity}（`+usable.map(c=>`${c.label} ${load.get(c.key)||0}/${c.concurrency}`).join('，')+'）'
         :'先在设置中配置可用的模型连接';
       $('#maitu-project-status').textContent=`${snapshot.tasks.length} 个任务 · ${produced} 个已产出`;
-      renderMap(); renderSources(); await renderDetail();
+      // 快照无变化时跳过整棵 DOM 重建：避免 2 秒轮询打断悬停/过渡，详情面板单独拉取。
+      const snapshotJson=JSON.stringify(snapshot);
+      if (snapshotJson!==lastSnapshotJson) {
+        lastSnapshotJson=snapshotJson;
+        renderMap(); renderSources(); renderAttention();
+      }
+      await renderDetail();
       const code=snapshot.codeProject;
       $('#maitu-code-state').textContent=code
         ? code.sourceName+' · '+code.fileCount+' 个文件 · 当前采用版本 '+code.acceptedCommit.slice(0,12)+' · '+code.checks.map(check=>check.label).join('、')
         : '导入代码副本后，可以在图上真实修改代码并运行检查。';
       $('#maitu-import-code').hidden=Boolean(code);
       $('#maitu-export-code').hidden=!code;
-      renderAttention();
     } finally {refreshing=false;}
   }
 
