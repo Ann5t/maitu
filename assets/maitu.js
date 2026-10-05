@@ -185,24 +185,33 @@
         if (!connection.enabled) card.classList.add('is-disabled');
         const head = element('div','maitu-connection-head');
         head.append(
-          element('strong','',connection.label + ' '),
+          element('strong','',connection.label),
           element('span','maitu-note',connection.key + ' · ' + connection.model),
-          element('span','maitu-status ' + (connection.configured && connection.enabled ? 'maitu-status--produced' : 'maitu-status--failed'),
+          element('span','maitu-chip ' + (connection.configured && connection.enabled ? 'maitu-chip--produced' : 'maitu-chip--failed'),
             connection.configured ? (connection.enabled ? '已启用' : '已停用') : '待填写密钥')
         );
-        card.append(head, element('p','maitu-note',
-          `${connection.baseUrl} · 并发 ${connection.concurrency} · 上下文 ${connection.contextTokens.toLocaleString('en-US')} · 输出上限 ${connection.maxTokens.toLocaleString('en-US')} Token`));
+        card.append(head);
+        const meta = element('div','maitu-connection-meta');
+        for (const text of [connection.baseUrl,
+          '并发 ' + connection.concurrency,
+          '上下文 ' + connection.contextTokens.toLocaleString('en-US'),
+          '输出上限 ' + connection.maxTokens.toLocaleString('en-US')]) {
+          meta.append(element('span','maitu-chip',text));
+        }
+        card.append(meta);
         const actions = element('div','maitu-connection-actions');
         actions.append(button('编辑',() => setEditing(connection)));
         actions.append(button(connection.enabled ? '停用' : '启用', async () => {
           await api('/api/maitu/connections','POST',{...connection,enabled:!connection.enabled,apiKey:''});
           await load(); feedback(connection.enabled ? '连接已停用，其排队任务会等待其他连接。' : '连接已启用。');
         }));
-        actions.append(button('删除', async () => {
+        const remove = button('删除', async () => {
           if (!confirm(`删除连接「${connection.label}」？历史记录保留，但排队中的任务将等待其他连接。`)) return;
           await api(`/api/maitu/connections/${encodeURIComponent(connection.key)}`,'DELETE');
           await load(); feedback('连接已删除。');
-        }));
+        });
+        remove.classList.add('maitu-button--danger');
+        actions.append(remove);
         card.append(actions);
         list.append(card);
       }
@@ -302,7 +311,9 @@
       select.type='button'; select.dataset.selectTask=task.id;
       select.setAttribute('aria-pressed',String(task.id===selectedTask));
       const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
-      select.append(element('span',`maitu-status maitu-status--${task.status}`,`${kindName} · ${statusNames[task.status]||task.status}`),element('strong','',task.title),element('p','',task.waitReason||task.instruction));
+      const meta=element('span',`maitu-node-meta maitu-node-meta--${task.status}`);
+      meta.append(element('i',`maitu-dot maitu-dot--${task.status}`),element('span','',`${kindName} · ${statusNames[task.status]||task.status}`));
+      select.append(meta,element('strong','',task.title),element('p','',task.waitReason||task.instruction));
       select.addEventListener('click',()=>selectTask(task.id));
       node.append(select);
       const actions=element('div','maitu-node-actions');
@@ -382,10 +393,12 @@
     if (detail.task.acceptanceCriteria) panel.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
     if (detail.task.waitReason) panel.append(element('p','maitu-wait',detail.task.waitReason));
     if (!['running','queued'].includes(detail.task.status)) {
-      panel.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
-      panel.append(button('补充要求再执行',()=> {
+      const actions=element('div','maitu-detail-actions');
+      actions.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
+      actions.append(button('补充要求再执行',()=> {
         retryTaskId=id;retryRequestId=requestId();$('#maitu-retry-form').reset();$('#maitu-retry-dialog').showModal();
       }));
+      panel.append(actions);
     }
     panel.append(element('h3','','历次尝试'));
     if (!detail.attempts.length) panel.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
@@ -393,7 +406,9 @@
       const section=element('details','maitu-attempt');
       section.open=selectedAttempt ? selectedAttempt===attempt.id : attempt.id===detail.attempts[0].id;
       section.addEventListener('toggle',()=> {if(section.open) selectedAttempt=attempt.id;});
-      const summary=element('summary','',`第 ${attempt.number} 次 · ${statusNames[attempt.status]||attempt.status}${detail.task.acceptedAttemptId===attempt.id?' · 已采用':''}`);
+      const summary=element('summary','');
+      summary.append(element('span',`maitu-chip maitu-chip--${attempt.status}`,`第 ${attempt.number} 次 · ${statusNames[attempt.status]||attempt.status}`));
+      if(detail.task.acceptedAttemptId===attempt.id) summary.append(element('span','maitu-chip maitu-chip--adopted','已采用'));
       section.append(summary,element('p','maitu-note',`创建：${time(attempt.createdAt)}`));
       if (attempt.model) section.append(element('p','maitu-note',`模型：${attempt.model}${attempt.connectionKey?` · 连接：${attempt.connectionKey}`:''}`));
       if (attempt.requestStartedAt) section.append(element('p','maitu-note',`请求开始：${time(attempt.requestStartedAt)}`));

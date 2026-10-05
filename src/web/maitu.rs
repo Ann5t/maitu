@@ -21,6 +21,26 @@ use crate::{
 
 use super::AppState;
 
+fn icon_project() -> Markup {
+    html! {
+        svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
+            circle cx="5" cy="5.5" r="2.2" {}
+            circle cx="5" cy="14.5" r="2.2" {}
+            circle cx="15" cy="10" r="2.2" {}
+            path d="M7.1 6.4 12.9 9.1M7.1 13.6 12.9 10.9" {}
+        }
+    }
+}
+
+fn icon_connection() -> Markup {
+    html! {
+        svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
+            path d="M4 8a6 6 0 0 1 12 0v1.5a1.5 1.5 0 0 1-1.5 1.5h-1.6a1.4 1.4 0 0 0 0 2.8h.6a1.4 1.4 0 0 1 0 2.8H14a6.2 6.2 0 0 1-4.5-1.9" {}
+            path d="M4 8h2.4a1.4 1.4 0 0 1 0 2.8h-.6a1.4 1.4 0 0 0 0 2.8h1" {}
+        }
+    }
+}
+
 fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> Markup {
     html! {
         (DOCTYPE)
@@ -32,21 +52,21 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="icon" href="/assets/icon.svg";
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
-                script src="/assets/maitu.js?v=multi-connection-1" defer {}
+                script src="/assets/maitu.js?v=ui-2" defer {}
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
                     aside class="maitu-nav" {
                         a class="maitu-brand" href="/" { span class="maitu-brand-mark" aria-hidden="true" { "脉" } strong { "脉图" } }
-                        p class="maitu-nav-caption" { "让工作从一个节点继续" }
                         nav aria-label="主要导航" {
-                            a href="/" class=(if mode == "dashboard" || mode == "project" { "is-active" } else { "" }) { "◎ 项目" }
-                            a href="/maitu/settings" class=(if mode == "settings" { "is-active" } else { "" }) { "⚙ 模型连接" }
+                            a href="/" class=(if mode == "dashboard" || mode == "project" { "is-active" } else { "" }) { (icon_project()) span { "项目" } }
+                            a href="/maitu/settings" class=(if mode == "settings" { "is-active" } else { "" }) { (icon_connection()) span { "模型连接" } }
                         }
                         div class="maitu-nav-bottom" {
-                            p { "想法 → 任务图 → 成果" }
-                            button type="button" data-theme-set="light" aria-label="浅色主题" { "浅色" }
-                            button type="button" data-theme-set="dark" aria-label="深色主题" { "深色" }
+                            div class="maitu-theme-toggle" role="group" aria-label="颜色主题" {
+                                button type="button" data-theme-set="light" aria-label="浅色主题" { "浅色" }
+                                button type="button" data-theme-set="dark" aria-label="深色主题" { "深色" }
+                            }
                             a href="/legacy" { "早期工作台" }
                         }
                     }
@@ -75,17 +95,18 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> AppResult<Markup> 
         .sum();
     let content = html! {
         header class="maitu-page-head" {
-            div { p class="maitu-eyebrow" { "你的个人工作区" } h1 { "项目" } p { "把资料变成任务，让独立的工作同时推进。" } }
-            a class="maitu-link-button" href="/maitu/settings" {
-                @if usable > 0 { (connections.len()) " 个连接 · " (usable) " 个可用 · 最多 " (capacity) " 项并行" } @else { "连接模型 API" }
+            div { h1 { "项目" } p { "把资料变成任务，让独立的工作同时推进。" } }
+            a class="maitu-capacity" href="/maitu/settings" title="查看模型连接" {
+                @if usable > 0 { (connections.len()) " 个连接 · 最多 " (capacity) " 项并行" } @else { "连接模型 API" }
             }
         }
         section class="maitu-intake" aria-labelledby="maitu-intake-title" {
-            div { h2 id="maitu-intake-title" { "今天想推进什么？" } p { "先给项目一个目标，再添加资料和具体任务。" } }
+            h2 id="maitu-intake-title" { "今天想推进什么？" }
+            p { "给项目一个目标，创建后在任务图上添加资料和任务。" }
             form id="maitu-project-create" {
                 label class="maitu-sr-only" for="maitu-project-intent" { "项目目标" }
                 textarea id="maitu-project-intent" name="intent" required maxlength="16000" rows="3" placeholder="例如：整理我的旧项目，找出最值得继续推进的一条路线……" {}
-                button class="maitu-button maitu-button--primary" type="submit" { "创建项目 →" }
+                button class="maitu-button maitu-button--primary" type="submit" { "创建项目" }
             }
         }
         section aria-labelledby="maitu-projects-title" {
@@ -97,10 +118,21 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> AppResult<Markup> 
                     @for project in projects {
                         @let (total, running) = counts.get(&project.id).copied().unwrap_or_default();
                         a class="maitu-project-card" href=(format!("/maitu/projects/{}",project.id)) {
-                            div class="maitu-card-top" { span class="maitu-project-symbol" { "◎" } span { @if running > 0 { (running) " 个任务执行中" } @else { (total) " 个任务" } } }
+                            div class="maitu-card-top" {
+                                @if running > 0 {
+                                    span { i class="maitu-dot maitu-dot--running" aria-hidden="true" {} (running) " 个执行中" }
+                                } @else if total > 0 {
+                                    span { i class="maitu-dot" aria-hidden="true" {} (total) " 个任务" }
+                                } @else {
+                                    span { i class="maitu-dot" aria-hidden="true" {} "未添加任务" }
+                                }
+                            }
                             h3 { (&project.title) }
                             p { (&project.intent) }
-                            div class="maitu-card-bottom" { span { (project.updated_at.format("%Y-%m-%d")) } strong { "打开任务图 ↗" } }
+                            div class="maitu-card-bottom" {
+                                span { (project.updated_at.format("%Y-%m-%d")) }
+                                span class="maitu-card-open" { "打开" }
+                            }
                         }
                     }
                 }
@@ -120,15 +152,15 @@ pub async fn project_page(
             div { a class="maitu-back" href="/" { "← 全部项目" } h1 { (&project.title) } p { (&project.intent) } }
             div class="maitu-head-actions" {
                 span id="maitu-capacity" class="maitu-capacity" { "读取执行状态…" }
-                button id="maitu-generate-plan" type="button" class="maitu-button" { "生成推进计划" }
-                button id="maitu-start-ready" type="button" class="maitu-button" { "启动待执行任务" }
+                button id="maitu-generate-plan" type="button" class="maitu-button" { "生成计划" }
+                button id="maitu-start-ready" type="button" class="maitu-button" { "启动待执行" }
                 button id="maitu-new-task" type="button" class="maitu-button maitu-button--primary" { "+ 添加任务" }
             }
         }
         section id="maitu-code-project" class="maitu-code-project" {
             div { strong { "项目代码" } p id="maitu-code-state" class="maitu-note" { "可以导入代码副本，让节点真实修改并运行检查。" } }
             div class="maitu-head-actions" {
-                button id="maitu-import-code" type="button" class="maitu-button" { "导入代码文件夹" }
+                button id="maitu-import-code" type="button" class="maitu-button maitu-button--small" { "导入代码文件夹" }
                 a id="maitu-export-code" class="maitu-link-button" href=(format!("/api/maitu/projects/{id}/code/export")) hidden { "导出已采用代码" }
             }
         }
@@ -143,7 +175,7 @@ pub async fn project_page(
                     button id="maitu-zoom-out" type="button" class="maitu-button maitu-button--small" aria-label="缩小" { "−" }
                     span id="maitu-zoom-level" { "100%" }
                     button id="maitu-zoom-in" type="button" class="maitu-button maitu-button--small" aria-label="放大" { "+" }
-                    button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置视图" }
+                    button id="maitu-zoom-reset" type="button" class="maitu-button maitu-button--small" { "重置" }
                     button id="maitu-focus-selected" type="button" class="maitu-button maitu-button--small" { "聚焦所选" }
                 }
                 div class="maitu-legend" { span { i class="maitu-dot maitu-dot--running" {} "执行中" } span { i class="maitu-dot maitu-dot--produced" {} "已产出" } span { i class="maitu-dot maitu-dot--failed" {} "需要处理" } }
@@ -152,7 +184,7 @@ pub async fn project_page(
                     div id="maitu-map" class="maitu-map" {}
                 }
                 section class="maitu-sources" {
-                    div class="maitu-section-head" { h2 { "项目资料" } button id="maitu-add-source" type="button" class="maitu-button maitu-button--small" { "+ 添加资料" } }
+                    div class="maitu-section-head" { h2 { "项目资料" } button id="maitu-add-source" type="button" class="maitu-button maitu-button--small" { "＋ 添加资料" } }
                     div id="maitu-source-list" {}
                     p class="maitu-note" { "支持 UTF-8 文本文件。每次启动固定当时的资料，之后添加的内容留给下次执行。" }
                 }
@@ -252,7 +284,7 @@ pub async fn project_page(
 
 pub async fn settings() -> Markup {
     let content = html! {
-        header class="maitu-page-head" { div { p class="maitu-eyebrow" { "执行资源" } h1 { "模型连接" } p { "管理多个 API 连接。独立任务按连接并行执行；一个连接限流或失败时，其他连接继续工作。" } } }
+        header class="maitu-page-head" { div { h1 { "模型连接" } p { "管理多个 API 连接。独立任务按连接并行执行；一个连接限流或失败时，其他连接继续工作。" } } }
         section class="maitu-settings-panel" {
             div class="maitu-section-head" { h2 { "已保存的连接" } span id="maitu-connections-state" { "读取配置…" } }
             div id="maitu-connection-list" {}
