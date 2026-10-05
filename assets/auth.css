@@ -1,0 +1,58 @@
+/* 认证页面专用样式：与 maitu.css 同一套设计语言（MiSans、绿色主色、双主题）。 */
+@import url('fonts/misans.css');
+
+:root {
+  color-scheme: light;
+  --bg: #f4f6f3;
+  --panel: #ffffff;
+  --ink: #1d2b23;
+  --muted: #67746c;
+  --faint: #8d988f;
+  --line: #e3e8e2;
+  --line-strong: #ccd6cd;
+  --green: #16804f;
+  --green-deep: #0e6b40;
+  --green-ink: #116b42;
+  --tint: #e7f3ec;
+  --shadow-md: 0 2px 4px rgba(23, 38, 30, .04), 0 12px 32px -10px rgba(23, 38, 30, .16);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #10150f;
+  --panel: #191f1b;
+  --ink: #e5ece7;
+  --muted: #94a399;
+  --faint: #6e7d73;
+  --line: #2b362f;
+  --line-strong: #3d4a41;
+  --green: #63bd88;
+  --green-deep: #74c995;
+  --green-ink: #8bd6a9;
+  --tint: #213228;
+  --shadow-md: 0 24px 56px -12px rgba(0, 0, 0, .5);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 13.5px/1.68 "MiSans", "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+button, input { font: inherit; }
+h1, p { margin: 0; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: -.012em; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb, var(--tint) 60%, var(--bg)), var(--bg)); }
+.auth-card { width: min(400px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-md); padding: 32px 30px; }
+.eyebrow { color: var(--green-ink); font-size: 11px; font-weight: 600; letter-spacing: .12em; margin-bottom: 8px; }
+.auth-introduction { color: var(--muted); font-size: 13px; margin: 6px 0 20px; }
+.auth-form { display: grid; gap: 4px; }
+.auth-form label { display: grid; gap: 5px; margin: 9px 0; font-size: 12.5px; font-weight: 500; }
+.auth-form input { width: 100%; border: 1px solid var(--line-strong); border-radius: 8px; background: color-mix(in srgb, var(--panel) 60%, var(--bg)); color: var(--ink); padding: 8px 11px; min-height: 36px; transition: border-color .13s ease, box-shadow .13s ease; }
+.auth-form input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--tint); }
+.button { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 6px 14px; margin-top: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.button--primary { background: linear-gradient(180deg, #1e8d5b, var(--green-deep)); color: #fff; border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 2px rgba(14, 107, 64, .3); }
+[data-theme="dark"] .button--primary { color: #10231a; }
+.button:hover { filter: brightness(1.04); }
+.auth-secondary-link { display: block; margin-top: 16px; color: var(--faint); font-size: 12.5px; text-align: center; }
+.auth-secondary-link:hover { color: var(--green-ink); }
+.recovery-code-list { margin: 12px 0 0; padding-left: 1.4em; display: grid; gap: 4px; color: var(--ink); font: 12.5px/1.6 "Cascadia Mono", Consolas, monospace; letter-spacing: .04em; }
+.maitu-feedback, .error-text { color: var(--red, #b23a2b); font-size: 12.5px; margin: 8px 0 0; }

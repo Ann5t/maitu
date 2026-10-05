@@ -1,7 +1,6 @@
 mod goal_projection;
 mod handlers;
 mod maitu;
-mod views;
 
 use std::sync::Arc;
 
@@ -71,7 +70,6 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(security::tool_proxy_path),
         )
         .route("/", get(maitu::dashboard))
-        .route("/legacy", get(handlers::dashboard))
         .route("/maitu", get(maitu::dashboard))
         .route("/maitu/settings", get(maitu::settings))
         .route("/maitu/projects/{project_id}", get(maitu::project_page))
@@ -91,30 +89,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/maitu/tasks/{task_id}/cancel", post(maitu::cancel_task))
         .route("/api/maitu/tasks/{task_id}/accept", post(maitu::accept_output))
         .route("/api/maitu/tasks/{task_id}/attempts/{attempt_id}/diff", get(maitu::code_diff))
-        .route("/settings", get(handlers::settings_page))
-        .route("/ideas", get(handlers::ideas_page))
-        .route("/ideas/new", get(handlers::new_idea_page))
-        .route("/ideas/{idea_id}", get(handlers::idea_page))
-        .route("/ideas/commands", post(handlers::idea_command_form))
-        .route("/new", get(handlers::new_project_page))
-        .route("/projects", post(handlers::create_project_form))
-        .route("/projects/{project_id}", get(handlers::project_page))
-        .route(
-            "/projects/{project_id}/actions",
-            post(handlers::project_action_form),
-        )
-        .route(
-            "/projects/{project_id}/graph",
-            post(handlers::graph_action_form),
-        )
-        .route(
-            "/projects/{project_id}/goal-commands",
-            post(handlers::goal_command_form),
-        )
-        .route(
-            "/projects/{project_id}/sessions/{session_id}/plugin-install-requests",
-            post(handlers::plugin_install_request_form),
-        )
         .route("/artifacts/{artifact_id}", get(handlers::artifact_download))
         .route("/api/health", get(handlers::api_health))
         .route(

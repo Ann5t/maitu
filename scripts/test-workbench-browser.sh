@@ -71,25 +71,11 @@ docker run --rm --init --ipc=host --network "$browser_network" \
   --mount type=volume,src=fudian_playwright_npm_cache,dst=/root/.npm \
   "$browser_image" sh -c '
     npm install --prefix /tmp/pw --no-audit --no-fund @playwright/test@1.62.0 >/dev/null &&
-    cp /work/tests/browser/workbench.spec.js /tmp/pw/workbench.spec.js &&
-    cp /work/tests/browser/ideas.spec.js /tmp/pw/ideas.spec.js &&
     cp /work/tests/browser/maitu.spec.js /tmp/pw/maitu.spec.js &&
     cd /tmp/pw &&
-    ./node_modules/.bin/playwright test workbench.spec.js ideas.spec.js maitu.spec.js --reporter=line --workers=1
+    ./node_modules/.bin/playwright test maitu.spec.js --reporter=line --workers=1
   '
 
-test -s "$browser_screenshot_dir/goal-workbench-desktop.png"
-test -s "$browser_screenshot_dir/goal-workbench-tablet.png"
-test -s "$browser_screenshot_dir/goal-workbench-mobile.png"
-test -s "$browser_screenshot_dir/ideas-board-desktop.png"
-test -s "$browser_screenshot_dir/ideas-board-mobile.png"
-test -s "$browser_screenshot_dir/ideas-map-desktop.png"
-test -s "$browser_screenshot_dir/ideas-map-tablet.png"
-test -s "$browser_screenshot_dir/idea-detail-mobile.png"
-test -s "$browser_screenshot_dir/settings-desktop-dark.png"
-test -s "$browser_screenshot_dir/settings-mobile-light.png"
-test -s "$browser_screenshot_dir/projects-dashboard-desktop.png"
-test -s "$browser_screenshot_dir/projects-dashboard-mobile.png"
 test -s "$browser_screenshot_dir/maitu-graph-desktop.png"
 test -s "$browser_screenshot_dir/maitu-graph-mobile.png"
-echo "Chromium passed: Goal workbench plus Idea/ProjectProposal flow at desktop, tablet and mobile sizes"
+echo "Chromium passed: Maitu graph flow at desktop and mobile sizes"
