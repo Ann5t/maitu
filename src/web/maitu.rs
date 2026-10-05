@@ -32,6 +32,15 @@ fn icon_project() -> Markup {
     }
 }
 
+fn icon_idea() -> Markup {
+    html! {
+        svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
+            path d="M10 2.8a4.6 4.6 0 0 1 2.8 8.3c-.6.5-.9 1.1-1 1.9l-.1.5H8.3l-.1-.5c-.1-.8-.4-1.4-1-1.9A4.6 4.6 0 0 1 10 2.8z" {}
+            path d="M8.4 16.2h3.2M8.9 18h2.2" {}
+        }
+    }
+}
+
 fn icon_connection() -> Markup {
     html! {
         svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
@@ -41,7 +50,7 @@ fn icon_connection() -> Markup {
     }
 }
 
-fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> Markup {
+pub(crate) fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="zh-CN" {
@@ -53,6 +62,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
                 script src="/assets/maitu.js?v=ui-4" defer {}
+                @if mode == "ideas" || mode == "idea" { script src="/assets/maitu-ideas.js?v=2" defer {} }
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {
                 div class="maitu-shell" {
@@ -60,6 +70,7 @@ fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: Markup) -> 
                         a class="maitu-brand" href="/" { span class="maitu-brand-mark" aria-hidden="true" { "脉" } strong { "脉图" } }
                         nav aria-label="主要导航" {
                             a href="/" class=(if mode == "dashboard" || mode == "project" { "is-active" } else { "" }) { (icon_project()) span { "项目" } }
+                            a href="/maitu/ideas" class=(if mode == "ideas" || mode == "idea" { "is-active" } else { "" }) { (icon_idea()) span { "想法" } }
                             a href="/maitu/settings" class=(if mode == "settings" { "is-active" } else { "" }) { (icon_connection()) span { "模型连接" } }
                         }
                         div class="maitu-nav-bottom" {

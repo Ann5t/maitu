@@ -347,7 +347,28 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 Consolas, "
 [hidden] { display: none !important; }
 .maitu-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 
+/* ── 想法空间 ─────────────────────────── */
+.maitu-idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; }
+.maitu-idea-card p { font-size: 12px; }
+.maitu-page-head--idea h1 { font-size: 18px; }
+.maitu-idea-meta { font-size: 12px; }
+.maitu-idea-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.maitu-panel { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 18px; box-shadow: var(--shadow-sm); }
+.maitu-idea-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.75; overflow-wrap: anywhere; }
+.maitu-revision-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.maitu-revision { border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; background: var(--raised); }
+.maitu-revision-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.maitu-revision-head time { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.maitu-revision strong { font-size: 13px; }
+.maitu-link-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.maitu-link-row:last-child { border-bottom: none; }
+.maitu-link-row a { color: var(--green-ink); font-size: 12.5px; font-weight: 550; }
+.maitu-link-row a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
 /* ── 响应式 ───────────────────────────── */
+@media (max-width: 1150px) {
+  .maitu-idea-layout { grid-template-columns: minmax(0, 1fr); }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .maitu-dot--running { animation: none !important; }

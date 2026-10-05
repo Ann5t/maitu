@@ -1,0 +1,382 @@
+(() => {
+  'use strict';
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const mode = document.body.dataset.maituMode;
+  const ideaId = document.body.dataset.projectId;
+  const relationNames = {related:'有关联', supports:'支持', contradicts:'矛盾', depends_on:'依赖', duplicates:'重复'};
+  const proposalStates = {draft:'草稿', submitted:'待决策', awaiting_approval:'待决策', approved:'已立项', rejected:'已驳回', cancelled:'已取消'};
+  let snapshot;
+  let ideaList = [];
+
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function feedback(message, error = false) {
+    const node = $('#maitu-feedback');
+    node.textContent = message;
+    node.classList.toggle('is-error', error);
+    node.hidden = false;
+    clearTimeout(feedback.timer);
+    feedback.timer = setTimeout(() => {node.hidden = true;}, error ? 14000 : 5000);
+  }
+  function requestId() { return crypto.randomUUID(); }
+  async function api(path, method = 'GET', data, raw) {
+    const headers = {};
+    if (raw) headers['Content-Type'] = 'text/plain; charset=utf-8';
+    else if (data !== undefined) headers['Content-Type'] = 'application/json';
+    if (method !== 'GET') {
+      const status = await fetch('/auth/status').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+      if (status.csrfToken) headers['x-csrf-token'] = status.csrfToken;
+    }
+    let response;
+    try {
+      response = await fetch(path, {method, headers, body: raw ?? (data === undefined ? undefined : JSON.stringify(data)), credentials: 'same-origin'});
+    } catch { throw new Error('无法连接本机服务，请确认服务正在运行后重试。'); }
+    let value;
+    try {value = await response.json();} catch {throw new Error(`服务回复未能读取（HTTP ${response.status}），请刷新页面核对操作是否已经生效。`);}
+    if (!response.ok) throw new Error(typeof value?.error === 'string' ? value.error : `请求失败（HTTP ${response.status}），请稍后重试。`);
+    return value;
+  }
+  function handle(action) {
+    return async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {await action();} catch (error) {feedback(error.message, true);} finally {button.disabled = false;}
+    };
+  }
+  function button(text, action, variant = '') {
+    const node = element('button', `maitu-button maitu-button--small${variant ? ' ' + variant : ''}`, text);
+    node.type = 'button';
+    node.addEventListener('click', handle(action));
+    return node;
+  }
+  function chip(text, kind = '') { return element('span', `maitu-chip${kind ? ' maitu-chip--' + kind : ''}`, text); }
+  function time(value) {return value ? new Date(value).toLocaleString() : '—';}
+  function openDialog(title, body) {
+    const dialog = $('#maitu-idea-dialog') || $('#maitu-idea-create-dialog');
+    dialog.replaceChildren();
+    const head = element('div', 'maitu-section-head');
+    head.append(element('h2', '', title));
+    const close = element('button', 'maitu-close', '×');
+    close.type = 'button';
+    close.setAttribute('data-close-dialog', dialog.id);
+    close.setAttribute('aria-label', '关闭' + title);
+    close.addEventListener('click', () => dialog.close());
+    head.append(close);
+    dialog.append(head, body);
+    dialog.showModal();
+  }
+  function formRow(labelText, control) {
+    const label = element('label', '', labelText);
+    label.append(control);
+    return label;
+  }
+  function field(name, {tag = 'input', value = '', placeholder = '', rows = 3, required = true, options} = {}) {
+    const control = element(tag);
+    control.name = name;
+    if (tag === 'textarea') {control.rows = rows; control.textContent = value;}
+    else control.value = value;
+    if (placeholder) control.placeholder = placeholder;
+    control.required = required;
+    if (options) for (const [value, title] of options) {const option = element('option', '', title); option.value = value; control.append(option);}
+    return control;
+  }
+
+  document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.closeDialog).close()));
+
+  if (mode === 'ideas') {
+    async function load() {
+      const ideas = (await api('/api/v1/ideas')).ideas ?? [];
+      ideaList = ideas;
+      $('#maitu-ideas-count').textContent = ideas.length ? ideas.length + ' 条' : '';
+      const list = $('#maitu-idea-list');
+      list.replaceChildren();
+      if (!ideas.length) {
+        const empty = element('div', 'maitu-empty');
+        empty.append(element('strong', '', '还没有记录任何想法'), element('p', '', '从右上角记下第一条，之后可以关联、修订，成熟时立项。'));
+        list.append(empty);
+        return;
+      }
+      for (const idea of ideas) {
+        const card = element('a', 'maitu-project-card maitu-idea-card');
+        card.href = '/maitu/ideas/' + idea.id;
+        const top = element('div', 'maitu-card-top');
+        top.append(chip(idea.state === 'archived' ? '已归档' : '进行中', idea.state === 'archived' ? '' : 'maitu-chip--produced'));
+        if (idea.promotedProjectId) top.append(chip('已立项', 'maitu-chip--produced'));
+        card.append(top, element('h3', '', idea.title), element('p', '', idea.body));
+        const bottom = element('div', 'maitu-card-bottom');
+        const bits = [`第 ${idea.currentRevision} 版`];
+        if (idea.linkCount) bits.push(`${idea.linkCount} 条关联`);
+        if (idea.proposalCount) bits.push(`${idea.proposalCount} 次立项`);
+        bottom.append(element('span', '', bits.join(' · ')), element('span', '', new Date(idea.updatedAt).toLocaleDateString()));
+        card.append(bottom);
+        list.append(card);
+      }
+    }
+    $('#maitu-idea-new').addEventListener('click', () => $('#maitu-idea-create-dialog').showModal());
+    $('#maitu-idea-create').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = $('button[type="submit"]', form);
+      submit.disabled = true;
+      try {
+        const data = Object.fromEntries(new FormData(form));
+        const response = await api('/api/v1/ideas', 'POST', {
+          clientRequestId: requestId(), action: 'idea.create',
+          payload: {revision: {title: data.title, body: data.body, sourceKind: data.sourceKind, sourceRef: data.sourceRef || null}}
+        });
+        const id = response.result?.ideaId || response.result?.id;
+        if (!id) throw new Error('想法已提交，请刷新列表查看。');
+        location.assign('/maitu/ideas/' + id);
+      } catch (error) {feedback(error.message, true); submit.disabled = false;}
+    });
+    load().catch(error => feedback(error.message, true));
+  }
+
+  if (mode === 'idea') {
+    function command(action, payload, extraPath = '/commands') {
+      return api(`/api/v1/ideas/${ideaId}${extraPath}`, 'POST', {clientRequestId: requestId(), action, payload});
+    }
+    function proposalCommand(proposalId, action, payload) {
+      return api(`/api/v1/project-proposals/${proposalId}/commands`, 'POST', {clientRequestId: requestId(), action, payload});
+    }
+    function currentRevision() {
+      return snapshot.revisions.find(item => item.revision === snapshot.idea.currentRevision) || snapshot.revisions[0];
+    }
+    function renderHeader() {
+      const revision = currentRevision();
+      const idea = {...snapshot.idea, title: revision?.title || '未命名', body: revision?.body || ''};
+      document.title = idea.title + ' · 脉图';
+      $('#maitu-idea-title').textContent = idea.title;
+      $('#maitu-idea-meta').textContent = `第 ${idea.currentRevision} 版 · 更新于 ${time(idea.updatedAt)}`;
+      const state = $('#maitu-idea-state');
+      state.replaceChildren(chip(idea.state === 'archived' ? '已归档' : '进行中', idea.state === 'archived' ? '' : 'maitu-chip--produced'));
+      const actions = $('#maitu-idea-actions');
+      actions.replaceChildren();
+      const revise = button('修订内容', () => openReviseDialog(), 'maitu-button--primary');
+      revise.classList.remove('maitu-button--small');
+      actions.append(revise, button('关联想法', openLinkDialog), button('立项提案', openProposalDialog));
+      if (idea.state !== 'archived') actions.append(button('归档', async () => {
+        if (!confirm(`归档想法「${idea.title}」？历史修订保留，可随时在需要时查阅。`)) return;
+        await command('idea.archive', {reason: '手动归档'});
+        feedback('想法已归档。'); await load();
+      }, 'maitu-button--danger'));
+    }
+    function renderBody() {
+      const revision = snapshot.revisions.find(item => item.revision === snapshot.idea.currentRevision) || snapshot.revisions.at(-1);
+      const body = $('#maitu-idea-body');
+      body.textContent = revision?.body || snapshot.idea.body || '';
+      const sources = $('#maitu-idea-sources');
+      sources.replaceChildren();
+      if (snapshot.sources.length) {
+        const head = element('div', 'maitu-section-head');
+        head.append(element('h3', '', '已附来源'), button('添加文本来源', openSourceDialog));
+        const rows = element('div', '');
+        for (const source of snapshot.sources) {
+          const row = element('div', 'maitu-source-row');
+          row.append(element('strong', '', source.displayName || source.originalFilename),
+            element('span', '', (source.sizeBytes / 1024).toFixed(1) + ' KiB'));
+          rows.append(row);
+        }
+        sources.append(head, rows);
+      } else {
+        const head = element('div', 'maitu-section-head');
+        head.append(element('h3', '', '来源'), button('添加文本来源', openSourceDialog));
+        sources.append(head, element('p', 'maitu-note', '附加资料会随立项提案进入项目目标。'));
+      }
+    }
+    function renderHistory() {
+      const history = $('#maitu-idea-history');
+      history.replaceChildren();
+      const count = $('#maitu-idea-history-count');
+      count.textContent = `${snapshot.revisions.length} 次修订 · ${snapshot.links.length} 条关联 · ${snapshot.proposals.length} 次立项`;
+      const revisions = element('ol', 'maitu-revision-list');
+      for (const revision of [...snapshot.revisions].reverse()) {
+        const item = element('li', 'maitu-revision');
+        const head = element('div', 'maitu-revision-head');
+        head.append(chip(`第 ${revision.revision} 版`, revision.revision === snapshot.idea.currentRevision ? 'maitu-chip--produced' : ''), element('time', '', time(revision.createdAt)));
+        item.append(head, element('strong', '', revision.title));
+        if (revision.revisionReason) item.append(element('p', 'maitu-note', revision.revisionReason));
+        revisions.append(item);
+      }
+      history.append(revisions);
+      if (snapshot.links.length) {
+        const head = element('h3', '', '关联想法');
+        const list = element('div', '');
+        for (const link of snapshot.links) {
+          const row = element('div', 'maitu-link-row');
+          const other = link.sourceIdeaId === ideaId ? {id: link.targetIdeaId, title: link.targetTitle, revision: link.targetRevision} : {id: link.sourceIdeaId, title: link.sourceTitle, revision: link.sourceRevision};
+          row.append(chip(relationNames[link.relation] || link.relation),
+            element('a', '', `${other.title}（第 ${other.revision} 版）`));
+          row.lastChild.href = '/maitu/ideas/' + other.id;
+          if (link.rationale) row.append(element('span', 'maitu-note', link.rationale));
+          list.append(row);
+        }
+        history.append(head, list);
+      }
+      if (snapshot.proposals.length) {
+        history.append(element('h3', '', '立项提案'));
+        const list = element('div', '');
+        for (const proposal of snapshot.proposals) {
+          const revision = snapshot.proposalRevisions.filter(item => item.proposalId === proposal.id)
+            .find(item => item.revision === proposal.currentRevision);
+          const card = element('div', 'maitu-connection-card');
+          const head = element('div', 'maitu-connection-head');
+          head.append(element('strong', '', revision?.title || '立项提案'), chip(proposalStates[proposal.status] || proposal.status,
+            proposal.status === 'approved' ? 'maitu-chip--produced' : ['submitted', 'awaiting_approval'].includes(proposal.status) ? 'maitu-chip--queued' : proposal.status === 'rejected' ? 'maitu-chip--failed' : ''));
+          card.append(head, element('p', 'maitu-note', `${revision?.projectIntent || ''}${revision?.whyNow ? ' · ' + revision.whyNow : ''}`));
+          const actions = element('div', 'maitu-connection-actions');
+          if (proposal.status === 'draft') {
+            actions.append(button('提交评审', () => proposalCommand(proposal.id, 'project_proposal.submit', {expectedRevision: proposal.currentRevision}).then(refreshAfter)));
+            actions.append(button('取消提案', () => proposalCommand(proposal.id, 'project_proposal.cancel', {reason: '手动取消'}).then(refreshAfter), 'maitu-button--danger'));
+          }
+          if (['submitted', 'awaiting_approval'].includes(proposal.status)) {
+            actions.append(button('批准立项', () => proposalCommand(proposal.id, 'project_proposal.approve', {expectedRevision: proposal.currentRevision}).then(response => {
+              const projectId = response.result?.projectId;
+              feedback(projectId ? '提案已批准，正在打开新项目…' : '提案已批准。');
+              if (projectId) setTimeout(() => location.assign('/maitu/projects/' + projectId), 600);
+              return refreshAfter();
+            }), 'maitu-button--primary'));
+            actions.append(button('驳回', () => proposalCommand(proposal.id, 'project_proposal.reject', {rationale: '手动驳回'}).then(refreshAfter), 'maitu-button--danger'));
+          }
+          if (proposal.status === 'approved' && proposal.approvedProjectId) {
+            const open = element('a', 'maitu-button maitu-button--small', '打开项目 ↗');
+            open.href = '/maitu/projects/' + proposal.approvedProjectId;
+            actions.append(open);
+          }
+          card.append(actions);
+          list.append(card);
+        }
+        history.append(list);
+      }
+    }
+    function refreshAfter() { return load(); }
+
+    function openReviseDialog() {
+      const current = currentRevision();
+      const form = element('form', '');
+      form.append(
+        formRow('标题', field('title', {value: current?.title || ''})),
+        formRow('内容', field('body', {tag: 'textarea', value: current?.body || '', rows: 6})),
+        formRow('修订原因（可选）', field('revisionReason', {required: false, placeholder: '例如：补充了实现思路'})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '保存修订');
+      submit.type = 'submit';
+      form.append(submit);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        submit.disabled = true;
+        try {
+          const data = Object.fromEntries(new FormData(form));
+          await command('idea.revise', {expectedRevision: snapshot.idea.currentRevision, revision: {
+            title: data.title, body: data.body, sourceKind: 'text', sourceRef: null,
+            revisionReason: data.revisionReason || null
+          }});
+          $('#maitu-idea-dialog').close();
+          feedback('修订已保存。'); await load();
+        } catch (error) {feedback(error.message, true); submit.disabled = false;}
+      });
+      openDialog('修订想法', form);
+    }
+    function openLinkDialog() {
+      const form = element('form', '');
+      const others = ideaList.filter(item => item.id !== ideaId);
+      if (!others.length) {feedback('还没有其他想法可以关联，先多记录几条。'); return;}
+      form.append(
+        formRow('关联到', field('targetIdeaId', {options: others.map(item => [item.id, item.title])})),
+        formRow('关系', field('relation', {options: Object.entries(relationNames)})),
+        formRow('为什么这样关联？', field('rationale', {placeholder: '这个关联对后续判断有什么帮助'})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '保存关联');
+      submit.type = 'submit';
+      form.append(submit);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        submit.disabled = true;
+        try {
+          const data = Object.fromEntries(new FormData(form));
+          const target = others.find(item => item.id === data.targetIdeaId);
+          await command('idea.link', {
+            expectedSourceRevision: snapshot.idea.currentRevision,
+            targetIdeaId: data.targetIdeaId, expectedTargetRevision: target.currentRevision,
+            relation: data.relation, rationale: data.rationale
+          });
+          $('#maitu-idea-dialog').close();
+          feedback('关联已保存。'); await load();
+        } catch (error) {feedback(error.message, true); submit.disabled = false;}
+      });
+      openDialog('关联想法', form);
+    }
+    function openProposalDialog() {
+      const form = element('form', '');
+      const current = currentRevision();
+      form.append(
+        formRow('项目标题', field('title', {value: current?.title || ''})),
+        formRow('项目意图', field('projectIntent', {tag: 'textarea', value: current?.body || '', rows: 3, placeholder: '这个项目要达成什么'})),
+        formRow('为什么是现在', field('whyNow', {required: false, placeholder: '推动现在做的理由'})),
+        formRow('期望结果', field('desiredOutcome', {tag: 'textarea', rows: 2, placeholder: '什么事实代表完成'})),
+        formRow('硬性约束（每行一条）', field('hardConstraints', {tag: 'textarea', rows: 2, required: false})),
+        formRow('待澄清的未知（每行一条）', field('unknowns', {tag: 'textarea', rows: 2, required: false})),
+        formRow('验证计划（每行一条）', field('validationPlan', {tag: 'textarea', rows: 2, required: false})),
+        formRow('停止/完成条件（每行一条，至少一条）', field('stopConditions', {tag: 'textarea', rows: 2, placeholder: '什么情况下这项目算完成或应当停止'})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '创建立项提案');
+      submit.type = 'submit';
+      form.append(submit);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        submit.disabled = true;
+        try {
+          const data = Object.fromEntries(new FormData(form));
+          const lines = value => value.split('\n').map(item => item.trim()).filter(Boolean);
+          await command('project_proposal.create', {revision: {
+            title: data.title, projectIntent: data.projectIntent, whyNow: data.whyNow,
+            rootGoal: {
+              whyNeeded: data.whyNow,
+              contract: {
+                desiredOutcome: data.desiredOutcome, hardConstraints: lines(data.hardConstraints),
+                subjectivePreferences: [], unknowns: lines(data.unknowns), nonGoals: [],
+                validationPlan: lines(data.validationPlan), judgmentTriggers: [], stopConditions: lines(data.stopConditions),
+                expectedContributions: [], exploration: {mode: 'delivery', budgets: [], candidateOutputs: [], uncertaintyReduction: []}
+              },
+              expectedContributions: [], explorationPlan: [], contextInheritance: {}, toolRequirements: [], inferences: [], revisionReason: null
+            },
+            retainedNotes: [], omittedNotes: [],
+            sources: [{ideaId: ideaId, ideaRevision: snapshot.idea.currentRevision, role: 'source', rationale: '当前想法是立项来源'}],
+            revisionReason: null
+          }});
+          $('#maitu-idea-dialog').close();
+          feedback('立项提案已创建，提交评审后可批准立项。'); await load();
+        } catch (error) {feedback(error.message, true); submit.disabled = false;}
+      });
+      openDialog('立项提案', form);
+    }
+    function openSourceDialog() {
+      const form = element('form', '');
+      form.append(
+        formRow('文件名', field('filename', {value: '想法资料.txt'})),
+        formRow('内容', field('content', {tag: 'textarea', rows: 6})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '保存来源');
+      submit.type = 'submit';
+      form.append(submit);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        submit.disabled = true;
+        try {
+          const data = Object.fromEntries(new FormData(form));
+          const query = new URLSearchParams({client_request_id: requestId(), expected_revision: String(snapshot.idea.currentRevision), filename: data.filename});
+          await api(`/api/v1/ideas/${ideaId}/sources?${query}`, 'POST', undefined, data.content);
+          $('#maitu-idea-dialog').close();
+          feedback('来源已附加。'); await load();
+        } catch (error) {feedback(error.message, true); submit.disabled = false;}
+      });
+      openDialog('添加文本来源', form);
+    }
+    async function load() {
+      snapshot = await api(`/api/v1/ideas/${ideaId}`);
+      ideaList = (await api('/api/v1/ideas')).ideas ?? [];
+      renderHeader(); renderBody(); renderHistory();
+    }
+    load().catch(error => feedback(error.message, true));
+  }
+})();
