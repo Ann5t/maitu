@@ -10,23 +10,19 @@ use super::maitu::shell;
 pub async fn ideas_page() -> Markup {
     let content = html! {
         header class="maitu-page-head" {
-            div { h1 { "想法" } p { "记下尚未成形的方向，准备好时把其中一条变成项目。" } }
-            button id="maitu-idea-new" type="button" class="maitu-button maitu-button--primary" { "+ 记录想法" }
+            div { h1 { "想法" } }
+            button id="maitu-idea-new" type="button" class="maitu-button maitu-button--primary" { "+ 记想法" }
         }
         section aria-labelledby="maitu-ideas-title" {
-            div class="maitu-section-head" { h2 id="maitu-ideas-title" { "全部想法" } span id="maitu-ideas-count" { "读取中…" } }
+            div class="maitu-section-head" { h2 id="maitu-ideas-title" { "全部" } span id="maitu-ideas-count" { "读取中…" } }
             div id="maitu-idea-list" class="maitu-idea-grid" {}
         }
         dialog id="maitu-idea-create-dialog" class="maitu-dialog" {
             form id="maitu-idea-create" {
-                div class="maitu-section-head" { h2 { "记录想法" } button type="button" class="maitu-close" data-close-dialog="maitu-idea-create-dialog" aria-label="关闭记录想法" { "×" } }
-                label { "标题" input name="title" required maxlength="200" placeholder="一句话说清这个想法"; }
-                label { "内容" textarea name="body" required rows="5" maxlength="20000" placeholder="背景、动机、可能的做法……想到什么写什么。" {} }
-                div class="maitu-form-row" {
-                    label { "来源类型" select name="sourceKind" { option value="text" { "随手记录" } option value="link" { "链接" } } }
-                    label { "来源地址（可选）" input name="sourceRef" maxlength="500" placeholder="https://…"; }
-                }
-                button type="submit" class="maitu-button maitu-button--primary" { "保存想法" }
+                div class="maitu-section-head" { h2 { "记想法" } button type="button" class="maitu-close" data-close-dialog="maitu-idea-create-dialog" aria-label="关闭记录想法" { "×" } }
+                label { "标题" input name="title" required maxlength="200" placeholder="一句话"; }
+                label { "内容（可选）" textarea name="body" rows="3" maxlength="20000" {} }
+                button type="submit" class="maitu-button maitu-button--primary" { "保存" }
             }
         }
     };

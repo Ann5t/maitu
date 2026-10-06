@@ -164,24 +164,32 @@
     host.append(panel);
   }
 
-  function proposalRevisionFields(form, prefix = '') {
-    form.append(
-      formRow('目标标题', field('title', {placeholder: '这条分支要达成什么'})),
-      formRow('为什么需要', field('whyNeeded', {tag: 'textarea', rows: 2})),
-      formRow('期望结果', field('desiredOutcome', {tag: 'textarea', rows: 2})),
+  function goalForm(prefix = '') {
+    const form = element('form', '');
+    form.append(formRow('目标', field('goal', {tag: 'textarea', rows: 2, placeholder: '要达成什么、怎样算完成'})));
+    const advanced = element('details', 'maitu-advanced');
+    advanced.append(element('summary', '', '高级'));
+    advanced.append(
       formRow('硬性约束（每行一条）', field('hardConstraints', {tag: 'textarea', rows: 2, required: false})),
-      formRow('待澄清的未知（每行一条）', field('unknowns', {tag: 'textarea', rows: 2, required: false})),
+      formRow('未知（每行一条）', field('unknowns', {tag: 'textarea', rows: 2, required: false})),
       formRow('验证计划（每行一条）', field('validationPlan', {tag: 'textarea', rows: 2, required: false})),
-      formRow('停止/完成条件（每行一条，至少一条）', field('stopConditions', {tag: 'textarea', rows: 2, placeholder: '什么情况下这条分支算完成或应当停止'})));
+      formRow('停止/完成条件（每行一条）', field('stopConditions', {tag: 'textarea', rows: 2, required: false})));
+    form.append(advanced);
+    return form;
   }
   function contractFrom(data) {
     const toLines = value => value.split('\n').map(item => item.trim()).filter(Boolean);
+    const goalText = (data.goal || '').trim();
+    const [firstLine, ...rest] = goalText.split('\n');
     return {
-      whyNeeded: data.whyNeeded,
+      whyNeeded: firstLine || '',
       contract: {
-        desiredOutcome: data.desiredOutcome, hardConstraints: toLines(data.hardConstraints || ''),
+        desiredOutcome: rest.join('\n').trim() || firstLine || '',
+        hardConstraints: toLines(data.hardConstraints || ''),
         subjectivePreferences: [], unknowns: toLines(data.unknowns || ''), nonGoals: [],
-        validationPlan: toLines(data.validationPlan || ''), judgmentTriggers: [], stopConditions: toLines(data.stopConditions || ''),
+        validationPlan: toLines(data.validationPlan || '').length ? toLines(data.validationPlan || '') : ['使用中按真实任务验证'],
+        judgmentTriggers: [],
+        stopConditions: toLines(data.stopConditions || '').length ? toLines(data.stopConditions || '') : ['目标达成或明确放弃'],
         expectedContributions: [],
         exploration: {mode: 'delivery', budgets: [], candidateOutputs: [], uncertaintyReduction: []}
       },
@@ -189,15 +197,16 @@
     };
   }
   $('#maitu-goal-proposal-new').addEventListener('click', () => {
-    const form = element('form', '');
-    proposalRevisionFields(form);
-    bindDialog(form, '创建目标提案', async data => {
-      await goalCommand('proposal.create', {revision: contractFrom(data)});
+    const form = goalForm();
+    bindDialog(form, '创建提案', async data => {
+      const contract = contractFrom(data);
+      const title = contract.contract.desiredOutcome.slice(0, 24) || '目标提案';
+      await goalCommand('proposal.create', {revision: {...contract, title: data.goal.split('\n')[0].slice(0, 24) || title}});
       $('#maitu-goal-dialog').close();
-      feedback('提案已创建，提交评审后批准建枝。');
+      feedback('提案已创建，提交后批准建枝。');
       await refreshAfter();
     });
-    openGoalDialog('提出目标提案', form);
+    openGoalDialog('提出目标', form);
   });
 
   // ── 分支列表 ──
@@ -260,24 +269,24 @@
     workspace.append(panel);
   }
   function openContractRevision(branch, contract) {
-    const form = element('form', '');
-    form.append(
-      formRow('期望结果', field('desiredOutcome', {tag: 'textarea', value: contract.desiredOutcome, rows: 2})),
-      formRow('硬性约束（每行一条）', field('hardConstraints', {tag: 'textarea', value: lines(contract.hardConstraints).join('\n'), rows: 2, required: false})),
-      formRow('待澄清的未知（每行一条）', field('unknowns', {tag: 'textarea', value: lines(contract.unknowns).join('\n'), rows: 2, required: false})),
-      formRow('验证计划（每行一条）', field('validationPlan', {tag: 'textarea', value: lines(contract.validationPlan).join('\n'), rows: 2, required: false})),
-      formRow('修订理由', field('reason', {placeholder: '为什么调整契约'})));
-    bindDialog(form, '提交修订请求', async data => {
+    const form = goalForm();
+    form.elements.goal.value = contract.desiredOutcome;
+    const advanced = form.querySelector('.maitu-advanced');
+    advanced.querySelector('[name="hardConstraints"]').value = lines(contract.hardConstraints).join('\n');
+    advanced.querySelector('[name="unknowns"]').value = lines(contract.unknowns).join('\n');
+    advanced.querySelector('[name="validationPlan"]').value = lines(contract.validationPlan).join('\n');
+    form.append(formRow('修订理由', field('reason', {placeholder: '为什么调整'})));
+    bindDialog(form, '提交修订', async data => {
       await goalCommand('contract.propose_revision', {
         goalBranchId: branch.id, expectedContractVersionId: contract.id, proposedBySessionId: branch.headSessionId,
         ...contractFrom(data), reason: data.reason,
-        sourceAnnotations: [{fieldPath: '/', sourceKind: 'human_input', sourceRef: null, note: data.reason || '用户从工作台提出契约调整'}]
+        sourceAnnotations: [{fieldPath: '/', sourceKind: 'human_input', sourceRef: null, note: data.reason || '用户提出契约调整'}]
       });
       $('#maitu-goal-dialog').close();
-      feedback('契约修订请求已提交，等待决定。');
+      feedback('契约修订请求已提交。');
       await refreshAfter();
     });
-    openGoalDialog('提议契约修订', form);
+    openGoalDialog('契约修订', form);
   }
 
   function renderSession(workspace, branch, session) {
@@ -313,7 +322,7 @@
       const block = element('div', 'maitu-goal-gate');
       block.append(element('h4', '', '合入门禁'), statusChip(gateLabels, gate.status));
       if (gate.status === 'pending_ai_review') {
-        block.append(element('p', 'maitu-note', '等待持有 ActionLease 的独立 Review Worker 提交复核记录；完成后这里会出现人工决策按钮。'));
+        block.append(element('p', 'maitu-note', '等待独立 Review Worker 复核，完成后出现决策按钮。'));
         const decide = element('div', 'maitu-attention-actions');
         decide.append(button('撤回合入', () => goalCommand('merge.withdraw', {reviewGateId: gate.id, reason: '撤回本次合入', newEvidence: []}).then(refreshAfter)));
         block.append(decide);
@@ -358,39 +367,32 @@
   function openContribution(session) {
     const form = element('form', '');
     form.append(
-      formRow('类型', field('kind', {options: Object.entries(kindLabels)})),
-      formRow('标题', field('title', {placeholder: '一句话概括这条贡献'})),
-      formRow('内容', field('body', {tag: 'textarea', rows: 3})));
-    bindDialog(form, '添加贡献', async data => {
-      await goalCommand('session.add_contribution', {sessionId: session.id, kind: data.kind, title: data.title, body: data.body, artifactId: null, evidenceRefs: [], evidenceIds: [], supersedesId: null});
+      formRow('标题', field('title', {placeholder: '一句话'})),
+      formRow('内容', field('body', {tag: 'textarea', rows: 2})));
+    bindDialog(form, '添加', async data => {
+      await goalCommand('session.add_contribution', {sessionId: session.id, kind: 'finding', title: data.title, body: data.body, artifactId: null, evidenceRefs: [], evidenceIds: [], supersedesId: null});
       $('#maitu-goal-dialog').close();
       feedback('贡献已记录。'); await refreshAfter();
     });
-    openGoalDialog('添加贡献', form);
+    openGoalDialog('贡献', form);
   }
   function openEvidence(session) {
     const form = element('form', '');
     form.append(
-      formRow('类型', field('kind', {options: Object.entries(evidenceKinds)})),
-      formRow('立场', field('stance', {options: [['supports', '支持'], ['contradicts', '矛盾'], ['neutral', '中性']]})),
-      formRow('结论', field('claim', {placeholder: '证据说明什么'})),
-      formRow('观察', field('observation', {tag: 'textarea', rows: 2})),
-      formRow('来源（可选）', field('sourceUri', {required: false})));
-    bindDialog(form, '添加证据', async data => {
-      await goalCommand('session.add_evidence', {sessionId: session.id, kind: data.kind, stance: data.stance, claim: data.claim, observation: data.observation, sourceUri: data.sourceUri || null, artifactId: null, toolCallId: null, verificationStatus: 'unverified'});
+      formRow('说明什么', field('claim', {placeholder: '一句话'})),
+      formRow('观察', field('observation', {tag: 'textarea', rows: 2})));
+    bindDialog(form, '添加', async data => {
+      await goalCommand('session.add_evidence', {sessionId: session.id, kind: 'observation', stance: 'supports', claim: data.claim, observation: data.observation, sourceUri: null, artifactId: null, toolCallId: null, verificationStatus: 'unverified'});
       $('#maitu-goal-dialog').close();
       feedback('证据已记录。'); await refreshAfter();
     });
-    openGoalDialog('添加证据', form);
+    openGoalDialog('证据', form);
   }
   function openJudgment(session) {
     const form = element('form', '');
-    form.append(
-      formRow('问题', field('question', {placeholder: '需要人来判断什么'})),
-      formRow('候选（每行一个）', field('candidates', {tag: 'textarea', rows: 2, required: false})),
-      formRow('建议', field('recommendation', {required: false})));
-    bindDialog(form, '请求判断', async data => {
-      await goalCommand('session.request_judgment', {sessionId: session.id, question: data.question, candidates: (data.candidates || '').split('\n').map(item => item.trim()).filter(Boolean), evidence: null, recommendation: data.recommendation || null});
+    form.append(formRow('问题', field('question', {placeholder: '需要人判断什么'})));
+    bindDialog(form, '提交', async data => {
+      await goalCommand('session.request_judgment', {sessionId: session.id, question: data.question, candidates: [], evidence: null, recommendation: null});
       $('#maitu-goal-dialog').close();
       feedback('判断请求已提交。'); await refreshAfter();
     });
@@ -398,7 +400,7 @@
   }
   function openMerge(branch, session) {
     const contributions = snapshot.contributions.filter(item => item.sessionId === session.id);
-    if (!contributions.length) {feedback('该会话还没有贡献，先添加至少一条贡献再提议合入。', true); return;}
+    if (!contributions.length) {feedback('先添加至少一条贡献。', true); return;}
     const form = element('form', '');
     const checks = element('div', 'maitu-checks');
     for (const item of contributions) {
@@ -409,17 +411,15 @@
       checks.append(row);
     }
     const wrap = element('fieldset', '');
-    wrap.append(element('legend', '', '选择要合入的贡献'), checks);
-    form.append(wrap,
-      formRow('自检说明', field('selfCheck', {tag: 'textarea', rows: 2, placeholder: '为什么这批成果可以合入'})),
-      formRow('风险（每行一条）', field('risks', {tag: 'textarea', rows: 2, required: false})));
+    wrap.append(element('legend', '', '合入贡献'), checks);
+    form.append(wrap, formRow('自检（可选）', field('selfCheck', {tag: 'textarea', rows: 2, required: false, placeholder: '为什么可以合入'})));
     bindDialog(form, '提议合入', async (data, form) => {
       await goalCommand('merge.propose', {sessionId: session.id, candidate: {
         contributionIds: new FormData(form).getAll('contributionIds'), evidenceIds: [],
         contractVersionId: session.contractVersionId, gitBaseCommit: null, gitHeadCommit: null, gitDirty: false,
         environmentFingerprint: null,
-        testEvidence: [], risks: (data.risks || '').split('\n').map(item => item.trim()).filter(Boolean),
-        selfCheck: data.selfCheck
+        testEvidence: [], risks: [],
+        selfCheck: data.selfCheck || ''
       }});
       $('#maitu-goal-dialog').close();
       feedback('合入已提议，等待门禁决定。'); await refreshAfter();
@@ -428,15 +428,13 @@
   }
   function openNextSession(branch, previous) {
     const form = element('form', '');
-    form.append(
-      formRow('下一会话的任务', field('assignment', {placeholder: '接下来推进什么'})),
-      formRow('执行者（可选）', field('agentIdentity', {required: false, placeholder: '留给模型或自己'})));
-    bindDialog(form, '开启下一会话', async data => {
-      await goalCommand('session.start_next', {goalBranchId: branch.id, previousSessionId: previous.id, assignment: data.assignment, agentIdentity: data.agentIdentity || null});
+    form.append(formRow('任务', field('assignment', {placeholder: '接下来推进什么'})));
+    bindDialog(form, '开启', async data => {
+      await goalCommand('session.start_next', {goalBranchId: branch.id, previousSessionId: previous.id, assignment: data.assignment, agentIdentity: null});
       $('#maitu-goal-dialog').close();
       feedback('新会话已开启。'); await refreshAfter();
     });
-    openGoalDialog('开启下一会话', form);
+    openGoalDialog('下一会话', form);
   }
 
   function render() {

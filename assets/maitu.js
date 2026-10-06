@@ -653,6 +653,9 @@
   }
 
   if (mode==='project') {
+    $('#maitu-detail').addEventListener('click',event => {
+      if (event.target.classList?.contains('maitu-detail-instruction')) event.target.classList.toggle('is-open');
+    });
     mapZoom = layoutMemory().zoom || 1;
     $('#maitu-zoom-in').addEventListener('click',()=>setZoom(mapZoom*1.2));
     $('#maitu-zoom-out').addEventListener('click',()=>setZoom(mapZoom/1.2));

@@ -126,7 +126,7 @@
         const data = Object.fromEntries(new FormData(form));
         const response = await api('/api/v1/ideas', 'POST', {
           clientRequestId: requestId(), action: 'idea.create',
-          payload: {revision: {title: data.title, body: data.body, sourceKind: data.sourceKind, sourceRef: data.sourceRef || null}}
+          payload: {revision: {title: data.title, body: data.body || data.title, sourceKind: 'text', sourceRef: null}}
         });
         const id = response.result?.ideaId || response.result?.id;
         if (!id) throw new Error('想法已提交，请刷新列表查看。');
@@ -260,9 +260,8 @@
       const form = element('form', '');
       form.append(
         formRow('标题', field('title', {value: current?.title || ''})),
-        formRow('内容', field('body', {tag: 'textarea', value: current?.body || '', rows: 6})),
-        formRow('修订原因（可选）', field('revisionReason', {required: false, placeholder: '例如：补充了实现思路'})));
-      const submit = element('button', 'maitu-button maitu-button--primary', '保存修订');
+        formRow('内容', field('body', {tag: 'textarea', value: current?.body || '', rows: 4})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '保存');
       submit.type = 'submit';
       form.append(submit);
       form.addEventListener('submit', async event => {
@@ -271,24 +270,23 @@
         try {
           const data = Object.fromEntries(new FormData(form));
           await command('idea.revise', {expectedRevision: snapshot.idea.currentRevision, revision: {
-            title: data.title, body: data.body, sourceKind: 'text', sourceRef: null,
-            revisionReason: data.revisionReason || null
+            title: data.title, body: data.body, sourceKind: 'text', sourceRef: null, revisionReason: null
           }});
           $('#maitu-idea-dialog').close();
           feedback('修订已保存。'); await load();
         } catch (error) {feedback(error.message, true); submit.disabled = false;}
       });
-      openDialog('修订想法', form);
+      openDialog('修订', form);
     }
     function openLinkDialog() {
       const form = element('form', '');
       const others = ideaList.filter(item => item.id !== ideaId);
-      if (!others.length) {feedback('还没有其他想法可以关联，先多记录几条。'); return;}
+      if (!others.length) {feedback('还没有其他想法可以关联。'); return;}
       form.append(
         formRow('关联到', field('targetIdeaId', {options: others.map(item => [item.id, item.title])})),
         formRow('关系', field('relation', {options: Object.entries(relationNames)})),
-        formRow('为什么这样关联？', field('rationale', {placeholder: '这个关联对后续判断有什么帮助'})));
-      const submit = element('button', 'maitu-button maitu-button--primary', '保存关联');
+        formRow('说明（可选）', field('rationale', {required: false, placeholder: ''})));
+      const submit = element('button', 'maitu-button maitu-button--primary', '保存');
       submit.type = 'submit';
       form.append(submit);
       form.addEventListener('submit', async event => {
@@ -300,27 +298,24 @@
           await command('idea.link', {
             expectedSourceRevision: snapshot.idea.currentRevision,
             targetIdeaId: data.targetIdeaId, expectedTargetRevision: target.currentRevision,
-            relation: data.relation, rationale: data.rationale
+            relation: data.relation, rationale: data.rationale || ''
           });
           $('#maitu-idea-dialog').close();
           feedback('关联已保存。'); await load();
         } catch (error) {feedback(error.message, true); submit.disabled = false;}
       });
-      openDialog('关联想法', form);
+      openDialog('关联', form);
     }
     function openProposalDialog() {
-      const form = element('form', '');
       const current = currentRevision();
-      form.append(
-        formRow('项目标题', field('title', {value: current?.title || ''})),
-        formRow('项目意图', field('projectIntent', {tag: 'textarea', value: current?.body || '', rows: 3, placeholder: '这个项目要达成什么'})),
-        formRow('为什么是现在', field('whyNow', {required: false, placeholder: '推动现在做的理由'})),
-        formRow('期望结果', field('desiredOutcome', {tag: 'textarea', rows: 2, placeholder: '什么事实代表完成'})),
-        formRow('硬性约束（每行一条）', field('hardConstraints', {tag: 'textarea', rows: 2, required: false})),
-        formRow('待澄清的未知（每行一条）', field('unknowns', {tag: 'textarea', rows: 2, required: false})),
-        formRow('验证计划（每行一条）', field('validationPlan', {tag: 'textarea', rows: 2, required: false})),
-        formRow('停止/完成条件（每行一条，至少一条）', field('stopConditions', {tag: 'textarea', rows: 2, placeholder: '什么情况下这项目算完成或应当停止'})));
-      const submit = element('button', 'maitu-button maitu-button--primary', '创建立项提案');
+      const form = element('form', '');
+      form.append(formRow('目标', field('goal', {tag: 'textarea', rows: 2, placeholder: '这个项目要达成什么、怎样算完成', value: current?.title || ''})));
+      const advanced = element('details', 'maitu-advanced');
+      advanced.append(element('summary', '', '高级'));
+      const reasons = formRow('为什么是现在（可选）', field('whyNow', {required: false}));
+      advanced.append(reasons);
+      form.append(advanced);
+      const submit = element('button', 'maitu-button maitu-button--primary', '创建提案');
       submit.type = 'submit';
       form.append(submit);
       form.addEventListener('submit', async event => {
@@ -328,16 +323,20 @@
         submit.disabled = true;
         try {
           const data = Object.fromEntries(new FormData(form));
-          const lines = value => value.split('\n').map(item => item.trim()).filter(Boolean);
+          const goalText = data.goal.trim();
+          const [firstLine, ...rest] = goalText.split('\n');
+          const title = firstLine.slice(0, 60) || current?.title || '立项';
+          const desiredOutcome = rest.join('\n').trim() || firstLine;
           await command('project_proposal.create', {revision: {
-            title: data.title, projectIntent: data.projectIntent, whyNow: data.whyNow,
+            title, projectIntent: goalText, whyNow: data.whyNow || '',
             rootGoal: {
-              whyNeeded: data.whyNow,
+              whyNeeded: data.whyNow || firstLine,
               contract: {
-                desiredOutcome: data.desiredOutcome, hardConstraints: lines(data.hardConstraints),
-                subjectivePreferences: [], unknowns: lines(data.unknowns), nonGoals: [],
-                validationPlan: lines(data.validationPlan), judgmentTriggers: [], stopConditions: lines(data.stopConditions),
-                expectedContributions: [], exploration: {mode: 'delivery', budgets: [], candidateOutputs: [], uncertaintyReduction: []}
+                desiredOutcome, hardConstraints: [],
+                subjectivePreferences: [], unknowns: [], nonGoals: [],
+                validationPlan: ['使用中按真实任务验证'], judgmentTriggers: [], stopConditions: ['目标达成或明确放弃'],
+                expectedContributions: [],
+                exploration: {mode: 'delivery', budgets: [], candidateOutputs: [], uncertaintyReduction: []}
               },
               expectedContributions: [], explorationPlan: [], contextInheritance: {}, toolRequirements: [], inferences: [], revisionReason: null
             },
@@ -346,10 +345,10 @@
             revisionReason: null
           }});
           $('#maitu-idea-dialog').close();
-          feedback('立项提案已创建，提交评审后可批准立项。'); await load();
+          feedback('提案已创建，提交后可批准立项。'); await load();
         } catch (error) {feedback(error.message, true); submit.disabled = false;}
       });
-      openDialog('立项提案', form);
+      openDialog('立项', form);
     }
     function openSourceDialog() {
       const form = element('form', '');
