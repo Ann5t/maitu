@@ -116,6 +116,29 @@
   }
   function refreshAfter() { return load().then(render); }
 
+  const attentionKinds = {session_failed:'会话失败', judgment_requested:'等待判断', gate_decision:'门禁待决策', contract_revision:'契约待决', merge_conflict:'合入冲突'};
+  function attentionRow(item) {
+    const row = element('div', 'maitu-attention-row');
+    row.append(element('strong', '', item.title), chip(attentionKinds[item.kind] || item.kind, item.status === 'open' ? 'maitu-chip--queued' : ''));
+    if (item.reason) row.append(element('span', 'maitu-note', item.reason));
+    const actions = element('div', 'maitu-attention-actions');
+    if (item.goalBranchId) actions.append(button('查看分支', () => {selectedBranch = item.goalBranchId; render();}));
+    row.append(actions);
+    return row;
+  }
+  function renderAttention() {
+    const host = document.createElement('div');
+    const open = (snapshot.attentionItems || []).filter(item => item.status === 'open');
+    if (!open.length) return null;
+    const panel = element('div', 'maitu-attention');
+    const head = element('div', 'maitu-section-head');
+    head.append(element('h2', '', '需要处理'), element('span', '', open.length + ' 项'));
+    panel.append(head);
+    for (const item of open) panel.append(attentionRow(item));
+    host.append(panel);
+    return host;
+  }
+
   // ── 视图切换 ──
   const viewTasks = $('#maitu-view-tasks');
   const viewGoals = $('#maitu-view-goals');
@@ -149,6 +172,7 @@
       row.append(element('strong', '', label), statusChip(proposalLabels, proposal.status));
       const actions = element('div', 'maitu-attention-actions');
       if (proposal.status === 'draft') {
+        actions.append(button('编辑', () => openProposalRevise(proposal, revision)));
         actions.append(button('提交评审', () => goalCommand('proposal.submit', {proposalId: proposal.id, expectedRevision: proposal.currentRevision}).then(refreshAfter)));
       }
       if (['submitted', 'awaiting_approval'].includes(proposal.status)) {
@@ -196,6 +220,19 @@
       expectedContributions: [], explorationPlan: [], contextInheritance: {}, toolRequirements: [], inferences: [], revisionReason: null
     };
   }
+  function openProposalRevise(proposal, revision) {
+    const form = goalForm();
+    if (revision) form.elements.goal.value = (revision.contract?.desiredOutcome || revision.whyNeeded || '') + '\n' + (revision.whyNeeded || '');
+    bindDialog(form, '保存修订', async data => {
+      const contract = contractFrom(data);
+      await goalCommand('proposal.revise', {proposalId: proposal.id, expectedRevision: proposal.currentRevision,
+        revision: {...contract, title: data.goal.split('\n')[0].slice(0, 24) || '目标提案'}});
+      $('#maitu-goal-dialog').close();
+      feedback('提案已修订。'); await refreshAfter();
+    });
+    openGoalDialog('编辑提案', form);
+  }
+
   $('#maitu-goal-proposal-new').addEventListener('click', () => {
     const form = goalForm();
     bindDialog(form, '创建提案', async data => {
@@ -243,30 +280,53 @@
     return block;
   }
   function renderContract(workspace, branch) {
-    const contract = snapshot.contracts.find(item => item.id === branch.currentContractVersionId);
+    const versions = snapshot.contracts.filter(item => item.goalBranchId === branch.id).sort((a, b) => b.version - a.version);
+    const contract = versions.find(item => item.id === branch.currentContractVersionId);
     if (!contract) return;
     const panel = element('section', 'maitu-goal-card');
     const head = element('div', 'maitu-section-head');
     head.append(element('h3', '', `契约 · 第 ${contract.version} 版`));
     const actions = element('div', 'maitu-attention-actions');
-    actions.append(button('提议契约修订', () => openContractRevision(branch, contract)));
+    if (versions.length > 1) actions.append(button(`历史 ${versions.length} 版`, () => showContractHistory(branch, versions)));
+    actions.append(button('提议修订', () => openContractRevision(branch, contract)));
     head.append(actions);
     panel.append(head, element('p', 'maitu-detail-instruction', contract.desiredOutcome));
-    for (const [title, value] of [['硬性约束', lines(contract.hardConstraints)], ['未知', lines(contract.unknowns)], ['验证计划', lines(contract.validationPlan)], ['预期贡献', lines(contract.expectedContributions)]]) {
+    for (const [title, value] of [['硬性约束', lines(contract.hardConstraints)], ['未知', lines(contract.unknowns)], ['验证计划', lines(contract.validationPlan)], ['停止条件', lines(contract.stopConditions)], ['预期贡献', lines(contract.expectedContributions)]]) {
       const block = contractList(title, value);
       if (block) panel.append(block);
     }
     const pending = snapshot.contractRevisionRequests.find(item => item.goalBranchId === branch.id && item.status === 'awaiting_approval');
     if (pending) {
       const notice = element('div', 'maitu-wait');
-      notice.append(document.createTextNode('有一份契约修订待决定：' + (pending.reason || '')));
+      notice.append(document.createTextNode('契约修订待决定：' + (pending.reason || '')));
       const decide = element('div', 'maitu-attention-actions');
       decide.append(button('接受修订', () => goalCommand('contract.accept_revision', {revisionRequestId: pending.id, rationale: '接受修订'}).then(() => {feedback('契约修订已接受。'); return refreshAfter();})));
       decide.append(button('驳回', () => goalCommand('contract.reject_revision', {revisionRequestId: pending.id, rationale: '驳回修订'}).then(refreshAfter), 'maitu-button--danger'));
       notice.append(decide);
       panel.append(notice);
     }
+    const decisions = snapshot.contractRevisionDecisions.filter(item => {
+      const request = snapshot.contractRevisionRequests.find(r => r.id === item.revisionRequestId);
+      return request && request.goalBranchId === branch.id;
+    }).slice(-3).reverse();
+    for (const decision of decisions) {
+      panel.append(element('p', 'maitu-note', `修订${decision.decision === 'accepted' ? '已接受' : '已驳回'} · ${decision.actorRole} · ${decision.rationale || ''}`));
+    }
     workspace.append(panel);
+  }
+  function showContractHistory(branch, versions) {
+    const list = element('div', '');
+    for (const version of versions) {
+      const row = element('details', 'maitu-operation');
+      row.append(element('summary', '', `第 ${version.version} 版${version.id === branch.currentContractVersionId ? ' · 当前' : ''} · ${time(version.createdAt)}`));
+      row.append(element('p', 'maitu-note', version.desiredOutcome));
+      for (const [title, value] of [['硬性约束', lines(version.hardConstraints)], ['验证计划', lines(version.validationPlan)], ['停止条件', lines(version.stopConditions)]]) {
+        const block = contractList(title, value);
+        if (block) row.append(block);
+      }
+      list.append(row);
+    }
+    openGoalDialog('契约版本', list);
   }
   function openContractRevision(branch, contract) {
     const form = goalForm();
@@ -321,6 +381,30 @@
     for (const gate of gates) {
       const block = element('div', 'maitu-goal-gate');
       block.append(element('h4', '', '合入门禁'), statusChip(gateLabels, gate.status));
+      const meta = [];
+      if (gate.gitHeadCommit) meta.push('提交 ' + gate.gitHeadCommit.slice(0, 8));
+      if (gate.candidateDigest) meta.push('摘要 ' + gate.candidateDigest.slice(0, 8));
+      const risks = lines(gate.risks), tests = lines(gate.testEvidence);
+      if (meta.length || risks.length || tests.length || gate.selfCheck) {
+        const info = element('div', '');
+        if (meta.length) info.append(element('p', 'maitu-note', meta.join(' · ')));
+        if (tests.length) info.append(contractList('复测证据', tests));
+        if (risks.length) info.append(contractList('风险', risks));
+        const selfCheckText = typeof gate.selfCheck === 'string' ? gate.selfCheck : (gate.selfCheck?.selfCheck || gate.selfCheck?.summary || '');
+        if (selfCheckText) info.append(element('p', 'maitu-note', '自检：' + selfCheckText));
+        block.append(info);
+      }
+      const gateEvidence = (snapshot.reviewGateEvidence || []).filter(item => item.reviewGateId === gate.id)
+        .map(item => snapshot.evidence.find(e => e.id === item.evidenceId)).filter(Boolean);
+      if (gateEvidence.length) block.append(contractList('关联证据', gateEvidence.map(item => item.claim)));
+      const decisions = (snapshot.reviewDecisions || []).filter(item => item.reviewGateId === gate.id);
+      for (const decision of decisions) {
+        const row = element('div', 'maitu-link-row');
+        row.append(chip(decision.actorRole === 'ai_reviewer' ? 'AI 复核' : decision.actorRole === 'human' ? '人工' : decision.actorRole,
+          ['accept', 'accepted', 'recommend_accept'].includes(decision.decision) ? 'maitu-chip--produced' : ['reject', 'rejected', 'recommend_reject'].includes(decision.decision) ? 'maitu-chip--failed' : ''));
+        row.append(element('span', 'maitu-note', decision.rationale || decision.decision), element('time', '', time(decision.createdAt)));
+        block.append(row);
+      }
       if (gate.status === 'pending_ai_review') {
         block.append(element('p', 'maitu-note', '等待独立 Review Worker 复核，完成后出现决策按钮。'));
         const decide = element('div', 'maitu-attention-actions');
@@ -328,24 +412,37 @@
         block.append(decide);
       }
       if (gate.status === 'pending_human_review') {
+        const contributions = snapshot.contributions.filter(item => item.sessionId === session.id);
+        const checks = element('div', 'maitu-checks');
+        for (const item of contributions) {
+          const rowE = element('label');
+          const input = element('input');
+          input.type = 'checkbox'; input.name = 'gate-contributions'; input.value = item.id; input.checked = true;
+          rowE.append(input, element('span', '', `${kindLabels[item.kind] || item.kind} · ${item.title}`));
+          checks.append(rowE);
+        }
+        const wrap = element('fieldset', '');
+        wrap.append(element('legend', '', '选择合入的贡献'), checks);
+        block.append(wrap);
         const decide = element('div', 'maitu-attention-actions');
+        const selectedIds = () => [...block.querySelectorAll('[name="gate-contributions"]:checked')].map(input => input.value);
         decide.append(button('通过并合入', () => goalCommand('review.human_decide', {
-          reviewGateId: gate.id, decision: 'accept', rationale: '人工审核通过',
-          selectedContributionIds: snapshot.contributions.filter(item => item.sessionId === session.id).map(item => item.id)
+          reviewGateId: gate.id, decision: 'accept', rationale: '人工审核通过', selectedContributionIds: selectedIds()
         }).then(() => {feedback('门禁已通过，分支进入合入。'); return refreshAfter();})));
         decide.append(button('部分通过', () => goalCommand('review.human_decide', {
-          reviewGateId: gate.id, decision: 'partial_accept', rationale: '部分贡献合入',
-          selectedContributionIds: snapshot.contributions.filter(item => item.sessionId === session.id).map(item => item.id)
+          reviewGateId: gate.id, decision: 'partial_accept', rationale: '部分贡献合入', selectedContributionIds: selectedIds()
         }).then(refreshAfter)));
-        decide.append(button('驳回', () => goalCommand('review.human_decide', {reviewGateId: gate.id, decision: 'reject', rationale: '人工驳回'}).then(refreshAfter), 'maitu-button--danger'));
+        decide.append(button('驳回', () => goalCommand('review.human_decide', {reviewGateId: gate.id, decision: 'reject', rationale: '人工驳回', selectedContributionIds: []}).then(refreshAfter), 'maitu-button--danger'));
         decide.append(button('撤回合入', () => goalCommand('merge.withdraw', {reviewGateId: gate.id, reason: '撤回本次合入', newEvidence: []}).then(refreshAfter)));
         block.append(decide);
       }
-      const show = button('查看候选快照', () => showOutput('合入候选快照', JSON.stringify(gate.candidateSnapshot, null, 2)));
+      const show = button('候选快照', () => showOutput('合入候选快照', JSON.stringify(gate.candidateSnapshot, null, 2)));
       block.append(show);
       card.append(block);
     }
     const actions = element('div', 'maitu-goal-actions');
+    actions.append(button('上下文', () => openContextCatalog(session)));
+    actions.append(button('执行记录', () => openActionRuns(session)));
     if (session.status === 'running') {
       actions.append(button('添加贡献', () => openContribution(session)));
       actions.append(button('添加证据', () => openEvidence(session)));
@@ -362,6 +459,43 @@
     }
     card.append(actions);
     workspace.append(card);
+  }
+
+  async function openContextCatalog(session) {
+    const page = await api(`/api/v1/projects/${projectId}/sessions/${session.id}/context/entries?limit=50`);
+    const host = element('div', '');
+    const entries = page.entries || [];
+    if (!entries.length) host.append(element('p', 'maitu-note', '该会话还没有上下文目录。'));
+    for (const entry of entries) {
+      const row = element('button', 'maitu-link-row maitu-context-entry');
+      row.type = 'button';
+      row.append(chip(entry.sourceKind), element('strong', '', entry.title), element('span', 'maitu-note', entry.inclusionReason || ''));
+      row.addEventListener('click', () => readContextEntry(session, page.snapshotId, entry).catch(error => feedback(error.message, true)));
+      host.append(row);
+    }
+    openGoalDialog(`上下文 · ${entries.length} 条`, host);
+  }
+  async function readContextEntry(session, snapshotId, entry) {
+    const result = await api(`/api/v1/projects/${projectId}/sessions/${session.id}/context/read`, 'POST', {
+      clientRequestId: requestId(), snapshotId, entryId: entry.id, level: 'full', purpose: '用户查看上下文', query: null, actorType: 'human'
+    });
+    $('#maitu-goal-dialog').close();
+    const content = result?.content ?? result?.text ?? JSON.stringify(result, null, 2);
+    showOutput(entry.title, typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+  }
+  async function openActionRuns(session) {
+    const data = await api(`/api/v1/projects/${projectId}/sessions/${session.id}/action-runs`);
+    const host = element('div', '');
+    const runs = data.actions || [];
+    if (!runs.length) host.append(element('p', 'maitu-note', '该会话还没有执行记录。'));
+    for (const run of runs.slice(0, 30)) {
+      const row = element('details', 'maitu-operation');
+      row.append(element('summary', '', `${run.kind} · ${run.status} · 第 ${run.attemptCount} 次`));
+      if (run.lastErrorSummary) row.append(element('p', 'maitu-error', run.lastErrorSummary));
+      if (run.result) row.append(button('查看结果', () => showOutput(run.kind, JSON.stringify(run.result, null, 2))));
+      host.append(row);
+    }
+    openGoalDialog(`执行记录 · ${runs.length} 条`, host);
   }
 
   function openContribution(session) {
@@ -438,7 +572,9 @@
   }
 
   function render() {
+    const attention = renderAttention();
     renderProposals();
+    if (attention) $('#maitu-goals-proposals').prepend(attention);
     renderBranches();
     const summary = $('#maitu-goals-summary');
     summary.textContent = `${snapshot.branches.filter(item => ['active', 'waiting', 'review_pending'].includes(item.status)).length} 个活跃分支 · ${snapshot.sessions.filter(item => item.status === 'running').length} 个会话进行中`;
@@ -453,6 +589,20 @@
     renderContract(workspace, branch);
     const sessions = snapshot.sessions.filter(item => item.goalBranchId === branch.id).sort((a, b) => b.sessionNumber - a.sessionNumber);
     for (const session of sessions) renderSession(workspace, branch, session);
+    const integrations = (snapshot.integrations || []).filter(item => item.sourceGoalBranchId === branch.id);
+    if (integrations.length) {
+      const panel = element('section', 'maitu-goal-card');
+      panel.append(element('h3', '', `合入记录 · ${integrations.length} 次`));
+      for (const integration of integrations.slice().reverse()) {
+        const row = element('div', 'maitu-link-row');
+        const included = (snapshot.integrationContributions || []).filter(item => item.integrationId === integration.id);
+        row.append(chip(integration.gitIntegrationStatus === 'succeeded' ? 'maitu-chip--produced' : integration.gitIntegrationStatus === 'failed' ? 'maitu-chip--failed' : ''));
+        row.lastChild.textContent = integration.gitIntegrationStatus;
+        row.append(element('strong', '', integration.summary || integration.kind), element('span', 'maitu-note', `${included.length} 条贡献 · ${time(integration.createdAt)}`));
+        panel.append(row);
+      }
+      workspace.append(panel);
+    }
     const archive = element('div', 'maitu-goal-actions');
     archive.append(button('归档分支', () => { if (confirm(`归档分支「${branch.name}」？`)) return goalCommand('goal_branch.archive', {goalBranchId: branch.id, reason: '手动归档'}).then(() => {selectedBranch = null; return refreshAfter();}); }, 'maitu-button--danger'));
     workspace.append(archive);

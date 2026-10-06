@@ -402,6 +402,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 Consolas, "
 .maitu-contribution { border: 1px solid var(--line); border-radius: 9px; background: var(--raised); padding: 8px 11px; margin: 5px 0; }
 .maitu-contribution strong { font-size: 12px; }
 .maitu-contribution p { margin: 3px 0 0; }
+.maitu-context-entry { display: flex; width: 100%; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 7px 0; cursor: pointer; text-align: left; align-items: baseline; }
+.maitu-context-entry:hover strong { color: var(--green-ink); }
+.maitu-diff { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 Consolas, "Cascadia Mono", monospace; margin: 0 22px 20px; }
 
 @media (max-width: 1150px) {
   .maitu-idea-layout { grid-template-columns: minmax(0, 1fr); }
