@@ -40,6 +40,8 @@
 
 同一实例还用真实 Chromium 加载过一次：部署版 19 条非 API 的 GET 路由中，被访问的 13 个 HTML 页面全部 `200`，标题与 `h1` 正常，**没有控制台错误、失败请求或非 2xx 子资源**。做法是复用仓库自带的浏览器镜像（`npm install @playwright/test` 后用 `fudian_playwright_npm_cache`），加 `--network maitu_default` 只读访问，不登录、不提交表单；`/account/password` 的 500 是 HTTP 探测发现的，不是这些页面加载时发出的请求。因此运行版本在浏览器层面是健康的，已发现的缺陷集中在认证相关的边缘路径。
 
+运行实例仍有一处运行时缺陷，它在静态加载时不出现，需要在页面上切换视图再导航才会触发：镜像内 `assets/app.js` 的 `updateWithTransition` 调用 `document.startViewTransition` 后不处理返回的 `ready` 与 `finished`，视图切换被跳过或中断时会以 `Transition was skipped`、`Transition was aborted because of invalid state` 成为未捕获异常（`assets/app.js` 与 `main` 内容一致，所以这条不是分支特有的）。它由浏览器用例里新增的未捕获异常收集实测发现，修复提交为 `graph/browser-runtime-guard` 的 `bca79f2`。
+
 合并可行性用对象层 `git merge-tree --write-tree` 检验（不依赖工作树）：`graph/salvage-deployed-parity` 与 `execution/local-mode-auth-response`、`repo/line-endings`、`repo/maitu-backup-doc` 都能干净合并，且 `main` 是 `graph/salvage-deployed-parity` 的祖先，因此合入不需要解决冲突。
 
 `graph/remove-legacy-ui` 的失败单独查过。Rust 三个阶段（`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked --all-targets`）在该提交上全部通过；`docker build --target development`、`--target runner-runtime`、插件镜像构建与插件冒烟也全部通过。按 `quality-gate.sh` 的顺序把 20 个脚本跑完，17 个通过，**确定性失败只有 `test-security-https`（exit 1），原因就是那行旧断言**，与其它分支一致；`test-production-image`、`test-storage-reconciliation`、`test-secure-compose`、`test-real-plugins-http` 都通过。云端 run 72 报的 exit 101 用本机逐阶段复现不出来，该提交上可复现的失败是 exit 1。
