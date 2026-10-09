@@ -4,15 +4,19 @@ mod maitu;
 mod views;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     Router,
+    extract::Request,
     http::{HeaderName, HeaderValue},
     middleware,
+    response::Response,
     routing::{delete, get, post, put},
 };
 use sqlx::PgPool;
 use tower_http::{
+    classify::ServerErrorsFailureClass,
     compression::CompressionLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     services::ServeDir,
@@ -401,6 +405,31 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
         .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
         .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().on_failure(
+            // TraceLayer 的失败日志只带状态码与耗时，实测不会输出请求 span 里的
+            // method/uri；失败归因交给下面的 log_server_error 中间件，这里静音。
+            |_: ServerErrorsFailureClass, _: Duration, _: &tracing::Span| {},
+        ))
+        .layer(middleware::from_fn(log_server_error))
         .with_state(state)
+}
+
+/// 记录服务端错误的请求方法、路径与状态码。
+///
+/// TraceLayer 默认的失败日志只有状态码与耗时，线上出现 500 时无法判断是哪个请求
+/// 失败（实测确认 parent: span 也不会输出请求 span 里的字段）。这里显式记录方法、
+/// 路径（不含查询串）与状态码，让每一条 500 都能直接对应到端点。
+async fn log_server_error(request: Request, next: middleware::Next) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let response = next.run(request).await;
+    if response.status().is_server_error() {
+        tracing::error!(
+            method = %method,
+            path = %path,
+            status = response.status().as_u16(),
+            "HTTP 请求失败"
+        );
+    }
+    response
 }
