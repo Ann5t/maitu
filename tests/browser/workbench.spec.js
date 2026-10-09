@@ -115,6 +115,10 @@ test.use({
 
 test('goal branch workbench is operable on desktop and mobile', async ({ page }) => {
   test.setTimeout(60_000);
+  const errors = [];
+  const serverErrors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
   await page.goto('/new');
   await page.getByLabel('项目意图').fill('用 Chromium 验证目标枝干工作台');
   await page.getByRole('button', { name: '形成项目起点' }).click();
@@ -322,9 +326,15 @@ test('goal branch workbench is operable on desktop and mobile', async ({ page })
   expect(workbenchBox.x + workbenchBox.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(3200);
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-mobile.png`, fullPage: true });
+  expect(errors).toEqual([]);
+  expect(serverErrors).toEqual([]);
 });
 
 test('settings reports real AI status and persists explicit theme choice', async ({ page }) => {
+  const errors = [];
+  const serverErrors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
   await expect(page.getByText('AI 服务')).toBeVisible();
@@ -357,9 +367,15 @@ test('settings reports real AI status and persists explicit theme choice', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1200);
   await page.screenshot({ path: `${screenshotDir}/settings-mobile-light.png`, fullPage: true });
+  expect(errors).toEqual([]);
+  expect(serverErrors).toEqual([]);
 });
 
 test('project dashboard keeps the current work visually primary', async ({ page }) => {
+  const errors = [];
+  const serverErrors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
   await page.goto('/legacy');
   await expect(page.getByRole('heading', { name: '项目', level: 1 })).toBeVisible();
   await expect(page.locator('.side-nav a[href="/?view=artifacts"]')).toHaveCount(0);
@@ -373,4 +389,6 @@ test('project dashboard keeps the current work visually primary', async ({ page 
   await expect(page.locator('.mobile-nav')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   await page.screenshot({ path: `${screenshotDir}/projects-dashboard-mobile.png`, fullPage: true });
+  expect(errors).toEqual([]);
+  expect(serverErrors).toEqual([]);
 });
