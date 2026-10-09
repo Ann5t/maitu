@@ -32,6 +32,8 @@
 
 保留、修复质量门后合入、还是删除这些分支，都需要用户明确决定。`graph/ui-refresh` 的云端质量门已经通过但同样未合入。
 
+失败原因已经定位：这些分支把认证页的 h1 从「登录 Fudian」改成「登录脉图」（`src/security.rs`），但 `tests/browser/security.spec.js` 第 30 行仍断言旧文案。该 spec 由 `scripts/test-security-https.sh` 用 Playwright 执行，在 `scripts/quality-gate.sh` 中位于第 56 步，所以质量门是在最后阶段以 exit 1 失败，而 `graph/ui-refresh` 是这条链上最后一次绿色（run 70）。对照实验：在 `graph/reduce-text-friction` 的工作树上，该脚本失败并输出 `Expected substring "登录 Fudian"`、`Received string "登录脉图"`；只改这一行后同一脚本通过。修复提交在 `graph/salvage-deployed-workbench`（基点 `graph/reduce-text-friction`，提交 `adb20e1`），等待用户决定是否合入。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。
