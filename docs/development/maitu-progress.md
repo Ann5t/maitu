@@ -46,6 +46,8 @@
 
 `graph/remove-legacy-ui` 的失败单独查过。Rust 三个阶段（`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked --all-targets`）在该提交上全部通过；`docker build --target development`、`--target runner-runtime`、插件镜像构建与插件冒烟也全部通过。按 `quality-gate.sh` 的顺序把 20 个脚本跑完，17 个通过，**确定性失败只有 `test-security-https`（exit 1），原因就是那行旧断言**，与其它分支一致；`test-production-image`、`test-storage-reconciliation`、`test-secure-compose`、`test-real-plugins-http` 都通过。云端 run 72 报的 exit 101 用本机逐阶段复现不出来，该提交上可复现的失败是 exit 1。
 
+那个 101 现在有了新证据：**云端质量门在并发运行时会失败，与提交内容无关**。`ci.yml` 的 `concurrency` 组是 `quality-${{ github.workflow }}-${{ github.ref }}`，只取消同一分支的重复运行，**不同分支会同时跑两个重型质量门**。实例：run 96（`graph/browser-runtime-guard`，`9adc1f3`）与 run 97（纯文档的 `repo/deployed-vs-main`，`58768ef`）几乎同时启动（05:33:22Z 与 05:34:14Z），两者都失败——分别是 `.github:4922` exit 1 与 `.github:2095` exit 101——而同一个 `9adc1f3` 在没有并发时单独运行（run 98）完整通过。纯文档分支以 exit 101 死掉、且只用了 9.8 分钟（顺序通过时是 15~20 分钟），说明失败来自 CI 侧的下载或资源竞争，而不是提交。这也解释了 `graph/remove-legacy-ui` 的 exit 101 与本机复现不出来的原因。做法：并行推送多个分支后要单独重跑一次再判断红绿。
+
 同一批顺序运行中 `test-scheduler-http` 曾以 exit 22（HTTP 409）失败，但**在同一提交上单独重跑通过**，所以它是顺序或时序敏感的偶发失败，不能算这个分支的缺陷；记在这里以免下次误判成回归。另有一条本机测试限制：`test-backup-recovery.sh` 无法从 `git worktree` 运行，因为 worktree 的 `.git` 文件里是 Windows 绝对路径，脚本内的 git 调用报 `fatal: not a git repository`，这条要在主检出里跑。
 
 ## 目标到编码成果的真实验收
