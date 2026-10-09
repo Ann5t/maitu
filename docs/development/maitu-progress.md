@@ -36,6 +36,10 @@
 
 失败原因已经定位：这些分支把认证页的 h1 从「登录 Fudian」改成「登录脉图」（`src/security.rs`），但 `tests/browser/security.spec.js` 第 30 行仍断言旧文案。该 spec 由 `scripts/test-security-https.sh` 用 Playwright 执行，在 `scripts/quality-gate.sh` 中位于第 56 步，所以质量门是在最后阶段以 exit 1 失败，而 `graph/ui-refresh` 是这条链上最后一次绿色（run 70）。对照实验：在 `graph/reduce-text-friction` 的工作树上，该脚本失败并输出 `Expected substring "登录 Fudian"`、`Received string "登录脉图"`；只改这一行后同一脚本通过。修复提交在 `graph/salvage-deployed-workbench`（基点 `graph/reduce-text-friction`，提交 `adb20e1`），**云端完整质量门在 run 85 通过**。`graph/workbench-parity` 与 `graph/remove-legacy-ui` 也已经改名但同样残留旧断言，其中 `graph/remove-legacy-ui` 还在更早的 Rust 阶段以 exit 101 失败，需要单独定位。**与本机运行镜像对应的抢救分支是 `graph/salvage-deployed-parity`**（基点 `graph/workbench-parity`，提交 `eda0de6`），**云端完整质量门在 run 88 通过**；`graph/salvage-deployed-workbench` 只是同一条链上较早的状态，它的云端完整质量门在 run 85 通过。两者都等待用户决定是否合入。
 
+运行镜像本身也做过一次只读扫描：解析部署版 `src/web/mod.rs` 的 109 条路由，逐条请求其中 49 条含 GET 的路径，**唯一的 5xx 是 `GET /account/password`**。原因是该分支的 `password_page`、`password_submit`、`logout` 仍使用必需的 `Extension<AuthenticatedSession>` 提取器，在明确关闭身份系统时中间件不会插入扩展，参数提取先于处理函数执行，于是返回 500——与 `main` 上同一个缺陷同形，修复在 `execution/local-mode-auth-response`。
+
+合并可行性用对象层 `git merge-tree --write-tree` 检验（不依赖工作树）：`graph/salvage-deployed-parity` 与 `execution/local-mode-auth-response`、`repo/line-endings`、`repo/maitu-backup-doc` 都能干净合并，且 `main` 是 `graph/salvage-deployed-parity` 的祖先，因此合入不需要解决冲突。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。
