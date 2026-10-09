@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eEuo pipefail
 umask 077
+trap 'echo "备份失败：第 $LINENO 行的命令以非零状态退出：$BASH_COMMAND" >&2' ERR
 
 backup_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 backup_parent="${1:-$backup_repo_root/backups}"
@@ -160,7 +161,7 @@ if [[ -n "$backup_app_container" ]]; then
     | sed -n 's/^MAITU_CONFIG_ROOT=//p' | head -1)"
   [[ -n "$backup_credential_path" ]] || backup_credential_path="/data/maitu-config"
   backup_credential_volume="$(docker inspect -f '{{range .Mounts}}{{.Destination}}={{.Name}}{{"\n"}}{{end}}' "$backup_app_container" \
-    | grep -F "$backup_credential_path=" | head -1 | cut -d= -f2-)"
+    | grep -F "$backup_credential_path=" | head -1 | cut -d= -f2- || true)"
   [[ -n "$backup_credential_volume" ]] || backup_credential_volume="not-recorded"
 fi
 printf '%s\n' \
@@ -198,8 +199,12 @@ elif [[ "$backup_app_revision" == not-recorded ]]; then
   echo "提示：运行中的应用镜像没有源码修订标签，这次备份无法证明归档源码与运行镜像同源。" >&2
   echo "      用 scripts/start-local.ps1 或 compose.maitu.yaml 重新构建镜像后会带上该标签。" >&2
 fi
-if [[ "$backup_credential_volume" != not-recorded ]]; then
-  echo "提示：模型连接凭据存放在卷 $backup_credential_volume（容器内 $backup_credential_path），按设计不在本次备份内。" >&2
-  echo "      需要连同连接配置一起迁移或备份时，请单独复制该卷，并按凭据保管。" >&2
+if [[ "$backup_credential_path" != not-recorded ]]; then
+  echo "提示：模型连接凭据（若已配置）存放在容器内 $backup_credential_path，按设计不在本次备份内。" >&2
+  if [[ "$backup_credential_volume" != not-recorded ]]; then
+    echo "      对应卷为 $backup_credential_volume；需要连同连接配置一起迁移或备份时，请单独复制该卷，并按凭据保管。" >&2
+  else
+    echo "      需要连同连接配置一起迁移或备份时，请单独复制承载该路径的卷，并按凭据保管。" >&2
+  fi
 fi
 echo "备份完成并通过校验：$backup_final"
