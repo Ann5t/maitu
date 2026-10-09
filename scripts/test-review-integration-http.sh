@@ -18,9 +18,9 @@ cleanup_review_stack() {
     docker logs "$review_app" >&2 || true
   fi
   [[ "$review_app" == fudian-review-integration-app-* ]] \
-    && docker rm -f "$review_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$review_app" >/dev/null 2>&1 || true
   [[ "$review_db" == fudian-review-integration-db-* ]] \
-    && docker rm -f "$review_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$review_db" >/dev/null 2>&1 || true
   [[ "$review_network" == fudian-review-integration-test-* ]] \
     && docker network rm "$review_network" >/dev/null 2>&1 || true
   [[ "$review_tmp" == /tmp/tmp.* && -d "$review_tmp" ]] \

@@ -15,9 +15,9 @@ cleanup_input_stack() {
     docker logs "$input_app" >&2 || true
   fi
   [[ "$input_app" == fudian-input-app-* ]] \
-    && docker rm -f "$input_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$input_app" >/dev/null 2>&1 || true
   [[ "$input_db" == fudian-input-db-* ]] \
-    && docker rm -f "$input_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$input_db" >/dev/null 2>&1 || true
   [[ "$input_network" == fudian-input-test-* ]] \
     && docker network rm "$input_network" >/dev/null 2>&1 || true
   [[ "$input_tmp" == /tmp/tmp.* ]] && rm -rf "$input_tmp"

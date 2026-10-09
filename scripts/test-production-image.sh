@@ -15,9 +15,9 @@ cleanup_runtime_stack() {
     docker logs "$runtime_app" >&2 || true
   fi
   [[ "$runtime_app" == fudian-runtime-app-* ]] \
-    && docker rm -f "$runtime_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$runtime_app" >/dev/null 2>&1 || true
   [[ "$runtime_db" == fudian-runtime-db-* ]] \
-    && docker rm -f "$runtime_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$runtime_db" >/dev/null 2>&1 || true
   [[ "$runtime_network" == fudian-runtime-test-* ]] \
     && docker network rm "$runtime_network" >/dev/null 2>&1 || true
   [[ "$runtime_tmp" == /tmp/tmp.* ]] && rm -rf "$runtime_tmp"

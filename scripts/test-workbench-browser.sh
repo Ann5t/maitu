@@ -16,9 +16,9 @@ cleanup_browser_stack() {
     docker logs "$browser_app" >&2 || true
   fi
   [[ "$browser_app" == fudian-browser-app-* ]] \
-    && docker rm -f "$browser_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$browser_app" >/dev/null 2>&1 || true
   [[ "$browser_db" == fudian-browser-db-* ]] \
-    && docker rm -f "$browser_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$browser_db" >/dev/null 2>&1 || true
   [[ "$browser_network" == fudian-browser-test-* ]] \
     && docker network rm "$browser_network" >/dev/null 2>&1 || true
   return "$exit_status"

@@ -14,10 +14,10 @@ cleanup_context_http() {
     docker logs "$context_app" >&2 || true
   fi
   if [[ "$context_app" == fudian-context-http-app-* ]]; then
-    docker rm -f "$context_app" >/dev/null 2>&1 || true
+    docker rm -fv "$context_app" >/dev/null 2>&1 || true
   fi
   if [[ "$context_db" == fudian-context-http-db-* ]]; then
-    docker rm -f "$context_db" >/dev/null 2>&1 || true
+    docker rm -fv "$context_db" >/dev/null 2>&1 || true
   fi
   if [[ "$context_network" == fudian-context-http-test-* ]]; then
     docker network rm "$context_network" >/dev/null 2>&1 || true

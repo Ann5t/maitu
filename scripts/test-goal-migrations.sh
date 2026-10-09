@@ -7,7 +7,7 @@ migration_image="${POSTGRES_TEST_IMAGE:-postgres:17-alpine}"
 
 cleanup_migration_container() {
   if [[ "$migration_container" == fudian-goal-migration-test-* ]]; then
-    docker rm -f "$migration_container" >/dev/null 2>&1 || true
+    docker rm -fv "$migration_container" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup_migration_container EXIT

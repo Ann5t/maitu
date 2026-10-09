@@ -63,7 +63,7 @@ cleanup_recovery_test() {
     "$recovery_maitu_source_app" "$recovery_maitu_target_app" \
     "$recovery_maitu_source_db" "$recovery_maitu_target_db"; do
     if [[ "$recovery_container" == "$recovery_prefix"-* ]]; then
-      docker rm -f "$recovery_container" >/dev/null 2>&1 || true
+      docker rm -fv "$recovery_container" >/dev/null 2>&1 || true
     fi
   done
   if [[ "$recovery_network" == "$recovery_prefix"-* ]]; then
@@ -296,8 +296,9 @@ assert deployment["schemaVersion"] == 3
 assert deployment["secretValuesIncluded"] is False
 assert deployment["appImageRevision"] == "not-recorded", deployment
 assert deployment["sourceMatchesRunningImage"] is None, deployment
+# 该用例的应用容器不设 MAITU_CONFIG_ROOT、也不挂配置卷：路径取缺省值，卷名无法确定。
 assert deployment["credentialStoreIncluded"] is False, deployment
-assert deployment["credentialStorePath"] == "not-recorded", deployment
+assert deployment["credentialStorePath"] == "/data/maitu-config", deployment
 assert deployment["credentialStoreVolume"] == "not-recorded", deployment
 assert database["schemaMigrationCount"] == 12, database
 assert database["projects"] == 1 and database["goalBranches"] == 1
@@ -352,7 +353,7 @@ recovery_restored_digest="$(docker exec "$recovery_current_app" \
   sha256sum /data/artifacts/recovery/artifact.txt | awk '{print $1}')"
 [[ "$recovery_restored_digest" == "$recovery_artifact_digest" ]]
 
-docker rm -f "$recovery_current_app" >/dev/null
+docker rm -fv "$recovery_current_app" >/dev/null
 run_app "$recovery_rollback_app" "$recovery_old_image" recovery-target-db \
   "$recovery_target_artifacts" "$recovery_target_repositories" \
   "$recovery_target_worktrees" "$recovery_target_runner" ',readonly' >/dev/null

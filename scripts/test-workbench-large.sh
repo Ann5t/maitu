@@ -16,9 +16,9 @@ cleanup_large_stack() {
     docker logs "$large_app" >&2 || true
   fi
   [[ "$large_app" == fudian-workbench-large-app-* ]] \
-    && docker rm -f "$large_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$large_app" >/dev/null 2>&1 || true
   [[ "$large_db" == fudian-workbench-large-db-* ]] \
-    && docker rm -f "$large_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$large_db" >/dev/null 2>&1 || true
   [[ "$large_network" == fudian-workbench-large-test-* ]] \
     && docker network rm "$large_network" >/dev/null 2>&1 || true
   [[ "$large_tmp" == /tmp/tmp.* ]] && rm -rf "$large_tmp"

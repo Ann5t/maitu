@@ -10,10 +10,10 @@ idea_http_artifacts="$(mktemp -d)"
 
 cleanup_idea_http() {
   if [[ "$idea_http_app" == fudian-idea-http-app-* ]]; then
-    docker rm -f "$idea_http_app" >/dev/null 2>&1 || true
+    docker rm -fv "$idea_http_app" >/dev/null 2>&1 || true
   fi
   if [[ "$idea_http_db" == fudian-idea-http-db-* ]]; then
-    docker rm -f "$idea_http_db" >/dev/null 2>&1 || true
+    docker rm -fv "$idea_http_db" >/dev/null 2>&1 || true
   fi
   if [[ "$idea_http_network" == fudian-idea-http-test-* ]]; then
     docker network rm "$idea_http_network" >/dev/null 2>&1 || true
