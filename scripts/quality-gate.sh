@@ -17,6 +17,7 @@ trap cleanup_quality_gate EXIT
 cd "$quality_repo_root"
 
 ./scripts/check-docs.py
+./scripts/check-auth-page-contract.py
 
 docker pull postgres:17-alpine >/dev/null
 docker pull mcr.microsoft.com/playwright:v1.62.0-noble >/dev/null

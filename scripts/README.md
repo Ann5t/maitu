@@ -6,6 +6,7 @@
 
 - `quality-gate.sh`：本地与 CI 共用的完整质量门
 - `check-docs.py`：Markdown 标题和本地链接检查
+- `check-auth-page-contract.py`：认证页 `auth_page` 标题与 `security.spec.js` 的 `h1` 断言一致性检查
 
 ## 公共测试库
 
