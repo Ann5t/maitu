@@ -18,12 +18,20 @@ cd "$quality_repo_root"
 
 ./scripts/check-docs.py
 
-docker pull postgres:17-alpine >/dev/null
-docker pull mcr.microsoft.com/playwright:v1.62.0-noble >/dev/null
+fudian_retry_network docker pull postgres:17-alpine >/dev/null
+fudian_retry_network docker pull mcr.microsoft.com/playwright:v1.62.0-noble >/dev/null
 docker build --target development --tag fudian-nextgen-app:latest .
 docker build --target runner-runtime --tag fudian-nextgen-runner:latest .
 ./scripts/build-plugin-images.sh
 ./scripts/test-plugin-images.sh
+
+# 依赖下载是纯网络阶段：单独重试它，随后的 fmt/clippy/test 一律不重试。
+# 这样瞬时网络失败可以恢复，而真实的编译或断言失败不会被重试掩盖。
+fudian_retry_network docker run --rm \
+  --mount "type=bind,src=$quality_repo_root,dst=/app" \
+  --mount type=volume,src=fudian_rust_cargo_registry,dst=/usr/local/cargo/registry \
+  --mount type=volume,src=fudian_rust_cargo_git,dst=/usr/local/cargo/git \
+  fudian-nextgen-app:latest bash -euo pipefail -c 'cargo fetch --locked'
 
 docker run --rm \
   --mount "type=bind,src=$quality_repo_root,dst=/app" \
