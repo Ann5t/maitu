@@ -14,6 +14,14 @@ make check
 ./scripts/check-docs.py
 ```
 
+## Windows 上的检查环境
+
+`make check`、`./scripts/quality-gate.sh` 和 `scripts/` 下的专项检查都是 Bash，在 Windows 上须通过 WSL 或 Git Bash 执行。仓库用 `.gitattributes` 固定文本文件为 LF；旧检出若把脚本写成 CRLF，shebang 会变成 `#!/usr/bin/env bash\r`，执行时报 `env: $'bash\r': No such file or directory`。此时重新取出脚本即可恢复正确行尾：
+
+```bash
+git checkout -- scripts
+```
+
 ## 完整质量门
 
 ```bash
