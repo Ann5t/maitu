@@ -28,11 +28,13 @@
 
 本机的两次备份（`backups/20261009T010122Z` 与 `backups/20261009T013722Z`）也不含这段源码：它们的 `source.tar.gz` 取自执行备份时所在的 `main` 工作树，实测都没有 `/maitu/ideas`。备份固化的是数据库、四个内容卷与**当前工作树**，而不是运行镜像对应的源码；运行态源码目前只由远端这些分支保存。
 
-按提交时间，运行镜像最可能对应 `graph/reduce-text-friction`（`6e800db`，13:07）或其祖先；`graph/workbench-parity`（14:10）晚于构建时间，不可能在其中。这是时间窗推断，没有逐字比对页面内容，未作为结论。
+运行镜像对应哪个分支已经由资源指纹确定，**不再是推断**：镜像内 `/app/assets` 的八个文件（`maitu.css`、`maitu.js`、`maitu-ideas.js`、`maitu-goals.js`、`auth.css`、`app.css`、`interface.css`、`app.js`）按行尾归一化后与 `graph/workbench-parity`（`470fbc2`）**逐字节一致**；其它候选都不完全一致（`main` 与 `graph/ui-refresh` 匹配 3/5，`graph/remove-legacy-ui`、`graph/absorb-ideas`、`graph/absorb-goal-workbench` 匹配 4/6~4/8，`graph/reduce-text-friction` 匹配 5/8）。
+
+本节此前按提交时间推断为 `graph/reduce-text-friction`，并断定 `graph/workbench-parity` 晚于构建时间、不可能在其中，**那个推断是错的**：提交时间（14:10）晚于镜像构建时间（13:57）并不矛盾，代码先在工作树里存在、之后才提交。两个方法要点必须记住：镜像内的资源是 **CRLF**（镜像在 Windows 上从本地工作树构建），所以直接用 `git rev-parse` 的 blob 哈希比对会全部失配，连没改动过的 `theme.js` 也会失配，必须先归一化行尾；比对对象是 `docker cp` 取出的镜像内文件，已核对与 HTTP 响应字节数一致。资源一致足以确定构建树，但不能证明 `src/` 也逐字节相同——二进制无法这样比对。
 
 保留、修复质量门后合入、还是删除这些分支，都需要用户明确决定。`graph/ui-refresh` 的云端质量门已经通过但同样未合入。
 
-失败原因已经定位：这些分支把认证页的 h1 从「登录 Fudian」改成「登录脉图」（`src/security.rs`），但 `tests/browser/security.spec.js` 第 30 行仍断言旧文案。该 spec 由 `scripts/test-security-https.sh` 用 Playwright 执行，在 `scripts/quality-gate.sh` 中位于第 56 步，所以质量门是在最后阶段以 exit 1 失败，而 `graph/ui-refresh` 是这条链上最后一次绿色（run 70）。对照实验：在 `graph/reduce-text-friction` 的工作树上，该脚本失败并输出 `Expected substring "登录 Fudian"`、`Received string "登录脉图"`；只改这一行后同一脚本通过。修复提交在 `graph/salvage-deployed-workbench`（基点 `graph/reduce-text-friction`，提交 `adb20e1`），**云端完整质量门在 run 85 通过**，等待用户决定是否合入。`graph/workbench-parity` 与 `graph/remove-legacy-ui` 也已经改名但同样残留旧断言，其中 `graph/remove-legacy-ui` 还在更早的 Rust 阶段以 exit 101 失败，需要单独定位。
+失败原因已经定位：这些分支把认证页的 h1 从「登录 Fudian」改成「登录脉图」（`src/security.rs`），但 `tests/browser/security.spec.js` 第 30 行仍断言旧文案。该 spec 由 `scripts/test-security-https.sh` 用 Playwright 执行，在 `scripts/quality-gate.sh` 中位于第 56 步，所以质量门是在最后阶段以 exit 1 失败，而 `graph/ui-refresh` 是这条链上最后一次绿色（run 70）。对照实验：在 `graph/reduce-text-friction` 的工作树上，该脚本失败并输出 `Expected substring "登录 Fudian"`、`Received string "登录脉图"`；只改这一行后同一脚本通过。修复提交在 `graph/salvage-deployed-workbench`（基点 `graph/reduce-text-friction`，提交 `adb20e1`），**云端完整质量门在 run 85 通过**。`graph/workbench-parity` 与 `graph/remove-legacy-ui` 也已经改名但同样残留旧断言，其中 `graph/remove-legacy-ui` 还在更早的 Rust 阶段以 exit 101 失败，需要单独定位。**与本机运行镜像对应的抢救分支是 `graph/salvage-deployed-parity`**（基点 `graph/workbench-parity`，提交 `eda0de6`）；`graph/salvage-deployed-workbench` 只是同一条链上较早的状态。两者都等待用户决定是否合入。
 
 ## 目标到编码成果的真实验收
 
