@@ -27,7 +27,7 @@ for (const [name, viewport] of sizes) {
       if (url.startsWith('http://')) insecureRequests.push(url);
     });
     await page.goto('/auth/login');
-    await expect(page.locator('h1')).toContainText('登录 Fudian');
+    await expect(page.locator('h1')).toContainText('登录脉图');
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(password);
     await Promise.all([

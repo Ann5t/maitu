@@ -1,6 +1,7 @@
 mod goal_projection;
 mod handlers;
 mod maitu;
+mod maitu_ideas;
 mod views;
 
 use std::sync::Arc;
@@ -74,6 +75,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/legacy", get(handlers::dashboard))
         .route("/maitu", get(maitu::dashboard))
         .route("/maitu/settings", get(maitu::settings))
+        .route("/maitu/ideas", get(maitu_ideas::ideas_page))
+        .route("/maitu/ideas/{idea_id}", get(maitu_ideas::idea_page))
         .route("/maitu/projects/{project_id}", get(maitu::project_page))
         .route("/api/maitu/connections", get(maitu::connections).post(maitu::save_connection))
         .route("/api/maitu/connections/{key}", delete(maitu::delete_connection))

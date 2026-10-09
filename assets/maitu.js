@@ -16,6 +16,7 @@
   let retryTaskId;
   let retryRequestId;
   let refreshing = false;
+  let lastSnapshotJson = '';
   let initialMapLayout = true;
   let mapZoom = 1;
   let adoptTaskId;
@@ -185,24 +186,33 @@
         if (!connection.enabled) card.classList.add('is-disabled');
         const head = element('div','maitu-connection-head');
         head.append(
-          element('strong','',connection.label + ' '),
+          element('strong','',connection.label),
           element('span','maitu-note',connection.key + ' · ' + connection.model),
-          element('span','maitu-status ' + (connection.configured && connection.enabled ? 'maitu-status--produced' : 'maitu-status--failed'),
+          element('span','maitu-chip ' + (connection.configured && connection.enabled ? 'maitu-chip--produced' : 'maitu-chip--failed'),
             connection.configured ? (connection.enabled ? '已启用' : '已停用') : '待填写密钥')
         );
-        card.append(head, element('p','maitu-note',
-          `${connection.baseUrl} · 并发 ${connection.concurrency} · 上下文 ${connection.contextTokens.toLocaleString('en-US')} · 输出上限 ${connection.maxTokens.toLocaleString('en-US')} Token`));
+        card.append(head);
+        const meta = element('div','maitu-connection-meta');
+        for (const text of [connection.baseUrl,
+          '并发 ' + connection.concurrency,
+          '上下文 ' + connection.contextTokens.toLocaleString('en-US'),
+          '输出上限 ' + connection.maxTokens.toLocaleString('en-US')]) {
+          meta.append(element('span','maitu-chip',text));
+        }
+        card.append(meta);
         const actions = element('div','maitu-connection-actions');
         actions.append(button('编辑',() => setEditing(connection)));
         actions.append(button(connection.enabled ? '停用' : '启用', async () => {
           await api('/api/maitu/connections','POST',{...connection,enabled:!connection.enabled,apiKey:''});
           await load(); feedback(connection.enabled ? '连接已停用，其排队任务会等待其他连接。' : '连接已启用。');
         }));
-        actions.append(button('删除', async () => {
+        const remove = button('删除', async () => {
           if (!confirm(`删除连接「${connection.label}」？历史记录保留，但排队中的任务将等待其他连接。`)) return;
           await api(`/api/maitu/connections/${encodeURIComponent(connection.key)}`,'DELETE');
           await load(); feedback('连接已删除。');
-        }));
+        });
+        remove.classList.add('maitu-button--danger');
+        actions.append(remove);
         card.append(actions);
         list.append(card);
       }
@@ -259,6 +269,19 @@
     memo.set(taskId, depth);
     return depth;
   }
+  function kindIcon(kind) {
+    // 图标只用 rect/line/polyline：测试以「#maitu-map svg path」数量断言连线数，不能混入 path。
+    const shapes = {
+      file: '<rect x="3" y="2" width="10" height="12" rx="1.5"/><polyline points="9,2 9,6 13,6"/><line x1="5.5" y1="9.5" x2="10.5" y2="9.5"/><line x1="5.5" y1="12" x2="8.5" y2="12"/>',
+      code: '<polyline points="5.5,4.5 2.5,8 5.5,11.5"/><polyline points="10.5,4.5 13.5,8 10.5,11.5"/>',
+      plan: '<line x1="5.5" y1="3.5" x2="14" y2="3.5"/><line x1="5.5" y1="8" x2="14" y2="8"/><line x1="5.5" y1="12.5" x2="14" y2="12.5"/><polyline points="2,3.2 2.9,4.1 4.6,2.9"/><polyline points="2,7.7 2.9,8.6 4.6,7.4"/><polyline points="2,12.2 2.9,13.1 4.6,11.9"/>'
+    };
+    const span = document.createElement('span');
+    span.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + (shapes[kind] || shapes.file) + '</svg>';
+    return span;
+  }
+
   function renderMap() {
     const map = $('#maitu-map');
     const previousFocus = document.activeElement?.dataset.selectTask;
@@ -286,11 +309,28 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
     svg.setAttribute('width',width); svg.setAttribute('height',height); svg.setAttribute('aria-hidden','true');
     svg.classList.add('maitu-edges');
-    function edge(from,to) {
+    const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+    for (const status of ['neutral','running','produced','failed','interrupted','queued']) {
+      const marker = document.createElementNS('http://www.w3.org/2000/svg','marker');
+      marker.setAttribute('id',`maitu-arrow-${status}`);
+      marker.setAttribute('viewBox','0 0 8 8');
+      marker.setAttribute('refX','7'); marker.setAttribute('refY','4');
+      marker.setAttribute('markerWidth','6.5'); marker.setAttribute('markerHeight','6.5');
+      marker.setAttribute('orient','auto-start-reverse');
+      const arrow = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+      arrow.setAttribute('points','0,0.8 7.2,4 0,7.2');
+      arrow.setAttribute('class',`maitu-edge-arrow${status==='neutral'?'':'--'+status}`);
+      marker.append(arrow); defs.append(marker);
+    }
+    svg.append(defs);
+    function edge(from,to,status) {
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-      const mid = (from.x+to.x)/2;
-      path.setAttribute('d',`M${from.x},${from.y} C${mid},${from.y} ${mid},${to.y} ${to.x},${to.y}`);
-      path.setAttribute('class','maitu-edge'); svg.append(path);
+      const reach=Math.min(130,Math.max(36,(to.x-from.x)*0.5));
+      path.setAttribute('d',`M${from.x},${from.y} C${from.x+reach},${from.y} ${to.x-reach},${to.y} ${to.x},${to.y}`);
+      const kind = ['running','produced','failed','interrupted','queued'].includes(status) ? status : 'neutral';
+      path.setAttribute('class',`maitu-edge${kind==='neutral'?'':' maitu-edge--'+kind}`);
+      path.setAttribute('marker-end',`url(#maitu-arrow-${kind})`);
+      svg.append(path);
     }
     map.prepend(svg);
     for (const task of snapshot.tasks) {
@@ -302,7 +342,9 @@
       select.type='button'; select.dataset.selectTask=task.id;
       select.setAttribute('aria-pressed',String(task.id===selectedTask));
       const kindName={file:'资料',plan:'计划',code:'编码'}[task.taskKind]||'资料';
-      select.append(element('span',`maitu-status maitu-status--${task.status}`,`${kindName} · ${statusNames[task.status]||task.status}`),element('strong','',task.title),element('p','',task.waitReason||task.instruction));
+      const meta=element('span',`maitu-node-meta maitu-node-meta--${task.status}`);
+      meta.append(kindIcon(task.taskKind),element('i',`maitu-dot maitu-dot--${task.status}`),element('span','',`${kindName} · ${statusNames[task.status]||task.status}`));
+      select.append(meta,element('strong','',task.title),element('p','',task.waitReason||task.instruction));
       select.addEventListener('click',()=>selectTask(task.id));
       node.append(select);
       const actions=element('div','maitu-node-actions');
@@ -313,10 +355,10 @@
     }
     for(const position of locations.values()) position.height=position.node.getBoundingClientRect().height;
     height=380;
-    for(const tasks of columns.values()) {
+      for(const tasks of columns.values()) {
       let y=35;
       for(const task of tasks) {
-        const position=locations.get(task.id);position.y=y;position.node.style.top=y+'px';y+=position.height+26;
+        const position=locations.get(task.id);position.y=y;position.node.style.top=y+'px';y+=position.height+34;
       }
       height=Math.max(height,y+30);
     }
@@ -326,10 +368,10 @@
       const position=locations.get(task.id);
       const target={x:position.x,y:position.y+position.height/2};
       const parents=snapshot.dependencies.filter(item=>item.taskId===task.id);
-      if(!parents.length) edge({x:272,y:height/2},target);
+      if(!parents.length) edge({x:272,y:height/2},target,task.status);
       for(const parent of parents) {
         const previous=locations.get(parent.parentTaskId);
-        edge({x:previous.x+248,y:previous.y+previous.height/2},target);
+        edge({x:previous.x+248,y:previous.y+previous.height/2},target,task.status);
       }
     }
     if (!snapshot.tasks.length) {
@@ -375,25 +417,39 @@
     const id=selectedTask;
     const detail=await api(`/api/maitu/tasks/${id}`);
     if (selectedTask!==id) return;
+    // 内容未变时跳过重建，避免轮询打断面板内悬停与滚动。
+    const detailJson=JSON.stringify(detail);
+    if (detailJson===renderDetail.lastJson) return;
+    renderDetail.lastJson=detailJson;
     const panel=$('#maitu-detail');
     const oldScroll=panel.scrollTop;
     panel.replaceChildren();
-    panel.append(element('p','maitu-eyebrow','任务详情'),element('h2','',detail.task.title),element('p','maitu-detail-instruction',detail.task.instruction));
-    if (detail.task.acceptanceCriteria) panel.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
-    if (detail.task.waitReason) panel.append(element('p','maitu-wait',detail.task.waitReason));
+    const head=element('div','maitu-detail-head');
+    head.append(element('p','maitu-eyebrow','任务详情'));
+    const title=element('h2','',detail.task.title);
+    title.append(element('span',`maitu-chip maitu-chip--${detail.task.status}`,statusNames[detail.task.status]||detail.task.status));
+    head.append(title);
+    const body=element('div','maitu-detail-body');
+    body.append(element('p','maitu-detail-instruction',detail.task.instruction));
+    if (detail.task.acceptanceCriteria) body.append(element('p','maitu-note',`验收要求：${detail.task.acceptanceCriteria}`));
+    if (detail.task.waitReason) body.append(element('p','maitu-wait',detail.task.waitReason));
     if (!['running','queued'].includes(detail.task.status)) {
-      panel.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
-      panel.append(button('补充要求再执行',()=> {
+      const actions=element('div','maitu-detail-actions');
+      actions.append(button(detail.task.status==='draft'?'执行任务':'再执行一次',()=>startTask(id),true));
+      actions.append(button('补充要求再执行',()=> {
         retryTaskId=id;retryRequestId=requestId();$('#maitu-retry-form').reset();$('#maitu-retry-dialog').showModal();
       }));
+      body.append(actions);
     }
-    panel.append(element('h3','','历次尝试'));
-    if (!detail.attempts.length) panel.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
+    body.append(element('h3','','历次尝试'));
+    if (!detail.attempts.length) body.append(element('p','maitu-note','尚未启动。执行后会保存输入、请求时段、过程记录和成果。'));
     for (const attempt of detail.attempts) {
       const section=element('details','maitu-attempt');
       section.open=selectedAttempt ? selectedAttempt===attempt.id : attempt.id===detail.attempts[0].id;
       section.addEventListener('toggle',()=> {if(section.open) selectedAttempt=attempt.id;});
-      const summary=element('summary','',`第 ${attempt.number} 次 · ${statusNames[attempt.status]||attempt.status}${detail.task.acceptedAttemptId===attempt.id?' · 已采用':''}`);
+      const summary=element('summary','');
+      summary.append(element('span',`maitu-chip maitu-chip--${attempt.status}`,`第 ${attempt.number} 次 · ${statusNames[attempt.status]||attempt.status}`));
+      if(detail.task.acceptedAttemptId===attempt.id) summary.append(element('span','maitu-chip maitu-chip--adopted','已采用'));
       section.append(summary,element('p','maitu-note',`创建：${time(attempt.createdAt)}`));
       if (attempt.model) section.append(element('p','maitu-note',`模型：${attempt.model}${attempt.connectionKey?` · 连接：${attempt.connectionKey}`:''}`));
       if (attempt.requestStartedAt) section.append(element('p','maitu-note',`请求开始：${time(attempt.requestStartedAt)}`));
@@ -455,11 +511,11 @@
         section.append(actions);
       }
       if (attempt.usage?.total_tokens) section.append(element('p','maitu-note',`本次用量：${attempt.usage.total_tokens} Token`));
-      panel.append(section);
+      body.append(section);
     }
     const withOutput=detail.attempts.filter(attempt=>attempt.artifactId);
     if (withOutput.length>=2 && detail.task.taskKind==='file') {
-      panel.append(button('比较两次成果',async()=> {
+      body.append(button('比较两次成果',async()=> {
         const contents=await Promise.all(withOutput.slice(0,2).map(async attempt=> {
           if (!outputCache.has(attempt.artifactId)) {
             const response=await fetch(`/artifacts/${attempt.artifactId}`);
@@ -471,6 +527,7 @@
         showContent(`成果比较：第 ${contents[0].attempt.number} 次 ↔ 第 ${contents[1].attempt.number} 次`,lineDiff(contents[0].content,contents[1].content));
       }));
     }
+    panel.append(head,body);
     panel.scrollTop=oldScroll;
   }
 
@@ -579,18 +636,26 @@
         ?`${snapshot.activeTasks} 项执行中 · 容量 ${capacity}（`+usable.map(c=>`${c.label} ${load.get(c.key)||0}/${c.concurrency}`).join('，')+'）'
         :'先在设置中配置可用的模型连接';
       $('#maitu-project-status').textContent=`${snapshot.tasks.length} 个任务 · ${produced} 个已产出`;
-      renderMap(); renderSources(); await renderDetail();
+      // 快照无变化时跳过整棵 DOM 重建：避免 2 秒轮询打断悬停/过渡，详情面板单独拉取。
+      const snapshotJson=JSON.stringify(snapshot);
+      if (snapshotJson!==lastSnapshotJson) {
+        lastSnapshotJson=snapshotJson;
+        renderMap(); renderSources(); renderAttention();
+      }
+      await renderDetail();
       const code=snapshot.codeProject;
       $('#maitu-code-state').textContent=code
         ? code.sourceName+' · '+code.fileCount+' 个文件 · 当前采用版本 '+code.acceptedCommit.slice(0,12)+' · '+code.checks.map(check=>check.label).join('、')
         : '导入代码副本后，可以在图上真实修改代码并运行检查。';
       $('#maitu-import-code').hidden=Boolean(code);
       $('#maitu-export-code').hidden=!code;
-      renderAttention();
     } finally {refreshing=false;}
   }
 
   if (mode==='project') {
+    $('#maitu-detail').addEventListener('click',event => {
+      if (event.target.classList?.contains('maitu-detail-instruction')) event.target.classList.toggle('is-open');
+    });
     mapZoom = layoutMemory().zoom || 1;
     $('#maitu-zoom-in').addEventListener('click',()=>setZoom(mapZoom*1.2));
     $('#maitu-zoom-out').addEventListener('click',()=>setZoom(mapZoom/1.2));
