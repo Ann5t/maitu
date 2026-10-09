@@ -6,7 +6,11 @@
       update();
       return null;
     }
-    return document.startViewTransition(update);
+    const transition = document.startViewTransition(update);
+    // 视图切换被跳过或中断时 ready 与 finished 会拒绝；不处理就会变成未捕获异常。
+    if (transition && transition.ready) transition.ready.catch(() => {});
+    if (transition && transition.finished) transition.finished.catch(() => {});
+    return transition;
   };
   const syncThemeControls = () => {
     document.querySelectorAll("[data-theme-set]").forEach((button) => {
