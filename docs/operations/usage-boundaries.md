@@ -49,9 +49,9 @@
 | 备份目录在 Windows 盘上可能变得无法恢复 | 宿主目录里一旦出现由容器创建的文件，再经 `mv` 改名，该目录在 WSL 侧显示 `d?????????`、只读挂载报 `mkdir …: file exists`；旧写法可复现，改为宿主落盘后不可复现，真实数据上也验证过 | 修复在 **#17（待合并）**，运行期自检在 **#12（待合并）** |
 | Windows 上按 CRLF 检出仓库 | 仓库脚本 `bash -n` 失败、`BASH_SOURCE` 相对根定位错误 | 修复在 **#7（待合并）** |
 | 两份原地坏备份 `20261009T013722Z`、`20261009T121159Z` | Windows 侧可正常读取、WSL 与容器侧不可读；**内容完好**，复制成新目录即可用于恢复（已实测校验与解包） | **需你决定**：是否复制留存或重做备份；原件未删 |
-| 陈旧 Docker 数据约 9.7 GB | 三个当前 compose 未声明、也无容器使用的命名卷（`maitu_check_target` 5.1 GB、`maitu_check_registry` 270 MB、`maitu_check_git` 4 KB），加悬空匿名卷：记录时 83 个、2026-10-10 复核为 93 个（差额含本维护任务诊断新增的临时卷；维护只删过自己新建且已悬空的匿名卷，记录里的 83 个未动） | **需你决定**：清理需要授权 |
-| 7 个 `action_runs` 停在 `ready` | 2026-09-30 至 2026-10-06，均为待人工确认的成果确认 | **需你决定**：逐项确认或放弃 |
-| `maitu_tasks` 与 `action_run` 没有关联列 | `maitu_tasks` 现有列中有 `latest_attempt_id`、`accepted_attempt_id`、`task_kind`，但没有指向 `action_runs` 的列；两套执行系统的关系没有落库 | 已记录；#11（待合并）更新路线图状态 |
+| 陈旧 Docker 数据约 9.7 GB | 三个当前 compose 未声明、也无容器使用的命名卷（`maitu_check_target` 5.1 GB、`maitu_check_registry` 270 MB、`maitu_check_git` 4 KB，2026-10-10 复核仍在），加悬空匿名卷：记录时 83 个，同日复核依次为 93 → 106 → 113 → **118** 个（各次增量都来自本维护任务隔离诊断新建的临时卷；维护只删过自己新建且已悬空的匿名卷，记录里的 83 个未动） | **需你决定**：清理需要授权 |
+| 7 个 `action_runs` 停在 `ready`（2026-10-10 复核为**不是缺陷**） | 2026-09-30 至 2026-10-06 这 7 行全部是 `kind='confirm_outcome'`、`owner='human'`、`requires_approval=1` 的**人工确认闸门**，7 个项目各 1 条（无重复派发），本来就在等用户处理，页面"需要处理"面板会列出。真正执行的一套用**另一张表** `goal_action_runs`（带 `available_at`/`deadline_at`/`client_request_id`，状态 `queued`/`running`/`succeeded`/`cancelled` 等，另有 `reconcile_action_runs` 与截止时间清扫）：只读复核为 1 行 `queued`（2026-10-05 创建、截止时间 2026-10-12 尚未到期），过期未处理数为 0。⇒ 没有卡住的执行 | 记录更正：等待用户确认是正常状态；是否逐项确认或放弃仍由你决定 |
+| `maitu_tasks` 与动作记录之间没有关联列 | `maitu_tasks` 有 `latest_attempt_id`、`accepted_attempt_id`、`task_kind`，但没有指向动作记录的列。`action_runs` 通过 `node_id`、`artifacts.action_run_id`、`evidence.action_run_id` 关联；执行侧的调度记录另存 `goal_action_runs`（有 `subject_kind` 与 `client_request_id`，但没有 `maitu_tasks` 主键）。⇒ "哪个任务产出这条动作、哪条动作跑了这个任务"在 schema 上无法表达 | 已记录；#11（待合并）更新路线图状态 |
 | 尚未合并的修复与推荐顺序 | 开放 PR 两两之间的冲突已用 `git merge-tree --write-tree` 核实（`scripts/quality-gate.sh`、`scripts/README.md` 上存在真实冲突） | **需你决定**：建议顺序 **#7 → #12 → #17 → #9 → #11 → #15 → #8 → #14**；`#8`、`#14` 合并前需要一次 rebase |
 | 五个旧库的删除 | 内容迁移与独立恢复验收已完成，删除条件是独立状态 | **需你决定**：未达删除条件，原库继续保留 |
 | 远端保留了较多历史分支（含已合并的） | 只做过统计，未改动 | **需你决定**：清理需要授权 |
