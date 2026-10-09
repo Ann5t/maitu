@@ -21,6 +21,10 @@ async function openDetails(locator) {
 
 test('idea revisions, relationships and ProjectProposal promotion work on three sizes', async ({ page }) => {
   test.setTimeout(60_000);
+  const errors = [];
+  const serverErrors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
   await page.goto('/ideas/new');
   await page.getByLabel('标题（可留空）').fill('科研目标枝干');
   await page.getByLabel('现在想到什么？').fill('把科研目标展开成可审查的独立枝干，并保留未知与反例。');
@@ -129,4 +133,6 @@ test('idea revisions, relationships and ProjectProposal promotion work on three 
   expect(await noHorizontalOverflow(page)).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1900);
   await page.screenshot({ path: `${screenshotDir}/idea-detail-mobile.png`, fullPage: true });
+  expect(errors).toEqual([]);
+  expect(serverErrors).toEqual([]);
 });
