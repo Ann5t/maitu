@@ -6,6 +6,30 @@
 
 运行基础 PR #1、资料任务 PR #2、连接设置 PR #3 与目标编码 PR #4 均已合入 `main`。多连接调度与日常历史经 [PR #5](https://github.com/Ann5t/maitu/pull/5) 合入 `main`（提交 `4b0fd7e`，云端完整质量门通过），后续主线合并继续由用户决定。
 
+## 本机运行版本与 `main` 的差异（2026-10-09 核对）
+
+本机 `maitu` 实例正在运行的镜像 `sha256:7f6d55df3e16` 构建于 `2026-10-06T05:57:33Z`（13:57 +08:00）。实测该实例提供的页面**不在 `main` 上**：
+
+- `GET /maitu/ideas` 返回 `200`，标题「想法 · 脉图」；
+- `main` 的 `src/web/mod.rs` 注册 107 条路由，没有 `/maitu/ideas`；下面这些分支各有 109 条，多出的正是 `/maitu/ideas` 与 `/maitu/ideas/{idea_id}`。
+
+界面收拢的工作都停在未合入的分支上：
+
+| 分支 | 末次提交 | 提交时间 | 云端质量门 |
+| --- | --- | --- | --- |
+| `graph/ui-refresh` | `0c97fcd` | 10-06 01:25 | 通过，但未合入 |
+| `graph/remove-legacy-ui` | `de3cfb0` | 10-06 02:23 | 失败 |
+| `graph/absorb-ideas` | `e25b44c` | 10-06 04:11 | 失败 |
+| `graph/absorb-goal-workbench` | `037946e` | 10-06 04:11 | 失败 |
+| `graph/reduce-text-friction` | `6e800db` | 10-06 13:07 | 失败 |
+| `graph/workbench-parity` | `470fbc2` | 10-06 14:10 | 失败 |
+
+生产镜像的运行层只包含 `assets` 与 `/usr/local/bin` 下的二进制，**没有构建时的源码**（`/app` 下没有 `src/`）。因此运行态的源码只能从这些分支取得，**从 `main` 重新构建会静默失去本机正在使用的想法空间**。
+
+按提交时间，运行镜像最可能对应 `graph/reduce-text-friction`（`6e800db`，13:07）或其祖先；`graph/workbench-parity`（14:10）晚于构建时间，不可能在其中。这是时间窗推断，没有逐字比对页面内容，未作为结论。
+
+保留、修复质量门后合入、还是删除这些分支，都需要用户明确决定。`graph/ui-refresh` 的云端质量门已经通过但同样未合入。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。
