@@ -1,0 +1,19 @@
+# 仓库行尾策略
+#
+# 本仓库的运行环境是 Linux（Docker、CI、WSL），但开发可能在 Windows 上进行。
+# Windows 上 core.autocrlf=true 的检出会把文本文件写成 CRLF，使 shell 脚本的
+# shebang 变成 "#!/usr/bin/env bash\r"，执行时报：
+#
+#     env: $'bash\r': No such file or directory
+#
+# 结果 `scripts/` 下的 Bash 检查脚本（含 quality-gate.sh）在 WSL 和 Git Bash
+# 中全部无法执行。这里显式声明行尾，检出结果不再取决于平台的 autocrlf 设置。
+#
+# 已提交的文本文件全部为 LF，因此本规则不改变任何已跟踪文件的内容。
+
+* text=auto eol=lf
+
+# 只在 Windows 上使用的脚本保留 CRLF。
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
