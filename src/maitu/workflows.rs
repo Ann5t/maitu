@@ -775,6 +775,7 @@ async fn wait_reason(pool: &PgPool, task: Uuid, reason: &str) -> AppResult<()> {
 async fn claim(
     state: &AppState,
     config: &ProviderConfig,
+    may_reclaim: bool,
 ) -> AppResult<Option<(TaskRecord, AttemptRecord)>> {
     // Pin available parents even when another parent is still missing. Blocked jobs
     // must not hide ready jobs beyond the first page of the queue. Tasks pinned to
@@ -783,10 +784,14 @@ async fn claim(
         .execute(&state.pool).await?;
     sqlx::query("UPDATE maitu_tasks t SET wait_reason='等待前序任务的成果被采用；可先推进其他任务' WHERE t.status='queued' AND EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) AND t.wait_reason IS DISTINCT FROM '等待前序任务的成果被采用；可先推进其他任务'")
         .execute(&state.pool).await?;
+    // Do not let a connection retake an automatic task whose most recent finished
+    // attempt it failed: the queued retry promises to move to another connection. A
+    // single connection may reclaim, otherwise the task would wait forever.
     let queued: Vec<TaskRecord> = sqlx::query_as(
-        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
+        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT ($2 OR (t.connection_key='' AND coalesce((SELECT a.connection_key FROM maitu_attempts a WHERE a.task_id=t.id AND a.status IN ('failed','produced') ORDER BY a.number DESC LIMIT 1), '')=$1)) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
     )
     .bind(&config.key)
+    .bind(may_reclaim)
     .fetch_all(&state.pool)
     .await?;
     'candidates: for candidate in queued {
@@ -1415,6 +1420,9 @@ pub async fn run_worker(
                         .execute(&state.pool)
                         .await?;
                     }
+                    // Only a sole connection may reclaim a task it just failed; while
+                    // another usable connection exists the retry must move there.
+                    let may_reclaim = connections.len() == 1;
                     for connection in &connections {
                         if cooldowns.active(&connection.key).await {
                             sqlx::query("UPDATE maitu_tasks t SET wait_reason='此任务等待连接冷却后自动重试' WHERE t.status='queued' AND t.connection_key=$1 AND t.wait_reason IS DISTINCT FROM '此任务等待连接冷却后自动重试'")
@@ -1430,7 +1438,7 @@ pub async fn run_worker(
                             if running >= connection.concurrency as i64 {
                                 break;
                             }
-                            let Some((task, attempt)) = claim(&state, connection).await? else { break };
+                            let Some((task, attempt)) = claim(&state, connection, may_reclaim).await? else { break };
                             let task_id = task.id;
                             let attempt_id = attempt.id;
                             let connection_key = connection.key.clone();
