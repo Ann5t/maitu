@@ -34,6 +34,31 @@ fudian_test_write_managed_file() {
     sh -c 'printf %s "$1" > "$2"' _ "$content" "$path"
 }
 
+# 网络阶段的有界重试。完整质量门在 CI 上每次都要冷下载镜像与 Rust 依赖，
+# 一次瞬时失败会让与提交内容无关的分支变红（纯文档分支曾以 exit 101 失败）。
+# 只用于下载类命令；断言与测试一律不重试，避免掩盖真实失败。
+fudian_retry_network() {
+  local attempts="${FUDIAN_NETWORK_ATTEMPTS:-3}"
+  local delay="${FUDIAN_NETWORK_DELAY_SECONDS:-10}"
+  local attempt=1
+  local status=0
+
+  while true; do
+    status=0
+    "$@" || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$attempt" -ge "$attempts" ]]; then
+      echo "network step failed after $attempt attempt(s), exit $status: $*" >&2
+      return "$status"
+    fi
+    echo "network step failed (attempt $attempt/$attempts, exit $status); retrying in ${delay}s: $*" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
+
 fudian_test_remove_bind_tree() {
   local tree="$1"
   local foreign_entry
