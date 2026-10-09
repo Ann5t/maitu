@@ -73,6 +73,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0018_maitu_daily_history.sql",
         include_str!("../migrations/0018_maitu_daily_history.sql"),
     ),
+    (
+        "0019_maitu_retry_hold.sql",
+        include_str!("../migrations/0019_maitu_retry_hold.sql"),
+    ),
 ];
 
 pub async fn run(pool: &PgPool) -> Result<(), sqlx::Error> {

@@ -784,7 +784,7 @@ async fn claim(
     sqlx::query("UPDATE maitu_tasks t SET wait_reason='等待前序任务的成果被采用；可先推进其他任务' WHERE t.status='queued' AND EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) AND t.wait_reason IS DISTINCT FROM '等待前序任务的成果被采用；可先推进其他任务'")
         .execute(&state.pool).await?;
     let queued: Vec<TaskRecord> = sqlx::query_as(
-        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
+        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT (t.hold_connection=$1 AND t.hold_until > now()) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
     )
     .bind(&config.key)
     .fetch_all(&state.pool)
@@ -792,9 +792,10 @@ async fn claim(
     'candidates: for candidate in queued {
         let mut tx = state.pool.begin().await?;
         let current: Option<TaskRecord> = sqlx::query_as(
-            "SELECT * FROM maitu_tasks WHERE id=$1 AND status='queued' FOR UPDATE SKIP LOCKED",
+            "SELECT * FROM maitu_tasks WHERE id=$1 AND status='queued' AND NOT (hold_connection=$2 AND hold_until > now()) FOR UPDATE SKIP LOCKED",
         )
         .bind(candidate.id)
+        .bind(&config.key)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(current) = current else { continue };
@@ -928,12 +929,22 @@ async fn claim(
         }
         let attempt = sqlx::query_as("UPDATE maitu_attempts SET status='running',started_at=now(),input_snapshot=$2,connection_key=$3,provider_base_url=$4,model=$5 WHERE id=$1 AND status='queued' RETURNING *")
             .bind(attempt_id).bind(snapshot).bind(&config.key).bind(&config.base_url).bind(&config.model).fetch_one(&mut *tx).await?;
-        sqlx::query(
-            "UPDATE maitu_tasks SET status='running',wait_reason=NULL,updated_at=now() WHERE id=$1",
+        // Authoritative hold check: the connection may have been cooled down between
+        // the candidate scan and this update, and that hold is written in the same
+        // transaction that re-queues the retry. Rolling back keeps the task queued
+        // for another connection or a later tick instead of hammering the throttled
+        // one.
+        let claimed = sqlx::query(
+            "UPDATE maitu_tasks SET status='running',wait_reason=NULL,hold_connection='',hold_until=NULL,updated_at=now() WHERE id=$1 AND NOT (hold_connection=$2 AND hold_until > now())",
         )
         .bind(current.id)
+        .bind(&config.key)
         .execute(&mut *tx)
         .await?;
+        if claimed.rows_affected() != 1 {
+            tx.rollback().await?;
+            continue 'candidates;
+        }
         sqlx::query(
             "INSERT INTO maitu_attempt_events(attempt_id,phase,message) VALUES($1,'started',$2)",
         )
@@ -1016,9 +1027,11 @@ async fn fail_or_retry(
     if !eligible || attempt.number > MAX_AUTO_RETRIES {
         return finish_failed(&state.pool, task.id, attempt.id, code, message).await;
     }
-    if transient {
-        cooldowns().penalize(&attempt.connection_key).await;
-    }
+    let cooldown = if transient {
+        cooldowns().penalize(&attempt.connection_key).await
+    } else {
+        Duration::ZERO
+    };
     let mut tx = state.pool.begin().await?;
     // Only the task's latest attempt may be retried; an older attempt's failure
     // was already superseded by a newer one.
@@ -1075,8 +1088,16 @@ async fn fail_or_retry(
     ))
     .execute(&mut *tx)
     .await?;
-    sqlx::query("UPDATE maitu_tasks SET status='queued',latest_attempt_id=$2,wait_reason='连接暂时不可用，自动重试已排队；其他任务继续执行',updated_at=now() WHERE id=$1")
-        .bind(task.id).bind(retry_id).execute(&mut *tx).await?;
+    // Hold the connection that just failed this task for the length of its
+    // backoff. The hold lands in the same transaction as the retry row and claim
+    // filters on it, so no claim path can pick the retry up during the backoff.
+    let (hold_connection, hold_seconds) = if cooldown.is_zero() {
+        ("", 0.0)
+    } else {
+        (attempt.connection_key.as_str(), cooldown.as_secs_f64())
+    };
+    sqlx::query("UPDATE maitu_tasks SET status='queued',latest_attempt_id=$2,wait_reason='连接暂时不可用，自动重试已排队；其他任务继续执行',hold_connection=$3,hold_until=now()+make_interval(secs => $4),updated_at=now() WHERE id=$1")
+        .bind(task.id).bind(retry_id).bind(hold_connection).bind(hold_seconds).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1311,14 +1332,17 @@ impl Cooldowns {
             .is_some_and(|until| *until > Instant::now())
     }
 
-    async fn penalize(&self, key: &str) {
+    /// Returns the backoff it applied, so the caller can record the same deadline
+    /// in the database and keep the hold authoritative for any claimant.
+    async fn penalize(&self, key: &str) -> Duration {
         let mut cooldowns = self.0.lock().await;
-        let until = cooldowns.get(key).copied();
-        let next = match until {
-            Some(until) if until > Instant::now() => ((until - Instant::now()) * 2).min(Self::MAX),
+        let now = Instant::now();
+        let next = match cooldowns.get(key).copied() {
+            Some(until) if until > now => ((until - now) * 2).min(Self::MAX),
             _ => Self::BASE,
         };
-        cooldowns.insert(key.to_owned(), Instant::now() + next);
+        cooldowns.insert(key.to_owned(), now + next);
+        next
     }
 
     async fn clear(&self, key: &str) {

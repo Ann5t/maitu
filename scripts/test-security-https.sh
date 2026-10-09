@@ -403,6 +403,6 @@ secret_audit_count="$(docker exec "$security_db" psql -U fudian_test -d fudian_t
 security_migrations="$(docker exec "$security_db" psql -U fudian_test -d fudian_test -Atc \
   'SELECT count(*) FROM schema_migrations;')"
 [[ "$secret_audit_count" == 0 ]]
-[[ "$security_migrations" == 18 ]]
+[[ "$security_migrations" == 19 ]]
 
 echo "security HTTPS passed: singleton setup, sessions, CSRF/origin, persistent limits, recovery, ToolLease proxy and Chromium 1440/820/390"

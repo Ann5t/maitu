@@ -48,5 +48,6 @@ maitu_test_run_app() {
 
 maitu_test_run_app maitu::integration::parallel_files_retry_pinned_dependencies_and_process_recovery
 maitu_test_run_app maitu::integration::rate_limited_connection_fails_over_bounded_and_records_usage_per_connection
+maitu_test_run_app maitu::integration::queued_task_held_for_a_connection_is_not_claimed_by_it
 
 echo "Maitu isolated workflow passed; this fixture does not verify paid DeepSeek access"
