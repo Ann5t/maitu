@@ -1,0 +1,14 @@
+# 仓库内容统一按 LF 存储与检出。
+#
+# 理由：源码、脚本与文档主要在 Linux 容器（compose.yaml 把仓库 `.:/app` 挂进容器）、
+# CI 与 WSL 下执行，而本仓库索引里 265 个受版本控制的文件全部是 LF。此前没有本文件，
+# Windows 上 `core.autocrlf=true` 的检出会把这些 LF 文件写成 CRLF：在 main 的 28 个
+# shell 脚本里有 22 个变成 CRLF，连 scripts/quality-gate.sh、scripts/backup-v2.sh 和
+# docker-test-lib.sh 都不例外，`bash -n` 会报 `$'{\r'`、`source` 会报
+# `set: pipefail: invalid option name`，即这些脚本在 WSL 下根本无法加载。
+# GNU make 的配方行同样受 CRLF 影响。
+#
+# `text=auto` 由 Git 按内容自动识别二进制文件（本仓库现有的图片、字体等不会被改写），
+# 其余文本一律以 LF 写入工作树与索引；因为索引已经是 LF，加上本文件不会产生任何
+# 内容变更，只是让后续检出与 CI 一致。
+* text=auto eol=lf
