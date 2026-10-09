@@ -9,9 +9,9 @@ tooling_app="fudian-tooling-app-$tooling_suffix"
 
 cleanup_tooling_stack() {
   [[ "$tooling_app" == fudian-tooling-app-* ]] \
-    && docker rm -f "$tooling_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$tooling_app" >/dev/null 2>&1 || true
   [[ "$tooling_db" == fudian-tooling-db-* ]] \
-    && docker rm -f "$tooling_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$tooling_db" >/dev/null 2>&1 || true
   [[ "$tooling_network" == fudian-tooling-test-* ]] \
     && docker network rm "$tooling_network" >/dev/null 2>&1 || true
 }

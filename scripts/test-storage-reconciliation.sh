@@ -17,9 +17,9 @@ cleanup_storage_test() {
     docker logs "$storage_app" >&2 || true
   fi
   [[ "$storage_app" == fudian-storage-app-* ]] \
-    && docker rm -f "$storage_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$storage_app" >/dev/null 2>&1 || true
   [[ "$storage_db" == fudian-storage-db-* ]] \
-    && docker rm -f "$storage_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$storage_db" >/dev/null 2>&1 || true
   [[ "$storage_network" == fudian-storage-test-* ]] \
     && docker network rm "$storage_network" >/dev/null 2>&1 || true
   [[ "$storage_tmp" == /tmp/tmp.* && -d "$storage_tmp" ]] \

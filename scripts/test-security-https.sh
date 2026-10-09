@@ -33,7 +33,7 @@ cleanup_security_stack() {
   for container in "$security_app" "$security_caddy" "$security_tool_small" \
     "$security_tool_large" "$security_db"; do
     if [[ "$container" == fudian-security-* ]]; then
-      docker rm -f "$container" >/dev/null 2>&1 || true
+      docker rm -fv "$container" >/dev/null 2>&1 || true
     fi
   done
   if [[ "$security_network" == fudian-security-test-* ]]; then

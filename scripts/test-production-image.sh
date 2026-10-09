@@ -15,9 +15,9 @@ cleanup_runtime_stack() {
     docker logs "$runtime_app" >&2 || true
   fi
   [[ "$runtime_app" == fudian-runtime-app-* ]] \
-    && docker rm -f "$runtime_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$runtime_app" >/dev/null 2>&1 || true
   [[ "$runtime_db" == fudian-runtime-db-* ]] \
-    && docker rm -f "$runtime_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$runtime_db" >/dev/null 2>&1 || true
   [[ "$runtime_network" == fudian-runtime-test-* ]] \
     && docker network rm "$runtime_network" >/dev/null 2>&1 || true
   [[ "$runtime_tmp" == /tmp/tmp.* ]] && rm -rf "$runtime_tmp"
@@ -25,7 +25,15 @@ cleanup_runtime_stack() {
 }
 trap cleanup_runtime_stack EXIT
 
-docker build --target runtime --tag "$runtime_image" "$runtime_repo_root"
+runtime_source_revision="$(git -C "$runtime_repo_root" rev-parse HEAD 2>/dev/null || printf unknown)"
+docker build --target runtime --tag "$runtime_image" \
+  --build-arg "FUDIAN_SOURCE_REVISION=$runtime_source_revision" "$runtime_repo_root"
+runtime_label_revision="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$runtime_image")"
+if [[ "$runtime_label_revision" != "$runtime_source_revision" ]]; then
+  echo "生产镜像没有带上源码修订标签：期望 $runtime_source_revision，实际 $runtime_label_revision" >&2
+  exit 1
+fi
+echo "生产镜像源码修订标签：$runtime_label_revision"
 docker network create "$runtime_network" >/dev/null
 docker run -d --name "$runtime_db" --network "$runtime_network" \
   --network-alias runtime-db \

@@ -47,6 +47,7 @@ services:
       args:
         HTTP_PROXY: ${MAITU_BUILD_PROXY:-}
         HTTPS_PROXY: ${MAITU_BUILD_PROXY:-}
+        FUDIAN_SOURCE_REVISION: ${FUDIAN_SOURCE_REVISION:-unknown}
     environment:
       DATABASE_URL: postgres://maitu:maitu_local_dev@postgres:5432/maitu
       FUDIAN_SECURITY_MODE: disabled
