@@ -313,9 +313,15 @@ pub async fn login_submit(
 
 pub async fn logout(
     State(state): State<Arc<AppState>>,
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-    axum::extract::Extension(identity): axum::extract::Extension<RequestIdentity>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+    identity: Option<axum::extract::Extension<RequestIdentity>>,
 ) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let (Some(axum::extract::Extension(auth)), Some(axum::extract::Extension(identity))) =
+        (auth, identity)
+    else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
     sqlx::query(
         "UPDATE auth_sessions SET revoked_at = now(), revocation_reason = 'logout' \
          WHERE id = $1 AND revoked_at IS NULL",
@@ -478,9 +484,14 @@ pub async fn recovery_submit(
 }
 
 pub async fn password_page(
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-) -> Response {
-    no_store_html(auth_page(
+    State(state): State<Arc<AppState>>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let Some(axum::extract::Extension(auth)) = auth else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
+    Ok(no_store_html(auth_page(
         "更改口令",
         &format!("当前用户：{}", auth.username),
         html! {
@@ -492,15 +503,21 @@ pub async fn password_page(
             }
             a class="auth-secondary-link" href="/" { "返回工作台" }
         },
-    ))
+    )))
 }
 
 pub async fn password_submit(
     State(state): State<Arc<AppState>>,
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-    axum::extract::Extension(identity): axum::extract::Extension<RequestIdentity>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+    identity: Option<axum::extract::Extension<RequestIdentity>>,
     Form(form): Form<PasswordChangeForm>,
 ) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let (Some(axum::extract::Extension(auth)), Some(axum::extract::Extension(identity))) =
+        (auth, identity)
+    else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
     if form.new_password != form.password_confirm {
         return Err(AppError::bad_request(
             "password_confirmation_mismatch",
