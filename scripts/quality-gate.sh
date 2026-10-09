@@ -59,5 +59,7 @@ FUDIAN_RECOVERY_CURRENT_IMAGE=fudian-nextgen-runtime:test \
 FUDIAN_SECURE_COMPOSE_IMAGE=fudian-nextgen-runtime:test \
   ./scripts/test-secure-compose.sh
 
+./scripts/check-secrets.py
+
 git diff --check
 echo "complete quality gate passed"
