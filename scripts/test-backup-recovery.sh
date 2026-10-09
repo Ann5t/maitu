@@ -296,6 +296,9 @@ assert deployment["schemaVersion"] == 3
 assert deployment["secretValuesIncluded"] is False
 assert deployment["appImageRevision"] == "not-recorded", deployment
 assert deployment["sourceMatchesRunningImage"] is None, deployment
+assert deployment["credentialStoreIncluded"] is False, deployment
+assert deployment["credentialStorePath"] == "not-recorded", deployment
+assert deployment["credentialStoreVolume"] == "not-recorded", deployment
 assert database["schemaMigrationCount"] == 12, database
 assert database["projects"] == 1 and database["goalBranches"] == 1
 assert database["artifacts"] == 1' \
