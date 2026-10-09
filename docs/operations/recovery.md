@@ -22,7 +22,7 @@ Rust 仓库不依赖取证目录或 `.next` 反编译产物才能构建。任何
 
 - PostgreSQL custom-format dump 与业务/迁移计数；
 - artifacts、bare repositories、goal worktrees、runner outputs 四个卷的压缩归档和逐文件 SHA-256；
-- 可构建 Rust 源码、14 个迁移的目录摘要；
+- 可构建 Rust 源码、全部迁移的目录摘要；
 - 脱敏的 Git commit/dirty、容器 ID、不可变镜像 ID、镜像上的源码修订标签和存储类型元数据；
 - 覆盖所有文件的 `SHA256SUMS`。
 
