@@ -785,8 +785,8 @@ async fn claim(
     sqlx::query("UPDATE maitu_tasks t SET wait_reason='等待前序任务的成果被采用；可先推进其他任务' WHERE t.status='queued' AND EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) AND t.wait_reason IS DISTINCT FROM '等待前序任务的成果被采用；可先推进其他任务'")
         .execute(&state.pool).await?;
     // Do not let a connection retake an automatic task whose most recent finished
-    // attempt it failed: the queued retry promises to move to another connection. A
-    // single connection may reclaim, otherwise the task would wait forever.
+    // attempt it failed while another connection is free to take it; the caller decides
+    // that in may_reclaim, so a task never waits for a connection that cannot serve it.
     let queued: Vec<TaskRecord> = sqlx::query_as(
         "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT ($2 OR (t.connection_key='' AND coalesce((SELECT a.connection_key FROM maitu_attempts a WHERE a.task_id=t.id AND a.status IN ('failed','produced') ORDER BY a.number DESC LIMIT 1), '')=$1)) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
     )
@@ -1420,9 +1420,6 @@ pub async fn run_worker(
                         .execute(&state.pool)
                         .await?;
                     }
-                    // Only a sole connection may reclaim a task it just failed; while
-                    // another usable connection exists the retry must move there.
-                    let may_reclaim = connections.len() == 1;
                     for connection in &connections {
                         if cooldowns.active(&connection.key).await {
                             sqlx::query("UPDATE maitu_tasks t SET wait_reason='此任务等待连接冷却后自动重试' WHERE t.status='queued' AND t.connection_key=$1 AND t.wait_reason IS DISTINCT FROM '此任务等待连接冷却后自动重试'")
@@ -1438,7 +1435,23 @@ pub async fn run_worker(
                             if running >= connection.concurrency as i64 {
                                 break;
                             }
-                            let Some((task, attempt)) = claim(&state, connection, may_reclaim).await? else { break };
+                            // A connection may only reclaim a task it just failed when no other
+                            // usable connection is free right now; otherwise the retry
+                            // must move there, as the queued event promises.
+                            let mut may_reclaim = true;
+                            for other in &connections {
+                                if other.key != connection.key
+                                    && !cooldowns.active(&other.key).await
+                                {
+                                    may_reclaim = false;
+                                    break;
+                                }
+                            }
+                            let Some((task, attempt)) =
+                                claim(&state, connection, may_reclaim).await?
+                            else {
+                                break;
+                            };
                             let task_id = task.id;
                             let attempt_id = attempt.id;
                             let connection_key = connection.key.clone();
