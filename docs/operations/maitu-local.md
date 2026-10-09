@@ -88,6 +88,26 @@ docker compose -f compose.maitu.yaml stop
 
 `compose.maitu.yaml` 默认项目名为 `maitu`，使用项目专属的 PostgreSQL、成果、仓库、工作区、执行输出与模型配置卷；旧 `compose.yaml` 是继承来源。可以在启动前设置 `MAITU_INSTANCE` 运行另一套独立实例，并选择空闲端口。继承的备份不导出个人模型密钥，恢复到另一实例时需重新配置。
 
+### 备份脉图实例
+
+`make backup` 调用的是继承的 `scripts/backup.sh`：它只备份旧 `compose.yaml` 栈的 `fudian_nextgen_artifacts`，并且要求旧栈的 postgres 正在运行；脉图实例的数据库和四个内容卷都不在其中。脉图实例的完整备份用 `scripts/backup-v2.sh`，在仓库根目录执行，数据库容器与四个内容卷这五个变量必须显式给出：
+
+```bash
+FUDIAN_BACKUP_DATABASE_CONTAINER=maitu-postgres-1 \
+FUDIAN_BACKUP_POSTGRES_USER=maitu \
+FUDIAN_BACKUP_POSTGRES_DB=maitu \
+FUDIAN_BACKUP_ARTIFACT_VOLUME=maitu_artifacts \
+FUDIAN_BACKUP_REPOSITORY_VOLUME=maitu_repositories \
+FUDIAN_BACKUP_WORKTREE_VOLUME=maitu_worktrees \
+FUDIAN_BACKUP_RUNNER_VOLUME=maitu_runner_outputs \
+FUDIAN_BACKUP_APP_CONTAINER=maitu-app-1 \
+./scripts/backup-v2.sh backups
+```
+
+给出 `FUDIAN_BACKUP_APP_CONTAINER` 时，脚本会先对所有托管 bare repository 执行严格 `git fsck`，校验失败就不发布备份目录。容器名带实例前缀；用 `MAITU_INSTANCE` 启动的其他实例要换用对应的容器和卷名。`backups/` 已在 `.gitignore` 中，备份不进 Git。
+
+这些是 Bash 脚本，在 Windows 上需通过 WSL 或 Git Bash 执行（见[测试指南](../development/testing.md)）。恢复用 `scripts/restore-v2.sh`，它只写入带 `com.fudian.restore-target=true` 标签、且数据库无表、四个卷为空的空目标，并要求显式设置 `FUDIAN_RESTORE_CONFIRM=EMPTY_LABELED_TARGETS`。
+
 模型连接配置（含密钥）保存在 `maitu_provider_config` 卷的 `connections.json` 中，`scripts/backup-v2.sh` 按设计不导出该卷。需要连同连接配置一起迁移或备份时，手动复制该卷数据，例如：
 
 ```powershell
