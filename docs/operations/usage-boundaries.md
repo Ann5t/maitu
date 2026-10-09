@@ -36,7 +36,7 @@
 ## 二、使用边界
 
 1. **平台**：本机日用是 Windows + WSL + Docker Desktop，CI 在 Linux 上跑。宿主文件系统（drvfs）与 Linux 的差异会产生 CI 发现不了的缺陷，涉及备份与恢复时请以**本机验证**为准。
-2. **检出**：`main` 目前没有 `.gitattributes`，Windows 检出是 CRLF；Git 里存的仍是 LF。直接 `bash scripts/*.sh` 会把 CR 当成命令的一部分（`bash -n` 也会失败，`BASH_SOURCE` 定位可能落到错误的根目录）。修正在 **#7（待合并）**；在那之前请用 LF 检出（例如 `git -c core.autocrlf=false worktree add <目录> <提交>`）或经容器执行。
+2. **检出**：`main` 目前没有 `.gitattributes`，Windows 检出是 CRLF；Git 里存的仍是 LF。直接 `bash scripts/*.sh` 会把 CR 当成命令的一部分（`bash -n` 也会失败，`BASH_SOURCE` 定位可能落到错误的根目录）。修正在 **#7（待合并）**；在那之前请用 LF 检出（例如 `git -c core.autocrlf=false worktree add <目录> <提交>`）或经容器执行。2026-10-10 本机复核：`origin/main` 无 `.gitattributes`，`origin/repo/verified-merge-candidate`（#7）新增了它；当前 Windows 检出里 `scripts/quality-gate.sh` 是整文件 63 行 CRLF，`bash -n` 在第 10 行报 `syntax error near unexpected token '$'{\r'`，而同一个提交在 `git -c core.autocrlf=false worktree add` 得到的 LF 工作树里 0 行 CRLF、`bash -n` 无输出。注意 CRLF 脚本**不一定立刻报错**：`echo ok\r` 这类行会照常执行、只把 CR 留在输出里，直接失败的是结构行（`() {`、`[[ … ]]`）。
 3. **镜像**：正在运行的活实例仍是旧镜像 `sha256:7f6d55df3e16`，**不含**下面第三节列出的修复。升级路径已在本机演练通过，但**尚未应用**到日用实例。
 4. **凭据**：备份默认**不含**模型连接凭据（`credentialStoreIncluded: false`）。迁移或另行保管连接配置时，需要单独复制 `provider_config` 卷。真实 secret、`.env`、数据库、模型文件、构建缓存和运行日志都不进入 Git。
 5. **入口**：`maitu` 保持**一个**实际运行的产品入口；五个旧库作为来源档案保留，不作为并列应用长期启动。
