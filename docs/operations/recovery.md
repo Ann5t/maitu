@@ -23,10 +23,16 @@ Rust 仓库不依赖取证目录或 `.next` 反编译产物才能构建。任何
 - PostgreSQL custom-format dump 与业务/迁移计数；
 - artifacts、bare repositories、goal worktrees、runner outputs 四个卷的压缩归档和逐文件 SHA-256；
 - 可构建 Rust 源码、14 个迁移的目录摘要；
-- 脱敏的 Git commit/dirty、容器 ID、不可变镜像 ID 和存储类型元数据；
+- 脱敏的 Git commit/dirty、容器 ID、不可变镜像 ID、镜像上的源码修订标签和存储类型元数据；
 - 覆盖所有文件的 `SHA256SUMS`。
 
 备份开始前，源数据库必须运行、四个卷必须显式命名。提供应用容器时还会先执行所有托管 bare repository 的严格 `git fsck`；校验失败不会发布最终备份目录。源码归档不包含 `.env`、`secrets/`、真实 secret 或 Docker 数据卷。
+
+部署元数据（`deployment-metadata.json`，`schemaVersion` 3）把这次备份能自证的信息写下来：`sourceCommit`/`sourceDirty` 是归档源码所在工作树的状态，`appContainerId`/`appImageId` 是运行中的应用容器与镜像，`appImageRevision` 取自镜像标签 `org.opencontainers.image.revision`，`sourceMatchesRunningImage` 是两者的同源判断（`true`/`false`；镜像没有该标签时为 `null`）。
+
+源码修订标签由 `Dockerfile` 的 `FUDIAN_SOURCE_REVISION` 构建参数写入；`scripts/start-local.ps1` 与 `compose.maitu.yaml` 在构建时带上当前工作树的提交，工作树不干净时带 `-dirty`。`sourceMatchesRunningImage` 为 `false` 时，备份脚本会在结尾明确告警：归档源码与运行镜像不同源，恢复后的行为可能不同；为 `null` 时说明镜像没有该标签，这次备份无法完成这项自证，用当前入口重新构建镜像即可。
+
+需要这条判断，是因为生产镜像只有运行层、没有构建它的源码：只比对 commit 或镜像 ID 都不能说明两者同源。历史备份 `20261009T121159Z` 记下的 `appImageId` 是 `sha256:7f6d55df3e16…`，而该镜像实际提供的界面源码并不在 `main` 上（由尚未合入的界面分支保存）。带上修订标签后，这类偏差会在备份时就报出来，而不是等到恢复时才发现。
 
 `scripts/restore-v2.sh` 只写入满足全部条件的目标：
 

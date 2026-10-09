@@ -292,8 +292,10 @@ test -n "$recovery_bundle"
 python3 -c 'import json,sys
 deployment=json.load(open(sys.argv[1],encoding="utf-8"))
 database=json.load(open(sys.argv[2],encoding="utf-8"))
-assert deployment["schemaVersion"] == 2
+assert deployment["schemaVersion"] == 3
 assert deployment["secretValuesIncluded"] is False
+assert deployment["appImageRevision"] == "not-recorded", deployment
+assert deployment["sourceMatchesRunningImage"] is None, deployment
 assert database["schemaMigrationCount"] == 12, database
 assert database["projects"] == 1 and database["goalBranches"] == 1
 assert database["artifacts"] == 1' \

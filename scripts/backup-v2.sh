@@ -128,16 +128,32 @@ else
 fi
 backup_database_id="$(docker inspect -f '{{.Id}}' "$backup_database_container")"
 backup_database_image="$(docker inspect -f '{{.Image}}' "$backup_database_container")"
+backup_source_revision="$backup_git_commit"
+if [[ "$backup_git_dirty" == true ]]; then
+  backup_source_revision="$backup_git_commit-dirty"
+fi
 if [[ -n "$backup_app_container" ]]; then
   backup_app_id="$(docker inspect -f '{{.Id}}' "$backup_app_container")"
   backup_app_image="$(docker inspect -f '{{.Image}}' "$backup_app_container")"
+  backup_app_revision="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backup_app_image" 2>/dev/null || printf '')"
+  if [[ -z "$backup_app_revision" || "$backup_app_revision" == "<no value>" ]]; then
+    backup_app_revision="not-recorded"
+  fi
 else
   backup_app_id="not-recorded"
   backup_app_image="not-recorded"
+  backup_app_revision="not-recorded"
+fi
+if [[ "$backup_app_revision" == not-recorded ]]; then
+  backup_source_matches="null"
+elif [[ "${backup_app_revision%-dirty}" == "${backup_source_revision%-dirty}" ]]; then
+  backup_source_matches="true"
+else
+  backup_source_matches="false"
 fi
 printf '%s\n' \
   '{' \
-  '  "schemaVersion": 2,' \
+  '  "schemaVersion": 3,' \
   "  \"createdAt\": \"$backup_timestamp\"," \
   "  \"sourceCommit\": \"$backup_git_commit\"," \
   "  \"sourceDirty\": $backup_git_dirty," \
@@ -145,6 +161,8 @@ printf '%s\n' \
   "  \"databaseImageId\": \"$backup_database_image\"," \
   "  \"appContainerId\": \"$backup_app_id\"," \
   "  \"appImageId\": \"$backup_app_image\"," \
+  "  \"appImageRevision\": \"$backup_app_revision\"," \
+  "  \"sourceMatchesRunningImage\": $backup_source_matches," \
   '  "secretValuesIncluded": false,' \
   '  "storageClasses": ["artifacts", "repositories", "worktrees", "runner_outputs"]' \
   '}' >"$backup_partial/deployment-metadata.json"
@@ -157,4 +175,12 @@ printf '%s\n' \
   sha256sum --check --strict SHA256SUMS >/dev/null
 )
 mv "$backup_partial" "$backup_final"
+if [[ "$backup_source_matches" == false ]]; then
+  echo "警告：归档源码是 $backup_source_revision，运行中的应用镜像标记为 $backup_app_revision。" >&2
+  echo "      这次备份不能自证「归档源码就是产生该镜像的那份源码」，恢复后行为可能与当前实例不同。" >&2
+  echo "      请先让工作树与构建该镜像的分支一致，再重新备份。" >&2
+elif [[ "$backup_app_revision" == not-recorded ]]; then
+  echo "提示：运行中的应用镜像没有源码修订标签，这次备份无法证明归档源码与运行镜像同源。" >&2
+  echo "      用 scripts/start-local.ps1 或 compose.maitu.yaml 重新构建镜像后会带上该标签。" >&2
+fi
 echo "备份完成并通过校验：$backup_final"

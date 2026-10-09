@@ -15,6 +15,7 @@ $taskPreviousPort = $env:MAITU_PORT
 $taskPreviousHttpProxy = $env:HTTP_PROXY
 $taskPreviousHttpsProxy = $env:HTTPS_PROXY
 $taskPreviousBuildProxy = $env:MAITU_BUILD_PROXY
+$taskPreviousSourceRevision = $env:FUDIAN_SOURCE_REVISION
 
 try {
     $env:MAITU_PORT = [string]$Port
@@ -63,6 +64,17 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw '脉图启动配置校验失败。'
     }
+    if (-not $env:FUDIAN_SOURCE_REVISION -and (Get-Command git -ErrorAction SilentlyContinue)) {
+        # 让镜像带上构建它的源码修订，备份元数据才能证明归档源码与运行镜像同源。
+        $taskSourceRevision = & git -C $taskRepoRoot rev-parse HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $taskSourceRevision) {
+            $env:FUDIAN_SOURCE_REVISION = ([string]$taskSourceRevision).Trim()
+            if (& git -C $taskRepoRoot status --porcelain --untracked-files=normal 2>$null) {
+                $env:FUDIAN_SOURCE_REVISION = "$($env:FUDIAN_SOURCE_REVISION)-dirty"
+            }
+            Write-Host "镜像将标记源码修订 $($env:FUDIAN_SOURCE_REVISION)。"
+        }
+    }
     $taskComposeArgs = @('compose', '-f', $taskComposeFile, 'up', '-d', '--wait', '--wait-timeout', '180')
     if ($NoBuild) {
         $taskComposeArgs += '--no-build'
@@ -91,4 +103,5 @@ try {
     $env:HTTP_PROXY = $taskPreviousHttpProxy
     $env:HTTPS_PROXY = $taskPreviousHttpsProxy
     $env:MAITU_BUILD_PROXY = $taskPreviousBuildProxy
+    $env:FUDIAN_SOURCE_REVISION = $taskPreviousSourceRevision
 }
