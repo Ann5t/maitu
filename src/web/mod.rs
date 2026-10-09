@@ -34,8 +34,11 @@ pub struct AppState {
     pub providers: crate::maitu::provider::ProviderStore,
 }
 
+/// 请求 id 响应头名：与下面的 id 层保持一致，失败日志也用它和前端对应。
+const REQUEST_ID_HEADER: &str = "x-request-id";
+
 pub fn router(state: Arc<AppState>) -> Router {
-    let request_id = HeaderName::from_static("x-request-id");
+    let request_id = HeaderName::from_static(REQUEST_ID_HEADER);
     let security_state = state.clone();
     Router::new()
         .route(
@@ -418,16 +421,23 @@ pub fn router(state: Arc<AppState>) -> Router {
 ///
 /// TraceLayer 默认的失败日志只有状态码与耗时，线上出现 500 时无法判断是哪个请求
 /// 失败（实测确认 parent: span 也不会输出请求 span 里的字段）。这里显式记录方法、
-/// 路径（不含查询串）与状态码，让每一条 500 都能直接对应到端点。
+/// 路径（不含查询串）、状态码与请求 id，让每一条 500 都能直接对应到端点，并与前端
+/// 看到的 x-request-id 相互印证。
 async fn log_server_error(request: Request, next: middleware::Next) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
     let response = next.run(request).await;
     if response.status().is_server_error() {
+        let request_id = response
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-");
         tracing::error!(
             method = %method,
             path = %path,
             status = response.status().as_u16(),
+            request_id,
             "HTTP 请求失败"
         );
     }
