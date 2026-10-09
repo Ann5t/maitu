@@ -16,11 +16,15 @@ make check
 
 ## Windows 上的检查环境
 
-`make check`、`./scripts/quality-gate.sh` 和 `scripts/` 下的专项检查都是 Bash，在 Windows 上须通过 WSL 或 Git Bash 执行。仓库用 `.gitattributes` 固定文本文件为 LF；旧检出若把脚本写成 CRLF，shebang 会变成 `#!/usr/bin/env bash\r`，执行时报 `env: $'bash\r': No such file or directory`。此时重新取出脚本即可恢复正确行尾：
+`make check`、`./scripts/quality-gate.sh` 和 `scripts/` 下的专项检查都是 Bash，在 Windows 上须通过 WSL 或 Git Bash 执行。仓库用 `.gitattributes` 固定文本文件为 LF；在此之前的旧检出会把脚本写成 CRLF，shebang 变成 `#!/usr/bin/env bash\r`，执行时报 `env: $'bash\r': No such file or directory`。
+
+行尾已经写坏时，重新取出脚本即可恢复（会覆盖 `scripts/` 下未提交的改动）：
 
 ```bash
-git checkout -- scripts
+rm -f scripts/*.sh && git checkout -- scripts
 ```
+
+只执行 `git checkout -- scripts` 不起作用：行尾差异被 Git 的行尾转换掩盖，Git 认为文件没有修改，因而不会重写它们。
 
 ## 完整质量门
 
