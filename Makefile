@@ -11,7 +11,7 @@ help:
 	@echo "make check     运行文档、格式、Clippy 和测试"
 	@echo "make docs      检查 Markdown 结构和本地链接"
 	@echo "make db-shell  进入 PostgreSQL"
-	@echo "make backup    备份数据库、产物和源码"
+	@echo "make backup    备份 Maitu 栈的数据库、四个内容卷与可构建源码"
 
 dev:
 	$(COMPOSE) up --build app
@@ -40,7 +40,7 @@ db-shell:
 	$(COMPOSE) exec postgres psql -U fudian_nextgen -d fudian_nextgen
 
 backup:
-	./scripts/backup.sh
+	./scripts/backup-maitu.sh
 
 logs:
 	$(COMPOSE) logs -f app app-prod postgres
