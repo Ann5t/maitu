@@ -39,6 +39,7 @@
 - `test-secure-compose.sh`
 - `test-storage-reconciliation.sh`
 - `test-backup-recovery.sh`
+- `audit-dependencies.sh`：用 RustSec 咨询库审计 Cargo.lock 全部依赖；按设计不接入质量门，需要阻断时由维护者显式运行
 
 ## 构建与运维
 
