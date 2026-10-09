@@ -59,12 +59,12 @@
 ## 四、怎样复现上面的验证
 
 ```bash
-# 1) 可重复启动：另起实例，项目名、端口与数据卷都与日用实例隔离
+  # 1) 可重复启动：另起实例，项目名、端口与数据卷都与日用实例隔离
 MAITU_INSTANCE=maitu-verify MAITU_PORT=3133 \
   docker compose -f compose.maitu.yaml up -d --no-build
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3133/api/health
 
-# 2) 备份：备份目录故意写在 Windows 盘路径上（缺陷只在这一层出现）
+  # 2) 备份：备份目录故意写在 Windows 盘路径上（缺陷只在这一层出现）
 FUDIAN_BACKUP_DATABASE_CONTAINER=<stack>-postgres-1 \
 FUDIAN_BACKUP_POSTGRES_USER=maitu FUDIAN_BACKUP_POSTGRES_DB=maitu \
 FUDIAN_BACKUP_APP_CONTAINER=<stack>-app-1 \
@@ -74,7 +74,7 @@ FUDIAN_BACKUP_WORKTREE_VOLUME=<stack>_worktrees \
 FUDIAN_BACKUP_RUNNER_VOLUME=<stack>_runner_outputs \
   bash scripts/backup-v2.sh /mnt/c/<会触发缺陷的路径>/backups
 
-# 3) 恢复：目标必须是带专用标签的空对象
+  # 3) 恢复：目标必须是带专用标签的空对象
 docker volume create --label com.fudian.restore-target=true <目标卷>
 docker run -d --name <目标库容器> --label com.fudian.restore-target=true \
   -e POSTGRES_USER=maitu -e POSTGRES_DB=maitu -e POSTGRES_PASSWORD=<本机开发口令> \
@@ -94,3 +94,4 @@ FUDIAN_RESTORE_APP_IMAGE=<runtime 镜像> \
 - 本页只记录有证据的结论。某个修复合并后，请把对应状态从「待合并」改为「已合并」，并把行为变化写进[实施进度](../development/maitu-progress.md)；不要在本页把计划写成已实现。
 - 阶段 6 的通过条件是「上述使用流程通过；影响核心使用或造成数据损失的问题已处理；用户试用接受」，**不是**本页列完即通过。
 - 相关检查方法见[测试指南](../development/testing.md)，本机启动细节见[脉图本机使用](maitu-local.md)，备份单元与回退边界见[备份与恢复](recovery.md)。
+- `scripts/check-docs.py` 按行统计以 `# ` 开头的行，所以代码块里**顶格**写的 shell 注释会被当成一级标题；注释请缩进两格，或移到代码块外。
