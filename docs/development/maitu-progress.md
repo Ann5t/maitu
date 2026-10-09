@@ -40,6 +40,10 @@
 
 合并可行性用对象层 `git merge-tree --write-tree` 检验（不依赖工作树）：`graph/salvage-deployed-parity` 与 `execution/local-mode-auth-response`、`repo/line-endings`、`repo/maitu-backup-doc` 都能干净合并，且 `main` 是 `graph/salvage-deployed-parity` 的祖先，因此合入不需要解决冲突。
 
+`graph/remove-legacy-ui` 的失败单独查过。Rust 三个阶段（`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked --all-targets`）在该提交上全部通过；`docker build --target development`、`--target runner-runtime`、插件镜像构建与插件冒烟也全部通过。按 `quality-gate.sh` 的顺序把 20 个脚本跑完，17 个通过，**确定性失败只有 `test-security-https`（exit 1），原因就是那行旧断言**，与其它分支一致；`test-production-image`、`test-storage-reconciliation`、`test-secure-compose`、`test-real-plugins-http` 都通过。云端 run 72 报的 exit 101 用本机逐阶段复现不出来，该提交上可复现的失败是 exit 1。
+
+同一批顺序运行中 `test-scheduler-http` 曾以 exit 22（HTTP 409）失败，但**在同一提交上单独重跑通过**，所以它是顺序或时序敏感的偶发失败，不能算这个分支的缺陷；记在这里以免下次误判成回归。另有一条本机测试限制：`test-backup-recovery.sh` 无法从 `git worktree` 运行，因为 worktree 的 `.git` 文件里是 Windows 绝对路径，脚本内的 git 调用报 `fatal: not a git repository`，这条要在主检出里跑。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。
