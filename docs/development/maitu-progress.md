@@ -50,6 +50,10 @@
 
 同一批顺序运行中 `test-scheduler-http` 曾以 exit 22（HTTP 409）失败，但**在同一提交上单独重跑通过**，所以它是顺序或时序敏感的偶发失败，不能算这个分支的缺陷；记在这里以免下次误判成回归。另有一条本机测试限制：`test-backup-recovery.sh` 无法从 `git worktree` 运行，因为 worktree 的 `.git` 文件里是 Windows 绝对路径，脚本内的 git 调用报 `fatal: not a git repository`，这条要在主检出里跑。
 
+**审阅分支的合并验证（每次重建重跑）。** 各审阅分支的合并后状态用对象层 `git merge-tree --write-tree` 依次合成验证（不动 `main`、不建工作树），结果维护在 `repo/verified-merge-candidate`；每加入一个分支都会重建候选并重跑一次云端完整质量门，所以这里不逐个记数。三点结论。第一，`graph/salvage-deployed-workbench` 是冗余的：在 `graph/salvage-deployed-parity` 之后合并它不改变 tree。第二，合并结果的 `assets/` 与运行镜像逐字节一致（按行尾归一后 180/181 匹配），唯一差异是 `app.js` 上的修复，说明后续分支没有把抢救回来的内容改坏。第三，合并暴露了一个单独分支看不到的缺陷：`test-workbench-browser.sh` 在合并状态收到 `InvalidStateError: Transition was aborted because of invalid state`，**堆栈为空、不来自页面脚本**——它是 CSS `@view-transition { navigation: auto }` 的跨文档切换被导航打断时由浏览器内部产生的拒绝。修法是在 `pageswap` 与 `pagereveal` 上兜住 `event.viewTransition`（`a585ea3`），合并状态随即 6 个浏览器用例全通过；运行实例镜像内的 `app.js` 至今连 JS 发起的那次切换都没兜，重建镜像后会一并生效。
+
+分支侧另外三项也随候选一起验证：`graph/browser-runtime-guard` 让五个浏览器用例都断言没有未捕获异常与 5xx；`infra/serialize-quality-gate` 让质量门里纯网络的两步（镜像拉取与新增的 `cargo fetch --locked`）可按次重试，而 `cargo fmt`、`cargo clippy`、`cargo test` 一律不重试，避免掩盖真实失败；`infra/dependency-security-update` 修掉 `cargo audit`（RustSec 1296 条咨询）报出的 RUSTSEC-2026-0285（`rustls` 0.23.43 → 0.23.45）与 `chacha20` 0.10.1 被 yank 的警告，并交付 `scripts/audit-dependencies.sh`——它故意不接入必过门：咨询库每天更新，接进去会让分支成败取决于提交之外的第三方数据。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。
