@@ -207,4 +207,26 @@ if [[ "$backup_credential_path" != not-recorded ]]; then
     echo "      需要连同连接配置一起迁移或备份时，请单独复制承载该路径的卷，并按凭据保管。" >&2
   fi
 fi
+
+# 主机侧校验通过不等于能恢复：restore-v2.sh 用只读 bind 挂载读取这个目录，
+# 而由容器创建在 Windows 挂载点上的目录可能主机可读、WSL/容器侧却不可见。
+# 2026-10-10 实测到这样的目录：主机 sha256sum -c 全部 OK，容器只读 bind 挂载却报
+# "mkdir ...: file exists" 且看不到任何文件，恢复因此直接失败。这里用恢复路径
+# 同样的方式再自检一次，产出不可恢复就当场失败，不把成功写在报告里。
+echo "用恢复路径的只读挂载自检备份目录"
+backup_final_absolute="$(cd "$backup_final" && pwd)"
+if ! backup_self_check="$(docker run --rm \
+  --mount "type=bind,src=$backup_final_absolute,dst=/backup,readonly" \
+  "$backup_archive_image" sh -c 'cd /backup && sha256sum -c SHA256SUMS >/dev/null 2>&1 && ls -1 | wc -l' 2>&1)"; then
+  echo "备份目录无法被恢复路径读取，这份备份不能用于恢复：$backup_final" >&2
+  echo "只读 bind 挂载自检输出：$backup_self_check" >&2
+  exit 1
+fi
+host_file_count="$(find "$backup_final_absolute" -maxdepth 1 -type f 2>/dev/null | wc -l)"
+container_file_count="${backup_self_check//[^0-9]/}"
+if [[ "$host_file_count" -eq 0 || "$container_file_count" != "$host_file_count" ]]; then
+  echo "备份目录在恢复路径下可见文件数与主机不一致：主机 $host_file_count，容器 $container_file_count" >&2
+  exit 1
+fi
+
 echo "备份完成并通过校验：$backup_final"
