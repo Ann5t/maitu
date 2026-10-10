@@ -458,7 +458,7 @@ print(json.dumps({"clientRequestId":str(uuid.uuid4()),"action":"session.add_cont
 [[ "$(json_field "$(<"$goal_http_tmp/link-reject.json")" code)" == task_not_accepted ]]
 
 goal_link_attempt_id="$(new_uuid)"
-docker exec "$goal_http_db" psql -U fudian_test -d fudian_test -Atc   "UPDATE maitu_tasks SET accepted_attempt_id = '$goal_link_attempt_id' WHERE id = '$goal_link_task_id'" >/dev/null
+docker exec "$goal_http_db" psql -U fudian_test -d fudian_test -Atc   "INSERT INTO maitu_attempts (id, task_id, number, status)    VALUES ('$goal_link_attempt_id', '$goal_link_task_id', 1, 'produced');    UPDATE maitu_tasks SET accepted_attempt_id = '$goal_link_attempt_id' WHERE id = '$goal_link_task_id'" >/dev/null
 goal_response="$(post_goal session.add_contribution   "{\"sessionId\":\"$goal_link_session_id\",\"kind\":\"finding\",\"title\":\"任务成果进入枝干\",\"body\":\"关联回归任务的已采用成果\",\"artifactId\":null,\"evidenceRefs\":[],\"supersedesId\":null,\"maituTaskId\":\"$goal_link_task_id\"}"   "$(new_uuid)")"
 goal_link_contribution_id="$(json_field "$goal_response" result.contributionId)"
 goal_link_graph="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_link_project_id/goal-graph")"
