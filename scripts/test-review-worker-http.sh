@@ -331,8 +331,9 @@ rw_gate_b="$(json_field "$rw_merge_b" result.reviewGateId)"
 [[ "$(docker exec "$rw_db" psql -U fudian_test -d fudian_test -Atc \
   "SELECT status FROM goal_review_gates WHERE id = '$rw_gate_b'")" == pending_ai_review ]]
 
-# 冻结后在宿主侧写入未跟踪文件：只读观察必须发现漂移。
-printf 'out-of-band drift\n' > "$rw_tmp/worktrees/$rw_key_b/drift.tmp"
+# 冻结后写入未跟踪文件制造漂移。经由 app 容器 touch（目录由容器内
+# root 创建，宿主侧非 root 用户——例如 CI runner——没有写权限）。
+docker exec "$rw_app" touch "/data/worktrees/$rw_key_b/drift.tmp"
 
 docker run -d --name "$rw_worker" --network "$rw_network" \
   -e MAITU_REVIEW_BASE_URL=http://rw-app:3000 -e RUST_LOG=fudian=info \
