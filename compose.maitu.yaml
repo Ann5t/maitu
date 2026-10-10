@@ -26,7 +26,8 @@ services:
       - >-
         mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config /run/maitu-executor
         && if [ ! -s /run/maitu-executor/token ]; then umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' >/run/maitu-executor/token; fi
-        && chmod 700 /run/maitu-executor && chmod 600 /run/maitu-executor/token
+        && if [ ! -s /run/maitu-executor/review-bootstrap ]; then umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' >/run/maitu-executor/review-bootstrap; fi
+        && chmod 700 /run/maitu-executor && chmod 600 /run/maitu-executor/token /run/maitu-executor/review-bootstrap
         && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner /data/maitu-config /run/maitu-executor
     volumes:
       - artifacts:/data/artifacts
@@ -59,6 +60,7 @@ services:
       MAITU_CONFIG_ROOT: /data/maitu-config
       MAITU_CHECK_WORKER_URL: http://check-worker:3001
       MAITU_CHECK_WORKER_TOKEN_FILE: /run/maitu-executor/token
+      FUDIAN_WORKER_BOOTSTRAP_TOKEN_FILE: /run/maitu-executor/review-bootstrap
       RUST_LOG: fudian=info,tower_http=info
     ports:
       - "127.0.0.1:${MAITU_PORT:-3033}:3000"
@@ -125,6 +127,34 @@ services:
       timeout: 5s
       retries: 12
       start_period: 15s
+    init: true
+    restart: unless-stopped
+
+  # 独立 Review Worker：评审闸门 pending_ai_review → pending_human_review 的
+  # 唯一驱动者。候选 worktree 与仓库只读挂载，无 Docker socket、无 capabilities、
+  # 无模型连接凭据卷——隔离声明由进程运行时实测，任一缺失会拒绝提交报告。
+  review-worker:
+    image: maitu-app:local
+    command: ["maitu-review-worker"]
+    environment:
+      MAITU_REVIEW_BASE_URL: http://app:3000
+      RUST_LOG: fudian=info
+    volumes:
+      - repositories:/data/repositories:ro
+      - worktrees:/data/worktrees:ro
+      - executor_auth:/run/maitu-executor:ro
+    networks: [executor]
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
     init: true
     restart: unless-stopped
 

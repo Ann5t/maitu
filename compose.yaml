@@ -10,6 +10,7 @@ x-app-environment: &app-environment
   RUNNER_OUTPUT_ROOT: /data/runner
   RUNNER_RUNTIME_DIGEST: ${RUNNER_RUNTIME_DIGEST:-sha256:0000000000000000000000000000000000000000000000000000000000000000}
   FUDIAN_BIND: 0.0.0.0:3000
+  FUDIAN_WORKER_BOOTSTRAP_TOKEN_FILE: /run/maitu-executor/review-bootstrap
   RUST_LOG: ${RUST_LOG:-fudian=debug,tower_http=info}
   INPUT_MAX_BYTES: ${INPUT_MAX_BYTES:-67108864}
   INPUT_CHUNK_MAX_BYTES: ${INPUT_CHUNK_MAX_BYTES:-4194304}
@@ -36,12 +37,20 @@ services:
   artifact-init:
     image: postgres:17-alpine
     user: "0:0"
-    command: ["sh", "-c", "mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner"]
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p /data/artifacts /data/repositories /data/worktrees /data/runner /run/maitu-executor
+        && if [ ! -s /run/maitu-executor/review-bootstrap ]; then umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' >/run/maitu-executor/review-bootstrap; fi
+        && chmod 700 /run/maitu-executor && chmod 600 /run/maitu-executor/review-bootstrap
+        && chown -R 1000:1000 /data/artifacts /data/repositories /data/worktrees /data/runner /run/maitu-executor
     volumes:
       - artifacts:/data/artifacts
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - executor_auth:/run/maitu-executor
     tmpfs:
       - /var/lib/postgresql/data
     restart: "no"
@@ -69,6 +78,37 @@ services:
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - executor_auth:/run/maitu-executor:ro
+    init: true
+
+  # 开发栈的 Review Worker：跑同一个检出的 cargo bin。候选 worktree 与
+  # 仓库卷仍然只读挂载；cap_drop 与 no-new-privileges 与日用栈一致，
+  # 隔离声明由进程实测（根文件系统因 cargo 需要可写，与候选只读无关）。
+  review-worker:
+    build:
+      context: .
+      target: development
+    working_dir: /app
+    command: ["cargo", "run", "--bin", "maitu-review-worker"]
+    environment:
+      MAITU_REVIEW_BASE_URL: http://app:3000
+      RUST_LOG: fudian=info
+    depends_on:
+      artifact-init:
+        condition: service_completed_successfully
+      app:
+        condition: service_started
+    volumes:
+      - .:/app
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - target:/app/target
+      - repositories:/data/repositories:ro
+      - worktrees:/data/worktrees:ro
+      - executor_auth:/run/maitu-executor:ro
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     init: true
 
   app-prod:
@@ -91,6 +131,7 @@ services:
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - executor_auth:/run/maitu-executor:ro
     init: true
     restart: unless-stopped
 
@@ -105,6 +146,8 @@ volumes:
     name: fudian_nextgen_worktrees
   runner_outputs:
     name: fudian_nextgen_runner_outputs
+  executor_auth:
+    name: fudian_nextgen_executor_auth
   cargo_registry:
     name: fudian_rust_cargo_registry
   cargo_git:
