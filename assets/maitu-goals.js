@@ -426,14 +426,49 @@
         block.append(wrap);
         const decide = element('div', 'maitu-attention-actions');
         const selectedIds = () => [...block.querySelectorAll('[name="gate-contributions"]:checked')].map(input => input.value);
-        decide.append(button('通过并合入', () => goalCommand('review.human_decide', {
-          reviewGateId: gate.id, decision: 'accept', rationale: '人工审核通过', selectedContributionIds: selectedIds()
-        }).then(() => {feedback('门禁已通过，分支进入合入。'); return refreshAfter();})));
-        decide.append(button('部分通过', () => goalCommand('review.human_decide', {
-          reviewGateId: gate.id, decision: 'partial_accept', rationale: '部分贡献合入', selectedContributionIds: selectedIds()
-        }).then(refreshAfter)));
-        decide.append(button('驳回', () => goalCommand('review.human_decide', {reviewGateId: gate.id, decision: 'reject', rationale: '人工驳回', selectedContributionIds: []}).then(refreshAfter), 'maitu-button--danger'));
-        decide.append(button('撤回合入', () => goalCommand('merge.withdraw', {reviewGateId: gate.id, reason: '撤回本次合入', newEvidence: []}).then(refreshAfter)));
+        // 决定理由是领域一等记录（驳回理由与下一轮要求会传给下一会话），不能用固定文案代填。
+        const openGateDecision = (title, submitLabel, options) => {
+          const form = element('form', '');
+          form.append(formRow(options.label, field('rationale', {
+            tag: 'textarea', rows: 2,
+            required: options.required,
+            value: options.value,
+            placeholder: options.placeholder
+          })));
+          bindDialog(form, submitLabel, async data => {
+            const rationale = (data.rationale || '').trim() || options.value;
+            if (options.required && !rationale) {feedback(options.label + '不能为空。', true); return;}
+            if (options.command === 'merge.withdraw') {
+              await goalCommand('merge.withdraw', {reviewGateId: gate.id, reason: rationale, newEvidence: []});
+            } else {
+              await goalCommand('review.human_decide', {
+                reviewGateId: gate.id, decision: options.command,
+                rationale, selectedContributionIds: options.selection ? selectedIds() : []
+              });
+            }
+            $('#maitu-goal-dialog').close();
+            if (options.message) feedback(options.message);
+            await refreshAfter();
+          });
+          openGoalDialog(title, form);
+        };
+        decide.append(button('通过并合入', () => openGateDecision('通过并合入', '确认通过', {
+          command: 'accept', selection: true, label: '决定理由',
+          value: '人工审核通过', placeholder: '接受这份候选的理由',
+          message: '门禁已通过，分支进入合入。'
+        })));
+        decide.append(button('部分通过', () => openGateDecision('部分通过', '确认部分通过', {
+          command: 'partial_accept', selection: true, label: '决定理由',
+          value: '部分贡献合入', placeholder: '只合入选中贡献的理由'
+        })));
+        decide.append(button('驳回', () => openGateDecision('驳回', '确认驳回', {
+          command: 'reject', selection: false, label: '退回理由与下一轮要求', required: true,
+          value: '', placeholder: '为什么退回；下一会话要推进什么（会传给下一会话）'
+        }), 'maitu-button--danger'));
+        decide.append(button('撤回合入', () => openGateDecision('撤回合入', '确认撤回', {
+          command: 'merge.withdraw', selection: false, label: '撤回原因', required: true,
+          value: '', placeholder: '发现的新问题与证据'
+        })));
         block.append(decide);
       }
       const show = button('候选快照', () => showOutput('合入候选快照', JSON.stringify(gate.candidateSnapshot, null, 2)));
