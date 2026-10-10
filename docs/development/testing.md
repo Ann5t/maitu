@@ -62,3 +62,39 @@ rm -f scripts/*.sh && git checkout -- scripts
 网页用例覆盖文件夹导入及忽略项、编码类型与验收字段、编辑并采用计划、未启动节点、历史查看、补充要求与重试，以及桌面和手机上卡片不重叠。计划建议 fixture 明确标为网页测试数据，不作为真实 DeepSeek 证据。真实账户验收另记录模型请求时段、具体代码差异、真实进程结果和采用版本。
 
 完整质量门的 `test-backup-recovery.sh` 还导入一个只有 Maitu 托管代码仓库的实例，实际备份到空目标并比较完整项目信息与代码导出。此用例不创建旧 `projects/*.git`，避免旧路径的有效仓库掩盖新版 `maitu-code/*/repository.git` 没有被校验的问题。
+
+## 隔离集成测试的排错要点
+
+`src/maitu/integration.rs` 里的用例都标了 `#[ignore]`，只在隔离 PostgreSQL 下运行。手写 `docker run ... cargo test` 复跑单个用例时，下面四点都实际造成过**看起来像产品缺陷的假结论**：
+
+1. **`--exact` 只接受完整测试路径，并且要核对真的跑了 1 个用例。**
+   短名配 `--exact` 匹配不到任何用例，cargo 仍会打印 `test result: ok. 0 passed; ... N filtered out`；只看 `ok` 会把空跑当成通过。用完整路径，并确认汇总行是 `1 passed`：
+
+   ```bash
+   docker run --rm --network "$NET" -w /app -e DATABASE_URL="$URL" "$IMG" \
+     cargo test --offline --locked --bin fudian \
+     maitu::integration::queued_task_held_for_a_connection_is_not_claimed_by_it \
+     -- --ignored --exact --nocapture
+   ```
+
+   `scripts/test-maitu-workflow.sh` 不传 `--exact`，逐个执行完整路径，不受这一条影响。
+
+2. **不要在另一个工作树里对共享 target 卷执行 `cargo clean`。**
+   `cargo clean -p fudian` 清掉的是卷里的产物，而另一个工作树的指纹仍显得是新的，于是那个工作树会继续运行**用被改过的源码构建出来的二进制**。实测后果是一个质量门全绿的用例在本地连续失败，并报出只有被改过的源码才可能产生的错误。给第二个工作树独立 target 卷，或只在当前工作树清理：
+
+   ```bash
+   docker run --rm -w /app --mount "type=bind,src=$OTHER_WORKTREE,dst=/app" \
+     --mount "type=volume,src=maitu_alt_target,dst=/app/target" "$IMG" cargo test ...
+   ```
+
+3. **`EXTRACT(EPOCH FROM ...)` 返回 `numeric`，sqlx 不能把它解码成 `f64`。**
+   取持锁剩余时间这类数值要显式转型，否则 `unwrap()` 报解码错误，掩盖真正要看的断言：
+
+   ```sql
+   SELECT (EXTRACT(EPOCH FROM (hold_until - now())))::float8 FROM maitu_tasks WHERE id=$1
+   ```
+
+4. **Windows 工作树是 CRLF、Git 存 LF，脚本类文件尤其要确认差异行数。**
+   在 Windows 侧改 `scripts/*.sh` 后用 WSL 的 git `add`，会把整个脚本按 CRLF 记进提交（diff 显示上百行），而 CRLF 的 bash 脚本在 Linux 上无法执行。提交脚本类文件用 Windows 的 git（`core.autocrlf=true` 会归一为 LF），并用 `git diff --stat HEAD^ HEAD` 确认它只改了实际修改的行数。
+
+与用例本身有关的一点：`fail_or_retry` 会在**新的 attempt 行**里为重试排队，所以一次失败之后任务本来就有两行，判定要按尝试状态计数，不能把 `attempts.len()` 当成"尝试次数"。
