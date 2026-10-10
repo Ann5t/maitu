@@ -60,6 +60,18 @@
 
 补充两条诊断时用得到的事实，免得重复踩坑：fixture 的调用计数在返回 429 **之前**自增（`calls` 的 entry 写在 flaky 分支之前），所以"已收到请求"不等于"响应已发出"；`ProviderStore::delete` 拒绝删除最后一个连接（`provider.rs:383`，提示"至少保留一个模型连接"），而 `save` 与 `delete` 都会立即更新内存里的连接表（`provider.rs:370`、`389`），所以删掉的连接不会再被领取。
 
+### 若选 (b)：Review Worker 的接口已经写死
+
+`scripts/review-worker-test-lib.sh` 里的 `test_review_gate` 已经把协议跑通，实现方照做即可：
+
+1. 用 `POST /api/v1/scheduler/workers` 注册**独立身份**（请求头 `x-fudian-worker-bootstrap`，能力 `["review.goal_candidate.v1"]`，身份必须与工作 Agent 不同）；
+2. 轮询 `POST /api/v1/scheduler/claim`，领到 `kind="review"`、`subjectId` 等于闸门 id 的 ActionRun，并持有 `softTtlSeconds`/`hardTtlSeconds` 内的 Lease 与 fencing token（测试里是 120/300 秒，真实复验应配合心跳或用更长的租约）；
+3. 以**只读**方式打开冻结候选（payload 里的 `repositoryKey`/`worktreeKey`，摘要见 `candidateDigest`/`headCommit`/`treeId`/`workspaceSnapshot`），复跑契约检查与隔离复验、记录反例与复验证据；
+4. 用 `POST /api/v1/scheduler/action-runs/:id/complete` 提交绑定报告，报文字段为 `schemaVersion`、`candidateDigest`、`contractVersionId`、`observedHeadCommit`、`observedTreeId`、`observedWorkspaceSnapshot`、`environmentFingerprint`、`decision`、`rationale`、`contractCheck`、`counterexamples`、`retestEvidence`、`isolation{candidateReadOnly,noWorkspaceWrites,noNewPrivileges,dockerSocketAbsent,hostSecretsAbsent,effectiveCapabilitiesHex}`；按[领域规范](../architecture/goal-branch-domain.md)第 186 行，摘要、HEAD/tree/snapshot、环境或 fencing 不匹配都会被拒（各项隔离声明的服务端校验强度我未逐项验证）；
+5. 完成后闸门才转 `pending_human_review`，用户才会看到「接受／退回／部分接受」。
+
+**缺的是生产者与部署**：一个独立进程（例如 `src/bin/` 新二进制或外部服务）、一条与工作 Agent 不同的模型连接、只读挂载且无 Docker socket 与主机密钥的隔离，以及 compose 服务与 bootstrap 密钥。验收套件已经存在（`scripts/test-review-integration-http.sh` 与上面这个共享库），所以实现后能直接在质量门里验证。
+
 ## 四、怎样复现上面的验证
 
 ```bash
