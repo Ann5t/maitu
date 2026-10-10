@@ -62,7 +62,7 @@ pub(crate) fn shell(title: &str, mode: &str, project_id: Option<Uuid>, content: 
                 link rel="stylesheet" href="/assets/maitu.css";
                 script src="/assets/theme.js" defer {}
                 script src="/assets/maitu.js?v=ui-5" defer {}
-                @if mode == "ideas" || mode == "idea" { script src="/assets/maitu-ideas.js?v=4" defer {} }
+                @if mode == "ideas" || mode == "idea" { script src="/assets/maitu-ideas.js?v=5" defer {} }
                 @if mode == "project" { script src="/assets/maitu-goals.js?v=4" defer {} }
             }
             body data-maitu-mode=(mode) data-project-id=(project_id.map(|id| id.to_string()).unwrap_or_default()) {

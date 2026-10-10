@@ -366,7 +366,7 @@
           const title = firstLine.slice(0, 60) || current?.title || '立项';
           const desiredOutcome = rest.join('\n').trim() || firstLine;
           await command('project_proposal.create', {revision: {
-            title, projectIntent: goalText, whyNow: data.whyNow || '',
+            title, projectIntent: goalText, whyNow: data.whyNow || firstLine,
             rootGoal: {
               whyNeeded: data.whyNow || firstLine,
               contract: {
