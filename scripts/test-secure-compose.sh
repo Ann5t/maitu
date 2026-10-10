@@ -180,6 +180,6 @@ grep -q 'id="maitu-project-create"' "$secure_compose_tmp/dashboard.html"
 
 secure_compose_migrations="$(secure_compose exec -T postgres \
   psql -U fudian -d fudian -Atc 'SELECT count(*) FROM schema_migrations;')"
-[[ "$secure_compose_migrations" == 18 ]]
+[[ "$secure_compose_migrations" == 19 ]]
 
 echo "secure compose passed: file secrets, internal networks, no app/database ports, HTTPS-only gateway, non-root read-only services and bounded resources"

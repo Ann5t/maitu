@@ -981,3 +981,167 @@ async fn rate_limited_connection_fails_over_bounded_and_records_usage_per_connec
         "Maitu multi-connection fixture passed: automatic failover across connections, bounded retries with backoff on one connection, per-connection capacity, queue fairness, usage and connection recorded per attempt."
     );
 }
+
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL; run scripts/test-maitu-workflow.sh"]
+async fn queued_task_held_for_a_connection_is_not_claimed_by_it() {
+    let config = Config::from_env().unwrap();
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&config.database_url)
+        .await
+        .unwrap();
+    migrations::run(&pool).await.unwrap();
+    let fixture_state = Arc::new(Fixture::default());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture_router = Router::new()
+        .route("/chat/completions", post(fixture))
+        .with_state(fixture_state.clone());
+    let fixture_server = tokio::spawn(async move {
+        axum::serve(listener, fixture_router).await.unwrap();
+    });
+    let providers = ProviderStore::open(config.artifact_root.with_file_name("maitu-test-hold"))
+        .await
+        .unwrap();
+    // Only the throttled connection is registered: the control task below proves the claim
+    // path works with this connection, so the held task proves the hold is what keeps it out.
+    providers
+        .save(ProviderConfig {
+            key: "flaky".into(),
+            label: "限流连接".into(),
+            base_url: format!("http://{address}"),
+            api_key: fixture_key("flaky"),
+            concurrency: 8,
+            max_tokens: 65536,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    providers.delete("deepseek").await.unwrap();
+    let state = Arc::new(AppState {
+        pool,
+        config,
+        providers,
+        tool_proxy_client: reqwest::Client::new(),
+    });
+    let project = projects::create_project(
+        &state.pool,
+        ProjectIntake {
+            intent: "验证退避持锁在领取路径上生效".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let (shutdown, signal) = watch::channel(false);
+    let worker_state = state.clone();
+    let worker = tokio::spawn(async move {
+        workflows::run_worker(worker_state, signal).await.unwrap();
+    });
+    let held = new_task(
+        &state,
+        project,
+        "hold-block",
+        "Produce while the connection is held",
+        vec![],
+    )
+    .await;
+    let control = new_task(
+        &state,
+        project,
+        "hold-control",
+        "Produce while the connection is held",
+        vec![],
+    )
+    .await;
+    // Hold the first task for the throttled connection without letting it fail first, so the
+    // in-process backoff is not active: the hold is then the only reason this connection may
+    // not claim the task. The status and attempt count below are read as one row.
+    sqlx::query(
+        "UPDATE maitu_tasks SET hold_connection=$2, hold_until=now()+make_interval(secs => 5) \
+         WHERE id=$1",
+    )
+    .bind(held.id)
+    .bind("flaky")
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    workflows::start(&state.pool, held.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    workflows::start(&state.pool, control.id, Uuid::new_v4())
+        .await
+        .unwrap();
+    // The control carries no hold and uses the same connection, so it is claimed and fails.
+    // A failure leaves two attempt rows (the failed one plus the retry fail_or_retry queues),
+    // so the count below is deliberately about failed rows only.
+    let _control = wait_attempt_error(&state, control.id, "provider_rate_limit").await;
+    let control_failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM maitu_attempts WHERE task_id=$1 AND status='failed'",
+    )
+    .bind(control.id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        control_failed, 1,
+        "对照组应恰好失败一次（重试会在新的 attempt 行里排队）"
+    );
+    let held_row: (String, i64) = sqlx::query_as(
+        "SELECT status, (SELECT count(*) FROM maitu_attempts WHERE task_id=$1 AND status='failed') \
+         FROM maitu_tasks WHERE id=$1",
+    )
+    .bind(held.id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    let hold_left: f64 = sqlx::query_scalar(
+        "SELECT (EXTRACT(EPOCH FROM (hold_until - now())))::float8 FROM maitu_tasks WHERE id=$1",
+    )
+    .bind(held.id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    let shapes: Vec<(i32, String)> = sqlx::query_as(
+        "SELECT number, status FROM maitu_attempts WHERE task_id=$1 ORDER BY number",
+    )
+    .bind(held.id)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    println!(
+        "  hold observation: status={} failed={} hold_left={hold_left:.2}s attempts={shapes:?}",
+        held_row.0, held_row.1
+    );
+    assert!(
+        hold_left > 0.0,
+        "the hold must still be in force for the next assertions to mean anything (left {hold_left:.2}s)"
+    );
+    assert_eq!(held_row.0, "queued", "持锁期间该连接不得领取这个任务");
+    assert_eq!(held_row.1, 0, "持锁期间不应产生任何失败尝试");
+    // Once the hold expires the same connection claims it, and that failed attempt re-arms the
+    // hold for the retry it just queued: nothing is stuck and the wait is on the record.
+    let _claimed = wait_attempt_error(&state, held.id, "provider_rate_limit").await;
+    let held_failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM maitu_attempts WHERE task_id=$1 AND status='failed'",
+    )
+    .bind(held.id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(held_failed, 1, "持锁到期后该连接应恰好失败一次");
+    let rearmed: (String, bool) =
+        sqlx::query_as("SELECT hold_connection, hold_until > now() FROM maitu_tasks WHERE id=$1")
+            .bind(held.id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(rearmed.0, "flaky", "失败重试必须为刚失败的连接重新记上持锁");
+    assert!(rearmed.1, "重新入队的重试在退避期内必须保持持锁");
+    shutdown.send(true).unwrap();
+    worker.await.unwrap();
+    fixture_server.abort();
+    println!(
+        "Maitu retry hold passed: a queued task held for a connection is not claimed by it while the hold is in force, the claim clears the hold, and a failed retry re-arms it."
+    );
+}
