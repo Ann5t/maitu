@@ -84,7 +84,10 @@ Docker Desktop 自身也需要通过其系统代理或手动代理访问镜像�
 docker compose -f compose.maitu.yaml ps
 docker compose -f compose.maitu.yaml logs --tail 100 app
 docker compose -f compose.maitu.yaml stop
+docker compose -f compose.maitu.yaml exec postgres sh -ec 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
+
+最后一行进入当前实例的 PostgreSQL（用户与库名由容器自己的环境变量决定，不写死）；等价的便捷入口是 `make maitu-db-shell`。
 
 `compose.maitu.yaml` 默认项目名为 `maitu`，使用项目专属的 PostgreSQL、成果、仓库、工作区、执行输出与模型配置卷；旧 `compose.yaml` 是继承来源。可以在启动前设置 `MAITU_INSTANCE` 运行另一套独立实例，并选择空闲端口。继承的备份不导出个人模型密钥，恢复到另一实例时需重新配置。
 

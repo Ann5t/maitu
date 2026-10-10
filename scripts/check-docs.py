@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check tracked Markdown headings and local links without external packages."""
+"""Check tracked Markdown headings, local links and the scripts index."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from urllib.parse import unquote
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+SCRIPTS = REPOSITORY / "scripts"
+SCRIPTS_INDEX = SCRIPTS / "README.md"
 
 
 def tracked_markdown_files() -> list[Path]:
@@ -42,9 +44,29 @@ def link_path(raw_target: str) -> str | None:
     return unquote(target) or None
 
 
+def script_index_failures() -> tuple[list[str], int]:
+    """Every file in scripts/ must be listed in its index, scripts/README.md.
+
+    The testing guide points at this index for per-script coverage; a script that
+    exists but is not indexed is how coverage gets lost without anyone noticing.
+    """
+    index = SCRIPTS_INDEX.read_text(encoding="utf-8")
+    scripts = sorted(
+        path for path in SCRIPTS.iterdir() if path.is_file() and path.name != SCRIPTS_INDEX.name
+    )
+    failures = [
+        f"scripts/README.md: missing index entry for scripts/{script.name}"
+        for script in scripts
+        if f"`{script.name}`" not in index
+    ]
+    return failures, len(scripts)
+
+
 def main() -> int:
     failures: list[str] = []
     files = tracked_markdown_files()
+    index_failures, indexed_scripts = script_index_failures()
+    failures.extend(index_failures)
     for markdown in files:
         text = markdown.read_text(encoding="utf-8")
         headings = [line for line in text.splitlines() if line.startswith("# ")]
@@ -69,7 +91,7 @@ def main() -> int:
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         return 1
-    print(f"documentation check passed ({len(files)} Markdown files)")
+    print(f"documentation check passed ({len(files)} Markdown files, {indexed_scripts} indexed scripts)")
     return 0
 
 

@@ -44,6 +44,8 @@
 ## 构建与运维
 
 - `build-plugin-images.sh`：构建代表性工具镜像
+- `start-local.ps1`：Windows 本机启动入口，构建并启动 Maitu 栈（端口、代理与浏览器开关）
+- `backup-maitu.sh`：解析运行中的 Maitu 栈容器与四个内容卷，再调用 `backup-v2.sh`
 - `backup-v2.sh`、`restore-v2.sh`：当前完整备份与空目标恢复
 - `backup.sh`：旧本机兼容备份入口
 

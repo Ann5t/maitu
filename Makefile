@@ -1,8 +1,11 @@
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose -f compose.yaml
+# 当前 Maitu 栈（用户日常运行的那套）。它与开发栈是不同 compose 项目，容器与卷都
+# 分开，所以操作它必须显式用这个变量，避免把两套栈混在一起。
+MAITU_COMPOSE ?= docker compose -f compose.maitu.yaml
 
-.PHONY: help dev build start check docs test fmt lint db-shell backup logs down
+.PHONY: help dev build start check docs test fmt lint db-shell maitu-db-shell backup logs down
 
 help:
 	@echo "make dev       启动 Rust 开发服务和 PostgreSQL"
@@ -10,8 +13,9 @@ help:
 	@echo "make start     启动生产镜像并复用现有数据卷"
 	@echo "make check     运行文档、格式、Clippy 和测试"
 	@echo "make docs      检查 Markdown 结构和本地链接"
-	@echo "make db-shell  进入 PostgreSQL"
-	@echo "make backup    备份数据库、产物和源码"
+	@echo "make db-shell  进入开发栈 PostgreSQL"
+	@echo "make maitu-db-shell  进入当前 Maitu 栈 PostgreSQL"
+	@echo "make backup    备份 Maitu 栈的数据库、四个内容卷与可构建源码"
 
 dev:
 	$(COMPOSE) up --build app
@@ -37,10 +41,13 @@ docs:
 check: docs fmt lint test
 
 db-shell:
-	$(COMPOSE) exec postgres psql -U fudian_nextgen -d fudian_nextgen
+	$(COMPOSE) exec postgres sh -ec 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+maitu-db-shell:
+	$(MAITU_COMPOSE) exec postgres sh -ec 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 backup:
-	./scripts/backup.sh
+	./scripts/backup-maitu.sh
 
 logs:
 	$(COMPOSE) logs -f app app-prod postgres
