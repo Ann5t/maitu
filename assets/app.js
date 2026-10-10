@@ -1,12 +1,24 @@
 (() => {
   const root = document.documentElement;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  // 视图切换被跳过或中断时 ready 与 finished 会拒绝；不处理就会变成未捕获异常。
+  // 跨文档切换（CSS @view-transition: navigation: auto）由浏览器发起，页面拿不到它的
+  // promise，只能在 pageswap / pagereveal 上兜住同一件事。
+  const swallowTransitionRejection = (transition) => {
+    if (!transition) return;
+    if (transition.ready) transition.ready.catch(() => {});
+    if (transition.finished) transition.finished.catch(() => {});
+  };
+  window.addEventListener("pageswap", (event) => swallowTransitionRejection(event.viewTransition));
+  window.addEventListener("pagereveal", (event) => swallowTransitionRejection(event.viewTransition));
   const updateWithTransition = (update) => {
     if (reducedMotion.matches || typeof document.startViewTransition !== "function") {
       update();
       return null;
     }
-    return document.startViewTransition(update);
+    const transition = document.startViewTransition(update);
+    swallowTransitionRejection(transition);
+    return transition;
   };
   const syncThemeControls = () => {
     document.querySelectorAll("[data-theme-set]").forEach((button) => {

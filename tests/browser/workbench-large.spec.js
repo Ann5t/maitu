@@ -12,6 +12,10 @@ test.use({
 
 test('100 branches and 300 sessions remain searchable, keyboard operable and responsive', async ({ page }) => {
   test.setTimeout(60_000);
+  const errors = [];
+  const serverErrors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
   await page.goto(`/projects/${projectId}?tab=goals`, { waitUntil: 'domcontentloaded' });
 
   const navigation = await page.evaluate(() => {
@@ -80,4 +84,6 @@ test('100 branches and 300 sessions remain searchable, keyboard operable and res
   await page.screenshot({ path: `${screenshotDir}/goal-workbench-large-mobile.png` });
 
   console.log(`BP08_LARGE_METRICS ${JSON.stringify({ ...navigation, filterMs, attentionCount, notificationCount })}`);
+  expect(errors).toEqual([]);
+  expect(serverErrors).toEqual([]);
 });

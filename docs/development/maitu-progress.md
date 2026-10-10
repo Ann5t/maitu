@@ -6,6 +6,54 @@
 
 运行基础 PR #1、资料任务 PR #2、连接设置 PR #3 与目标编码 PR #4 均已合入 `main`。多连接调度与日常历史经 [PR #5](https://github.com/Ann5t/maitu/pull/5) 合入 `main`（提交 `4b0fd7e`，云端完整质量门通过），后续主线合并继续由用户决定。
 
+## 本机运行版本与 `main` 的差异（2026-10-09 核对）
+
+本机 `maitu` 实例正在运行的镜像 `sha256:7f6d55df3e16` 构建于 `2026-10-06T05:57:33Z`（13:57 +08:00）。实测该实例提供的页面**不在 `main` 上**：
+
+- `GET /maitu/ideas` 返回 `200`，标题「想法 · 脉图」；
+- `main` 的 `src/web/mod.rs` 注册 107 条路由，没有 `/maitu/ideas`；下面这些分支各有 109 条，多出的正是 `/maitu/ideas` 与 `/maitu/ideas/{idea_id}`。
+
+界面收拢的工作都停在未合入的分支上：
+
+| 分支 | 末次提交 | 提交时间 | 云端质量门 |
+| --- | --- | --- | --- |
+| `graph/ui-refresh` | `0c97fcd` | 10-06 01:25 | 通过，但未合入 |
+| `graph/remove-legacy-ui` | `de3cfb0` | 10-06 02:23 | 失败 |
+| `graph/absorb-ideas` | `e25b44c` | 10-06 04:11 | 失败 |
+| `graph/absorb-goal-workbench` | `037946e` | 10-06 04:11 | 失败 |
+| `graph/reduce-text-friction` | `6e800db` | 10-06 13:07 | 失败 |
+| `graph/workbench-parity` | `470fbc2` | 10-06 14:10 | 失败 |
+
+生产镜像的运行层只包含 `assets` 与 `/usr/local/bin` 下的二进制，**没有构建时的源码**（`/app` 下没有 `src/`）。因此运行态的源码只能从这些分支取得，**从 `main` 重新构建会静默失去本机正在使用的想法空间**。
+
+本机的两次备份（`backups/20261009T010122Z` 与 `backups/20261009T013722Z`）也不含这段源码：它们的 `source.tar.gz` 取自执行备份时所在的 `main` 工作树，实测都没有 `/maitu/ideas`。备份固化的是数据库、四个内容卷与**当前工作树**，而不是运行镜像对应的源码；运行态源码目前只由远端这些分支保存。
+
+运行镜像对应哪个分支已经由资源指纹确定，**不再是推断**：镜像内 `/app/assets` 的八个文件（`maitu.css`、`maitu.js`、`maitu-ideas.js`、`maitu-goals.js`、`auth.css`、`app.css`、`interface.css`、`app.js`）按行尾归一化后与 `graph/workbench-parity`（`470fbc2`）**逐字节一致**；其它候选都不完全一致（`main` 与 `graph/ui-refresh` 匹配 3/5，`graph/remove-legacy-ui`、`graph/absorb-ideas`、`graph/absorb-goal-workbench` 匹配 4/6~4/8，`graph/reduce-text-friction` 匹配 5/8）。
+
+本节此前按提交时间推断为 `graph/reduce-text-friction`，并断定 `graph/workbench-parity` 晚于构建时间、不可能在其中，**那个推断是错的**：提交时间（14:10）晚于镜像构建时间（13:57）并不矛盾，代码先在工作树里存在、之后才提交。两个方法要点必须记住：镜像内的资源是 **CRLF**（镜像在 Windows 上从本地工作树构建），所以直接用 `git rev-parse` 的 blob 哈希比对会全部失配，连没改动过的 `theme.js` 也会失配，必须先归一化行尾；比对对象是 `docker cp` 取出的镜像内文件，已核对与 HTTP 响应字节数一致。资源一致足以确定构建树，但不能证明 `src/` 也逐字节相同——二进制无法这样比对。
+
+保留、修复质量门后合入、还是删除这些分支，都需要用户明确决定。`graph/ui-refresh` 的云端质量门已经通过但同样未合入。
+
+失败原因已经定位：这些分支把认证页的 h1 从「登录 Fudian」改成「登录脉图」（`src/security.rs`），但 `tests/browser/security.spec.js` 第 30 行仍断言旧文案。该 spec 由 `scripts/test-security-https.sh` 用 Playwright 执行，在 `scripts/quality-gate.sh` 中位于第 56 步，所以质量门是在最后阶段以 exit 1 失败，而 `graph/ui-refresh` 是这条链上最后一次绿色（run 70）。对照实验：在 `graph/reduce-text-friction` 的工作树上，该脚本失败并输出 `Expected substring "登录 Fudian"`、`Received string "登录脉图"`；只改这一行后同一脚本通过。修复提交在 `graph/salvage-deployed-workbench`（基点 `graph/reduce-text-friction`，提交 `adb20e1`），**云端完整质量门在 run 85 通过**。`graph/workbench-parity` 与 `graph/remove-legacy-ui` 也已经改名但同样残留旧断言；`graph/remove-legacy-ui` 的云端失败码是 exit 101，但那**不是** Rust 阶段（本机逐阶段都跑通了，见下文）。**与本机运行镜像对应的抢救分支是 `graph/salvage-deployed-parity`**（基点 `graph/workbench-parity`，提交 `eda0de6`），**云端完整质量门在 run 88 通过**；`graph/salvage-deployed-workbench` 只是同一条链上较早的状态，它的云端完整质量门在 run 85 通过。两者都等待用户决定是否合入。
+
+运行镜像本身也做过一次只读扫描：解析部署版 `src/web/mod.rs` 的 109 条路由，逐条请求其中 49 条含 GET 的路径，**唯一的 5xx 是 `GET /account/password`**。原因是该分支的 `password_page`、`password_submit`、`logout` 仍使用必需的 `Extension<AuthenticatedSession>` 提取器，在明确关闭身份系统时中间件不会插入扩展，参数提取先于处理函数执行，于是返回 500——与 `main` 上同一个缺陷同形，修复在 `execution/local-mode-auth-response`。
+
+同一实例还用真实 Chromium 加载过一次：部署版 19 条非 API 的 GET 路由中，被访问的 13 个 HTML 页面全部 `200`，标题与 `h1` 正常，**没有控制台错误、失败请求或非 2xx 子资源**。做法是复用仓库自带的浏览器镜像（`npm install @playwright/test` 后用 `fudian_playwright_npm_cache`），加 `--network maitu_default` 只读访问，不登录、不提交表单；`/account/password` 的 500 是 HTTP 探测发现的，不是这些页面加载时发出的请求。因此运行版本在浏览器层面是健康的，已发现的缺陷集中在认证相关的边缘路径。
+
+运行实例仍有一处运行时缺陷，它在静态加载时不出现，需要在页面上切换视图再导航才会触发：镜像内 `assets/app.js` 的 `updateWithTransition` 调用 `document.startViewTransition` 后不处理返回的 `ready` 与 `finished`，视图切换被跳过或中断时会以 `Transition was skipped`、`Transition was aborted because of invalid state` 成为未捕获异常（`assets/app.js` 与 `main` 内容一致，所以这条不是分支特有的）。它由浏览器用例里新增的未捕获异常收集实测发现，修复提交为 `graph/browser-runtime-guard` 的 `bca79f2`。
+
+合并可行性用对象层 `git merge-tree --write-tree` 检验（不依赖工作树）：`graph/salvage-deployed-parity` 与 `execution/local-mode-auth-response`、`repo/line-endings`、`repo/maitu-backup-doc` 都能干净合并，且 `main` 是 `graph/salvage-deployed-parity` 的祖先，因此合入不需要解决冲突。
+
+`graph/remove-legacy-ui` 的失败单独查过。Rust 三个阶段（`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked --all-targets`）在该提交上全部通过；`docker build --target development`、`--target runner-runtime`、插件镜像构建与插件冒烟也全部通过。按 `quality-gate.sh` 的顺序把 20 个脚本跑完，17 个通过，**确定性失败只有 `test-security-https`（exit 1），原因就是那行旧断言**，与其它分支一致；`test-production-image`、`test-storage-reconciliation`、`test-secure-compose`、`test-real-plugins-http` 都通过。云端 run 72 报的 exit 101 用本机逐阶段复现不出来，该提交上可复现的失败是 exit 1。
+
+那个 101 的线索是**同一时段并发运行的两个分支都失败，而同一提交单独运行通过**（纯文档分支也曾以 exit 101 在约 10 分钟处失败）。这只能证明相关性，机制没有直接证据（该运行的 job 日志返回 403），本机也复现不出来，因为本机 cargo registry 卷是热的，而 CI 每次运行都要冷下载镜像与依赖。`ci.yml` 的 `concurrency` 组是 `quality-${{ github.workflow }}-${{ github.ref }}`，只取消同一分支的重复运行，**不同分支会同时跑两个重型质量门**。实例：run 96（`graph/browser-runtime-guard`，`9adc1f3`）与 run 97（纯文档的 `repo/deployed-vs-main`，`58768ef`）几乎同时启动（05:33:22Z 与 05:34:14Z），两者都失败——分别是 `.github:4922` exit 1 与 `.github:2095` exit 101——而同一个 `9adc1f3` 在没有并发时单独运行（run 98）完整通过。纯文档分支以 exit 101 死掉、且只用了 9.8 分钟（顺序通过时是 15~20 分钟）。可以确定的是失败与提交内容无关（纯文档分支同样失败），至于来自下载还是资源竞争，没有证据。这与 `graph/remove-legacy-ui` 的 exit 101、以及本机复现不出来是同一类现象。做法：并行推送多个分支后要单独重跑一次再判断红绿；此外 `infra/serialize-quality-gate` 已让纯网络阶段可重试（见下）。
+
+同一批顺序运行中 `test-scheduler-http` 曾以 exit 22（HTTP 409）失败，但**在同一提交上单独重跑通过**，所以它是顺序或时序敏感的偶发失败，不能算这个分支的缺陷；记在这里以免下次误判成回归。另有一条本机测试限制：`test-backup-recovery.sh` 无法从 `git worktree` 运行，因为 worktree 的 `.git` 文件里是 Windows 绝对路径，脚本内的 git 调用报 `fatal: not a git repository`，这条要在主检出里跑。
+
+**审阅分支的合并验证（每次重建重跑）。** 各审阅分支的合并后状态用对象层 `git merge-tree --write-tree` 依次合成验证（不动 `main`、不建工作树），结果维护在 `repo/verified-merge-candidate`；每加入一个分支都会重建候选并重跑一次云端完整质量门，所以这里不逐个记数。三点结论。第一，`graph/salvage-deployed-workbench` 是冗余的：在 `graph/salvage-deployed-parity` 之后合并它不改变 tree。第二，合并结果的 `assets/` 与运行镜像逐字节一致（按行尾归一后 180/181 匹配），唯一差异是 `app.js` 上的修复，说明后续分支没有把抢救回来的内容改坏。第三，合并暴露了一个单独分支看不到的缺陷：`test-workbench-browser.sh` 在合并状态收到 `InvalidStateError: Transition was aborted because of invalid state`，**堆栈为空、不来自页面脚本**——它是 CSS `@view-transition { navigation: auto }` 的跨文档切换被导航打断时由浏览器内部产生的拒绝。修法是在 `pageswap` 与 `pagereveal` 上兜住 `event.viewTransition`（`a585ea3`），合并状态随即 6 个浏览器用例全通过；运行实例镜像内的 `app.js` 至今连 JS 发起的那次切换都没兜，重建镜像后会一并生效。
+
+分支侧另外三项也随候选一起验证：`graph/browser-runtime-guard` 让五个浏览器用例都断言没有未捕获异常与 5xx；`infra/serialize-quality-gate` 让质量门里纯网络的两步（镜像拉取与新增的 `cargo fetch --locked`）可按次重试，而 `cargo fmt`、`cargo clippy`、`cargo test` 一律不重试，避免掩盖真实失败；`infra/dependency-security-update` 修掉 `cargo audit`（RustSec 1296 条咨询）报出的 RUSTSEC-2026-0285（`rustls` 0.23.43 → 0.23.45）与 `chacha20` 0.10.1 被 yank 的警告，并交付 `scripts/audit-dependencies.sh`——它故意不接入必过门：咨询库每天更新，接进去会让分支成败取决于提交之外的第三方数据。
+
 ## 目标到编码成果的真实验收
 
 2026-10-01，分支 `execution/goal-to-code-workflow` 接通计划生成与编辑采用、代码副本导入、独立工作区、DeepSeek 多轮工具调用、实际检查、差异与采用，以及补充要求形成新尝试。迁移增加到 16 项。实现选择见[工作流决定](../decisions/maitu-0002-goal-to-code-workflow.md)，使用边界见[本机运行指南](../operations/maitu-local.md)。

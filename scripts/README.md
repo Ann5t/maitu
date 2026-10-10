@@ -6,6 +6,7 @@
 
 - `quality-gate.sh`：本地与 CI 共用的完整质量门
 - `check-docs.py`：Markdown 标题和本地链接检查
+- `check-auth-page-contract.py`：认证页 `auth_page` 标题与 `security.spec.js` 的 `h1` 断言一致性检查
 
 ## 公共测试库
 
@@ -38,6 +39,7 @@
 - `test-secure-compose.sh`
 - `test-storage-reconciliation.sh`
 - `test-backup-recovery.sh`
+- `audit-dependencies.sh`：用 RustSec 咨询库审计 Cargo.lock 全部依赖；按设计不接入质量门，需要阻断时由维护者显式运行
 
 ## 构建与运维
 

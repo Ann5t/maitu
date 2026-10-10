@@ -88,6 +88,29 @@ grep -q 'data-theme-set="dark"' <<< "$settings_html"
 ! grep -q 'Rust edition\|可恢复单体' <<< "$settings_html"
 ! grep -q '当前没有真实 AI 在运行\|没有连接 ChatGPT 或 Codex' <<< "$settings_html"
 
+# 本机实例关闭了身份系统，因此不会注入会话与请求身份扩展。只有身份系统可用的路由
+# 必须给出明确的 403，而不是因为取不到扩展而返回 500。
+workbench_status="$(curl -sS -o /dev/null -w '%{http_code}' "$workbench_base/account/password")"
+[[ "$workbench_status" == "403" ]] || {
+  echo "本机模式下 GET /account/password 应返回 403，实际 $workbench_status" >&2
+  exit 1
+}
+# /auth/logout 只注册了 POST。
+workbench_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$workbench_base/auth/logout")"
+[[ "$workbench_status" == "403" ]] || {
+  echo "本机模式下 POST /auth/logout 应返回 403，实际 $workbench_status" >&2
+  exit 1
+}
+workbench_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode 'current_password=本机模式占位口令' \
+  --data-urlencode 'new_password=本机模式占位口令不会生效' \
+  --data-urlencode 'password_confirm=本机模式占位口令不会生效' \
+  "$workbench_base/account/password")"
+[[ "$workbench_status" == "403" ]] || {
+  echo "本机模式下 POST /account/password 应返回 403，实际 $workbench_status" >&2
+  exit 1
+}
+
 curl -fsS -o /dev/null -D "$workbench_tmp/create.headers" \
   --data-urlencode 'intent=<script>不能进入页面</script>：完成工作台闭环' \
   "$workbench_base/projects"

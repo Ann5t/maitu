@@ -21,13 +21,17 @@ for (const [name, viewport] of sizes) {
       ignoreHTTPSErrors: true,
     });
     const page = await context.newPage();
+    const errors = [];
+    const serverErrors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('response', response => { if (response.status() >= 500) serverErrors.push(response.url()); });
     const insecureRequests = [];
     page.on('request', request => {
       const url = request.url();
       if (url.startsWith('http://')) insecureRequests.push(url);
     });
     await page.goto('/auth/login');
-    await expect(page.locator('h1')).toContainText('登录 Fudian');
+    await expect(page.locator('h1')).toContainText('登录脉图');
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(password);
     await Promise.all([
@@ -48,6 +52,8 @@ for (const [name, viewport] of sizes) {
     }));
     expect(overflow.scroll).toBeLessThanOrEqual(overflow.viewport + 1);
     expect(insecureRequests).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(serverErrors).toEqual([]);
     await page.screenshot({
       path: path.join(screenshotDir, `private-${name}.png`),
       fullPage: true,

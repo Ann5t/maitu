@@ -158,6 +158,7 @@ test('Maitu graph persists real tasks, explains waiting and retains failed attem
   const childForm = page.locator('#maitu-task-create');
   await childForm.locator('[name="title"]').fill('汇总后续工作');
   await childForm.locator('[name="instruction"]').fill('基于已经采用的整理需求成果继续。');
+  await childForm.locator('details.maitu-advanced summary').click();
   await page.locator('#maitu-task-dependencies label').filter({ hasText: '整理需求' }).locator('input').check();
   await childForm.getByRole('button', { name: '加入任务图' }).click();
   const child = page.locator('.maitu-node').filter({ hasText: '汇总后续工作' });
@@ -221,6 +222,7 @@ test('Maitu code import, editable plan adoption and additional attempts persist'
   await page.locator('#maitu-new-task').click();
   const form=page.locator('#maitu-task-create');
   await form.locator('[name="title"]').fill('编码入口检查');
+  await form.locator('details.maitu-advanced summary').click();
   await form.locator('[name="taskKind"]').selectOption('code');
   await form.locator('[name="instruction"]').fill('测试没有检查服务时不能调用模型');
   await form.locator('[name="acceptanceCriteria"]').fill('先验证执行环境');

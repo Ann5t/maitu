@@ -14,6 +14,18 @@ make check
 ./scripts/check-docs.py
 ```
 
+## Windows 上的检查环境
+
+`make check`、`./scripts/quality-gate.sh` 和 `scripts/` 下的专项检查都是 Bash，在 Windows 上须通过 WSL 或 Git Bash 执行。仓库用 `.gitattributes` 固定文本文件为 LF；在此之前的旧检出会把脚本写成 CRLF，shebang 变成 `#!/usr/bin/env bash\r`，执行时报 `env: $'bash\r': No such file or directory`。
+
+行尾已经写坏时，重新取出脚本即可恢复（会覆盖 `scripts/` 下未提交的改动）：
+
+```bash
+rm -f scripts/*.sh && git checkout -- scripts
+```
+
+只执行 `git checkout -- scripts` 不起作用：行尾差异被 Git 的行尾转换掩盖，Git 认为文件没有修改，因而不会重写它们。
+
 ## 完整质量门
 
 ```bash
@@ -23,12 +35,13 @@ make check
 完整入口依次检查：
 
 1. Markdown 结构和相对链接；
-2. Rust 格式、Clippy 和测试；
-3. 空库、增量迁移和旧数据 fixture；
-4. 目标、上下文、工作区、调度、审核、工具和输入 HTTP 闭环；
-5. 桌面、平板、手机及大图 Chromium 测试；
-6. 非 root 生产镜像、安全 HTTPS、存储调和和备份恢复；
-7. 工作树空白错误检查。
+2. 认证页标题文案与浏览器 `h1` 断言的一致性；
+3. Rust 格式、Clippy 和测试；
+4. 空库、增量迁移和旧数据 fixture；
+5. 目标、上下文、工作区、调度、审核、工具和输入 HTTP 闭环；
+6. 桌面、平板、手机及大图 Chromium 测试；
+7. 非 root 生产镜像、安全 HTTPS、存储调和和备份恢复；
+8. 工作树空白错误检查。
 
 质量门使用唯一命名的一次性容器、网络和数据库，不连接 Compose 正在使用的正式卷。浏览器截图默认写入临时目录；需要更新文档视觉证据时显式设置 `SCREENSHOT_DIR=docs/assets/screenshots`，并人工审查差异。
 

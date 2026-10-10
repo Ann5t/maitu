@@ -105,7 +105,7 @@ pub async fn setup_page(
         return Ok(Redirect::to("/auth/login").into_response());
     }
     Ok(no_store_html(auth_page(
-        "初始化 Fudian",
+        "初始化脉图",
         "只有空库可进行一次初始化。初始化 token 来自服务器 secret 文件。",
         html! {
             form method="post" action="/auth/setup" class="auth-form" {
@@ -170,7 +170,7 @@ pub async fn setup_submit(
         transaction.rollback().await?;
         return Err(AppError::conflict(
             "already_initialized",
-            "Fudian 已经完成单用户初始化",
+            "脉图已经完成单用户初始化",
         ));
     }
     let recovery_codes = rotate_recovery_codes(&state, &mut transaction, 1, None).await?;
@@ -198,12 +198,12 @@ pub async fn setup_submit(
 
     let mut response = no_store_html(auth_page(
         "保存恢复码",
-        "这些恢复码只显示这一次。请存到 Fudian 服务器之外的可靠位置。",
+        "这些恢复码只显示这一次。请存到脉图服务之外的可靠位置。",
         html! {
             ol class="recovery-code-list" data-recovery-codes {
                 @for code in &recovery_codes { li { code { (code) } } }
             }
-            a class="button button--primary" href="/" { "进入 Fudian" }
+            a class="button button--primary" href="/" { "进入脉图" }
         },
     ));
     set_session_cookies(&mut response, &session);
@@ -223,7 +223,7 @@ pub async fn login_page(
         return Ok(Redirect::to("/auth/setup").into_response());
     }
     Ok(no_store_html(auth_page(
-        "登录 Fudian",
+        "登录脉图",
         "单用户私有工作台",
         html! {
             form method="post" action="/auth/login" class="auth-form" {
@@ -313,9 +313,15 @@ pub async fn login_submit(
 
 pub async fn logout(
     State(state): State<Arc<AppState>>,
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-    axum::extract::Extension(identity): axum::extract::Extension<RequestIdentity>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+    identity: Option<axum::extract::Extension<RequestIdentity>>,
 ) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let (Some(axum::extract::Extension(auth)), Some(axum::extract::Extension(identity))) =
+        (auth, identity)
+    else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
     sqlx::query(
         "UPDATE auth_sessions SET revoked_at = now(), revocation_reason = 'logout' \
          WHERE id = $1 AND revoked_at IS NULL",
@@ -470,7 +476,7 @@ pub async fn recovery_submit(
             ol class="recovery-code-list" data-recovery-codes {
                 @for code in &recovery_codes { li { code { (code) } } }
             }
-            a class="button button--primary" href="/" { "进入 Fudian" }
+            a class="button button--primary" href="/" { "进入脉图" }
         },
     ));
     set_session_cookies(&mut response, &session);
@@ -478,9 +484,14 @@ pub async fn recovery_submit(
 }
 
 pub async fn password_page(
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-) -> Response {
-    no_store_html(auth_page(
+    State(state): State<Arc<AppState>>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let Some(axum::extract::Extension(auth)) = auth else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
+    Ok(no_store_html(auth_page(
         "更改口令",
         &format!("当前用户：{}", auth.username),
         html! {
@@ -492,15 +503,21 @@ pub async fn password_page(
             }
             a class="auth-secondary-link" href="/" { "返回工作台" }
         },
-    ))
+    )))
 }
 
 pub async fn password_submit(
     State(state): State<Arc<AppState>>,
-    axum::extract::Extension(auth): axum::extract::Extension<AuthenticatedSession>,
-    axum::extract::Extension(identity): axum::extract::Extension<RequestIdentity>,
+    auth: Option<axum::extract::Extension<AuthenticatedSession>>,
+    identity: Option<axum::extract::Extension<RequestIdentity>>,
     Form(form): Form<PasswordChangeForm>,
 ) -> AppResult<Response> {
+    require_security_enabled(&state)?;
+    let (Some(axum::extract::Extension(auth)), Some(axum::extract::Extension(identity))) =
+        (auth, identity)
+    else {
+        return Err(AppError::forbidden("authentication_required", "需要登录"));
+    };
     if form.new_password != form.password_confirm {
         return Err(AppError::bad_request(
             "password_confirmation_mismatch",
@@ -562,7 +579,7 @@ pub async fn password_submit(
             ol class="recovery-code-list" data-recovery-codes {
                 @for code in &recovery_codes { li { code { (code) } } }
             }
-            a class="button button--primary" href="/" { "返回 Fudian" }
+            a class="button button--primary" href="/" { "返回脉图" }
         },
     ));
     set_session_cookies(&mut response, &session);
@@ -1061,7 +1078,7 @@ fn verify_write_origin(state: &AppState, headers: &HeaderMap) -> AppResult<()> {
     if source.as_deref() != Some(expected) {
         return Err(AppError::forbidden(
             "csrf_origin_mismatch",
-            "请求来源与 Fudian 公开 origin 不一致",
+            "请求来源与脉图公开 origin 不一致",
         ));
     }
     if headers
@@ -1706,13 +1723,13 @@ fn auth_page(title: &str, introduction: &str, content: Markup) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="light dark";
-                title { (title) " · 浮点" }
-                link rel="stylesheet" href="/assets/app.css";
+                title { (title) " · 脉图" }
+                link rel="stylesheet" href="/assets/auth.css";
                 script defer src="/assets/theme.js" {}
             }
             body class="auth-shell" {
                 main class="auth-card" {
-                    p class="eyebrow" { "FUDIAN · PRIVATE WORKSPACE" }
+                    p class="eyebrow" { "脉图 · 个人工作区" }
                     h1 { (title) }
                     p class="auth-introduction" { (introduction) }
                     (content)
