@@ -4,6 +4,7 @@
 
 当前已完成资料任务、目标到编码、多连接调度与日常历史的真实运行验收，五库迁移与独立恢复核对完成；验收使用脉图组件代码副本，证明这条流程能产生和整合真实代码，但这些组件尚未接入网页筛选入口，长期日用与用户试用接受仍在积累。实际完成记录由[实施进度](../development/maitu-progress.md)维护。
 
+**已知未完成（不要把上面的概述读成整条流程已经通了）**：成果**采用**这一步在领域规范里必须由 Review Worker 驱动。[目标枝干领域](../architecture/goal-branch-domain.md) 第 186 行规定 `pending_ai_review → pending_human_review` 只能由「Review Worker complete」完成（要求专用 ActionLease、身份不同，见第 217 行的不变式 `independent_reviewer_required`），协议见 [api-goal-branch-v1](../reference/api-goal-branch-v1.md) 第 51、56 行。但仓库里没有这个生产者：`src/bin/` 只有 `fudian-runner`、`fudian-tool-runtime`、`maitu-check-worker`、`maitu-code-check`、`fudian-maintenance`，除测试脚本外没有任何进程调用 `/api/v1/scheduler/claim`、`…/reconcile`、`…/heartbeat`，应用启动时唯一的后台任务 `workflows::serve_worker` 只处理 `maitu_tasks`。所以闸门会停在 `pending_ai_review`（`src/goal_domain.rs:325` 是唯一的升格转换，`:340` 要求闸门已是 `pending_human_review` 才允许用户决定），界面在该状态下只显示「独立审核已排队／系统正在独立复验」，没有任何接受／退回按钮（`src/web/views.rs:2465-2482`）。⇒ 阶段 1、2 的「图上查看差异并采用」在真实使用中会停在这里，处理方向见本仓库 `docs/operations/usage-boundaries.md` 第 54 行（该文件由 PR #18 新增，合并前不在 main 上，所以这里不作链接）。另外「完整历史体验」仍未验收：上一版概述把它列为未验收项，这一版把它去掉了，应保留这句留白。
 ## 最终要完成的使用流程
 
 用户说出一个想法或选中已有项目，脉图读取指定资料和代码，提出可修改的推进图。用户能理解每个节点的目的、依赖、成果和下一步，并在节点内补充要求。独立任务利用可用的模型连接和工作区同时执行，形成真实文件或代码改动，完成检查后供用户选择采用。
