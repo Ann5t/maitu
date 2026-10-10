@@ -4116,7 +4116,7 @@ fn inspect_managed_worktree(
     worktree_path: &Path,
     branch_name: &str,
 ) -> Result<GitWorkspaceInspection, String> {
-    validate_managed_worktree_identity(repository_path, worktree_path, branch_name)?;
+    fudian::git_snapshot::verify_worktree_identity(repository_path, worktree_path, branch_name)?;
     inspect_worktree(worktree_path)
 }
 
@@ -4125,36 +4125,7 @@ fn validate_managed_worktree_identity(
     worktree_path: &Path,
     branch_name: &str,
 ) -> Result<(), String> {
-    let git_file = worktree_path.join(".git");
-    let metadata = fs::symlink_metadata(&git_file).map_err(|error| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("托管 worktree 的 .git 必须是普通链接文件".to_owned());
-    }
-    let observed_branch = run_git([
-        OsStr::new("-C"),
-        worktree_path.as_os_str(),
-        OsStr::new("symbolic-ref"),
-        OsStr::new("--short"),
-        OsStr::new("HEAD"),
-    ])?;
-    if observed_branch != branch_name {
-        return Err("worktree 当前 branch 与 GoalBranch 身份不一致".to_owned());
-    }
-    let common_directory = run_git([
-        OsStr::new("-C"),
-        worktree_path.as_os_str(),
-        OsStr::new("rev-parse"),
-        OsStr::new("--path-format=absolute"),
-        OsStr::new("--git-common-dir"),
-    ])?;
-    let observed_repository =
-        fs::canonicalize(&common_directory).map_err(|error| error.to_string())?;
-    let expected_repository =
-        fs::canonicalize(repository_path).map_err(|error| error.to_string())?;
-    if observed_repository != expected_repository {
-        return Err("worktree 的 Git common directory 不属于记录的托管仓库".to_owned());
-    }
-    Ok(())
+    fudian::git_snapshot::verify_worktree_identity(repository_path, worktree_path, branch_name)
 }
 
 fn worktree_contents_match_commit(worktree_path: &Path, commit: &str) -> Result<bool, String> {
@@ -4183,44 +4154,15 @@ fn worktree_contents_match_commit(worktree_path: &Path, commit: &str) -> Result<
 }
 
 fn inspect_worktree(path: &Path) -> Result<GitWorkspaceInspection, String> {
-    let head_commit = run_git([
-        OsStr::new("-C"),
-        path.as_os_str(),
-        OsStr::new("rev-parse"),
-        OsStr::new("HEAD"),
-    ])?;
-    let tree_id = run_git([
-        OsStr::new("-C"),
-        path.as_os_str(),
-        OsStr::new("rev-parse"),
-        OsStr::new("HEAD^{tree}"),
-    ])?;
-    validate_git_oid(&head_commit)?;
-    validate_git_oid(&tree_id)?;
-    let status = run_git_bytes([
-        OsStr::new("-C"),
-        path.as_os_str(),
-        OsStr::new("status"),
-        OsStr::new("--porcelain=v1"),
-        OsStr::new("-z"),
-        OsStr::new("--untracked-files=all"),
-    ])?;
-    let dirty = !status.is_empty();
-    let status_digest = format!("sha256:{}", hex::encode(Sha256::digest(&status)));
-    let workspace_snapshot = runner_canonical_json_sha256(&json!({
-        "schemaVersion": 1,
-        "headCommit": head_commit,
-        "treeId": tree_id,
-        "dirty": dirty,
-        "statusDigest": status_digest,
-    }))
-    .map_err(|error| error.to_string())?;
+    // 唯一实现在 lib 的 git_snapshot 模块：Review Worker 复核必须与应用
+    // 冻结时算出同一个 workspaceSnapshot，两侧共用这一份代码。
+    let snapshot = fudian::git_snapshot::inspect_worktree(path)?;
     Ok(GitWorkspaceInspection {
-        head_commit,
-        tree_id,
-        dirty,
-        status_digest,
-        workspace_snapshot,
+        head_commit: snapshot.head_commit,
+        tree_id: snapshot.tree_id,
+        dirty: snapshot.dirty,
+        status_digest: snapshot.status_digest,
+        workspace_snapshot: snapshot.workspace_snapshot,
     })
 }
 
@@ -4304,15 +4246,7 @@ fn run_git_command<'a>(
 }
 
 fn validate_git_oid(value: &str) -> Result<(), String> {
-    if matches!(value.len(), 40 | 64)
-        && value
-            .chars()
-            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
-    {
-        Ok(())
-    } else {
-        Err("Git object ID 不是规范小写十六进制".to_owned())
-    }
+    fudian::git_snapshot::validate_git_oid(value)
 }
 
 async fn canonical_root(root: &Path) -> AppResult<PathBuf> {

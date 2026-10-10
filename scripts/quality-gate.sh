@@ -67,6 +67,7 @@ step "隔离 HTTP 接口测试"
 ./scripts/test-workspace-runner-http.sh
 ./scripts/test-scheduler-http.sh
 ./scripts/test-review-integration-http.sh
+./scripts/test-review-worker-http.sh
 SKIP_PLUGIN_IMAGE_SMOKE=1 ./scripts/test-real-plugins-http.sh
 ./scripts/test-ideas-http.sh
 ./scripts/test-tooling-http.sh

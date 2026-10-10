@@ -27,6 +27,7 @@
 - `test-workspace-runner-http.sh`
 - `test-scheduler-http.sh`
 - `test-review-integration-http.sh`
+- `test-review-worker-http.sh`：真实 maitu-review-worker 二进制端到端（独立身份领取、只读复核、完整候选升格待人工、漂移候选判 unsafe_state）
 - `test-real-plugins-http.sh`
 
 ## 浏览器、镜像与安全

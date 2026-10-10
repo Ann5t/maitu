@@ -32,6 +32,7 @@ WORKDIR /app
 COPY --from=builder /app/target/release/fudian /usr/local/bin/fudian
 COPY --from=builder /app/target/release/fudian-maintenance /usr/local/bin/fudian-maintenance
 COPY --from=builder /app/target/release/maitu-check-worker /usr/local/bin/maitu-check-worker
+COPY --from=builder /app/target/release/maitu-review-worker /usr/local/bin/maitu-review-worker
 COPY --chown=fudian:fudian assets ./assets
 # 构建来源修订：备份元数据用它证明"归档的源码"与"运行中的镜像"同源。
 # 放在最后的层，改动它不会让前面的编译缓存失效。
