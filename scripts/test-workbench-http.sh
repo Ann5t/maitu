@@ -18,9 +18,9 @@ cleanup_workbench_stack() {
     docker logs "$workbench_app" >&2 || true
   fi
   [[ "$workbench_app" == fudian-workbench-app-* ]] \
-    && docker rm -f "$workbench_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$workbench_app" >/dev/null 2>&1 || true
   [[ "$workbench_db" == fudian-workbench-db-* ]] \
-    && docker rm -f "$workbench_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$workbench_db" >/dev/null 2>&1 || true
   [[ "$workbench_network" == fudian-workbench-test-* ]] \
     && docker network rm "$workbench_network" >/dev/null 2>&1 || true
   [[ "$workbench_tmp" == /tmp/tmp.* ]] && rm -rf "$workbench_tmp"

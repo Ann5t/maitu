@@ -17,9 +17,9 @@ cleanup_workspace_stack() {
     docker logs "$workspace_app" || true
   fi
   [[ "$workspace_app" == fudian-workspace-app-* ]] \
-    && docker rm -f "$workspace_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$workspace_app" >/dev/null 2>&1 || true
   [[ "$workspace_db" == fudian-workspace-db-* ]] \
-    && docker rm -f "$workspace_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$workspace_db" >/dev/null 2>&1 || true
   [[ "$workspace_network" == fudian-workspace-test-* ]] \
     && docker network rm "$workspace_network" >/dev/null 2>&1 || true
   if [[ "$workspace_tmp" == /tmp/tmp.* && -d "$workspace_tmp" ]]; then

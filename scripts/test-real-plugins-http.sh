@@ -20,13 +20,13 @@ cleanup_real_plugins() {
     docker logs "$real_app" >&2 || true
   fi
   [[ "$real_tool_live" == fudian-real-tool-live-* ]] \
-    && docker rm -f "$real_tool_live" >/dev/null 2>&1 || true
+    && docker rm -fv "$real_tool_live" >/dev/null 2>&1 || true
   [[ "$real_tool_crash" == fudian-real-tool-crash-* ]] \
-    && docker rm -f "$real_tool_crash" >/dev/null 2>&1 || true
+    && docker rm -fv "$real_tool_crash" >/dev/null 2>&1 || true
   [[ "$real_app" == fudian-real-plugins-app-* ]] \
-    && docker rm -f "$real_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$real_app" >/dev/null 2>&1 || true
   [[ "$real_db" == fudian-real-plugins-db-* ]] \
-    && docker rm -f "$real_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$real_db" >/dev/null 2>&1 || true
   [[ "$real_network" == fudian-real-plugins-test-* ]] \
     && docker network rm "$real_network" >/dev/null 2>&1 || true
   [[ "$real_tmp" == /tmp/tmp.* && -d "$real_tmp" ]] \
@@ -925,7 +925,7 @@ if docker exec "$real_tool_live" sh -c 'printf unsafe > /workspace/input/forbidd
 fi
 
 docker kill "$real_app" >/dev/null
-docker rm "$real_app" >/dev/null
+docker rm -v "$real_app" >/dev/null
 start_real_app
 [[ "$(curl -fsS "http://127.0.0.1:$real_tool_live_port/health")" == ok ]]
 real_live_heartbeat="$(python3 -c 'import json,sys
@@ -948,7 +948,7 @@ real_live_cancel_signal="$(curl -fsS -H 'content-type: application/json' \
   -d "$real_live_heartbeat" \
   "$real_base/api/v1/scheduler/action-runs/$real_live_action_id/heartbeat")"
 [[ "$(json_field "$real_live_cancel_signal" cancellationRequested)" == true ]]
-docker rm -f "$real_tool_live" >/dev/null
+docker rm -fv "$real_tool_live" >/dev/null
 real_live_finish="$(python3 -c 'import json,sys
 p=json.loads(sys.argv[1]); p.update({"retainedOutputs":[],
  "result":{"processExited":True,"endpointClosed":True}}); print(json.dumps(p))' \
@@ -996,7 +996,7 @@ p=json.loads(sys.argv[1]); p["endpointRefs"]=[sys.argv[2]]; print(json.dumps(p))
   "$real_crash_credentials" "$real_crash_endpoint")"
 curl -fsS -H 'content-type: application/json' -d "$real_crash_activate" \
   "$real_base/api/v1/scheduler/action-runs/$real_crash_action_id/tool-lease/activate" >/dev/null
-docker rm -f "$real_tool_crash" >/dev/null
+docker rm -fv "$real_tool_crash" >/dev/null
 sleep 6
 real_crash_reconcile="$(curl -fsS -H 'content-type: application/json' \
   -d "{\"workerId\":\"$real_reconcile_worker\",\"workerToken\":\"$real_reconcile_worker_token\",\"limit\":100}" \

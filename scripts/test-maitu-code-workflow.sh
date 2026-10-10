@@ -20,10 +20,10 @@ cleanup_code_test() {
     docker logs "$code_test_worker" >&2 || true
   fi
   for container in "$code_test_app" "$code_test_worker" "$code_test_db"; do
-    [[ "$container" == maitu-code-test-* ]] && docker rm -f "$container" >/dev/null 2>&1 || true
+    [[ "$container" == maitu-code-test-* ]] && docker rm -fv "$container" >/dev/null 2>&1 || true
   done
   while read -r container; do
-    [[ "$container" =~ ^[a-f0-9]{12,64}$ ]] && docker rm -f "$container" >/dev/null 2>&1 || true
+    [[ "$container" =~ ^[a-f0-9]{12,64}$ ]] && docker rm -fv "$container" >/dev/null 2>&1 || true
   done < <(docker ps -aq --filter "label=maitu.check.volume=$code_test_worktrees")
   [[ "$code_test_network" == maitu-code-test-*-network ]] && docker network rm "$code_test_network" >/dev/null 2>&1 || true
   for volume in "$code_test_worktrees" "$code_test_records" "$code_test_auth"; do

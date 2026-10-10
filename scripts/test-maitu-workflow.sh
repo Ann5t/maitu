@@ -10,9 +10,9 @@ maitu_test_network="$maitu_test_prefix-network"
 cleanup_maitu_test() {
   local result="$?"
   [[ "$maitu_test_app" == maitu-workflow-test-*-app ]] \
-    && docker rm -f "$maitu_test_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$maitu_test_app" >/dev/null 2>&1 || true
   [[ "$maitu_test_db" == maitu-workflow-test-*-db ]] \
-    && docker rm -f "$maitu_test_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$maitu_test_db" >/dev/null 2>&1 || true
   [[ "$maitu_test_network" == maitu-workflow-test-*-network ]] \
     && docker network rm "$maitu_test_network" >/dev/null 2>&1 || true
   return "$result"

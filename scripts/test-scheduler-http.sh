@@ -18,9 +18,9 @@ cleanup_scheduler_stack() {
     docker logs "$scheduler_app" >&2 || true
   fi
   [[ "$scheduler_app" == fudian-scheduler-app-* ]] \
-    && docker rm -f "$scheduler_app" >/dev/null 2>&1 || true
+    && docker rm -fv "$scheduler_app" >/dev/null 2>&1 || true
   [[ "$scheduler_db" == fudian-scheduler-db-* ]] \
-    && docker rm -f "$scheduler_db" >/dev/null 2>&1 || true
+    && docker rm -fv "$scheduler_db" >/dev/null 2>&1 || true
   [[ "$scheduler_network" == fudian-scheduler-test-* ]] \
     && docker network rm "$scheduler_network" >/dev/null 2>&1 || true
   [[ "$scheduler_tmp" == /tmp/tmp.* && -d "$scheduler_tmp" ]] \
@@ -218,7 +218,7 @@ scheduler_disabled_status="$(curl -sS -o "$scheduler_tmp/disabled.json" -w '%{ht
   "$scheduler_base/api/v1/scheduler/workers")"
 [[ "$scheduler_disabled_status" == 403 ]]
 [[ "$(json_field "$(<"$scheduler_tmp/disabled.json")" code)" == worker_registration_disabled ]]
-docker rm -f "$scheduler_app" >/dev/null
+docker rm -fv "$scheduler_app" >/dev/null
 
 start_scheduler_app "$scheduler_bootstrap"
 

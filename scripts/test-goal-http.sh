@@ -18,10 +18,10 @@ cleanup_goal_http() {
     docker logs "$goal_http_app" >&2 || true
   fi
   if [[ "$goal_http_app" == fudian-goal-http-app-* ]]; then
-    docker rm -f "$goal_http_app" >/dev/null 2>&1 || true
+    docker rm -fv "$goal_http_app" >/dev/null 2>&1 || true
   fi
   if [[ "$goal_http_db" == fudian-goal-http-db-* ]]; then
-    docker rm -f "$goal_http_db" >/dev/null 2>&1 || true
+    docker rm -fv "$goal_http_db" >/dev/null 2>&1 || true
   fi
   if [[ "$goal_http_network" == fudian-goal-http-test-* ]]; then
     docker network rm "$goal_http_network" >/dev/null 2>&1 || true
