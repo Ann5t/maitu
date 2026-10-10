@@ -193,7 +193,9 @@ fn probe_isolation(worktree_path: &Path) -> anyhow::Result<IsolationFacts> {
     let status =
         std::fs::read_to_string("/proc/self/status").context("无法读取 /proc/self/status")?;
     let fields = parse_status_fields(&status);
-    let cap_eff = fields.get("CapEff").context("/proc/self/status 缺少 CapEff")?;
+    let cap_eff = fields
+        .get("CapEff")
+        .context("/proc/self/status 缺少 CapEff")?;
     let cap_eff_value = u64::from_str_radix(cap_eff, 16)
         .with_context(|| format!("CapEff 不是十六进制：{cap_eff}"))?;
     let no_new_privileges = fields.get("NoNewPrivs").is_some_and(|value| value == "1");
@@ -254,7 +256,10 @@ impl ReviewWorker {
     }
 
     fn error_text(response: &Value) -> String {
-        response["error"].as_str().unwrap_or("无错误说明").to_owned()
+        response["error"]
+            .as_str()
+            .unwrap_or("无错误说明")
+            .to_owned()
     }
 
     async fn register(&self) -> anyhow::Result<()> {
@@ -265,7 +270,9 @@ impl ReviewWorker {
             "displayName": self.identity.display_name,
             "capabilities": [CAPABILITY, RECONCILE_CAPABILITY],
         });
-        let (status, response) = self.post_json("/api/v1/scheduler/workers", &body, true).await?;
+        let (status, response) = self
+            .post_json("/api/v1/scheduler/workers", &body, true)
+            .await?;
         anyhow::ensure!(
             status.is_success(),
             "注册独立审核身份失败（HTTP {}）：{}",
@@ -285,7 +292,10 @@ impl ReviewWorker {
             "workerToken": self.identity.worker_token,
             "limit": 100,
         });
-        match self.post_json("/api/v1/scheduler/reconcile", &body, false).await {
+        match self
+            .post_json("/api/v1/scheduler/reconcile", &body, false)
+            .await
+        {
             Ok((status, response)) if status.is_success() => {
                 let counters = [
                     "expiredLeases",
@@ -325,7 +335,9 @@ impl ReviewWorker {
             "softTtlSeconds": CLAIM_SOFT_TTL_SECONDS,
             "hardTtlSeconds": CLAIM_HARD_TTL_SECONDS,
         });
-        let (status, response) = self.post_json("/api/v1/scheduler/claim", &body, false).await?;
+        let (status, response) = self
+            .post_json("/api/v1/scheduler/claim", &body, false)
+            .await?;
         anyhow::ensure!(
             status.is_success(),
             "领取行动失败（HTTP {}）：{}",
@@ -424,13 +436,15 @@ impl ReviewWorker {
             .context("Review 行动缺少 goalBranchId")?
             .to_owned();
 
-        let repository_path = fudian::git_snapshot::managed_path(
-            &self.config.repository_root,
-            &repository_key,
-        )
-        .map_err(|error| anyhow::anyhow!("托管仓库 key 无法解析（{repository_key}）：{error}"))?;
-        let worktree_path = fudian::git_snapshot::managed_path(&self.config.worktree_root, &worktree_key)
-            .map_err(|error| anyhow::anyhow!("托管 worktree key 无法解析（{worktree_key}）：{error}"))?;
+        let repository_path =
+            fudian::git_snapshot::managed_path(&self.config.repository_root, &repository_key)
+                .map_err(|error| {
+                    anyhow::anyhow!("托管仓库 key 无法解析（{repository_key}）：{error}")
+                })?;
+        let worktree_path =
+            fudian::git_snapshot::managed_path(&self.config.worktree_root, &worktree_key).map_err(
+                |error| anyhow::anyhow!("托管 worktree key 无法解析（{worktree_key}）：{error}"),
+            )?;
         let branch_name = format!("goal/{goal_branch_id}");
 
         let isolation = probe_isolation(&worktree_path)?;
@@ -489,16 +503,30 @@ impl ReviewWorker {
             "cleanWorktree": !observed.dirty,
         });
         let retest_evidence = vec![
-            format!("git -C {worktree_key} rev-parse HEAD → {}", observed.head_commit),
-            format!("git -C {worktree_key} rev-parse HEAD^{{tree}} → {}", observed.tree_id),
+            format!(
+                "git -C {worktree_key} rev-parse HEAD → {}",
+                observed.head_commit
+            ),
+            format!(
+                "git -C {worktree_key} rev-parse HEAD^{{tree}} → {}",
+                observed.tree_id
+            ),
             format!(
                 "git -C {worktree_key} status --porcelain=v1 -z --untracked-files=all → {}",
-                if observed.dirty { "非空（脏现场）" } else { "空（干净现场）" }
+                if observed.dirty {
+                    "非空（脏现场）"
+                } else {
+                    "空（干净现场）"
+                }
             ),
             format!(
                 "mountinfo：候选挂载为只读；CapEff={}，NoNewPrivs={}",
                 isolation.effective_capabilities_hex,
-                if isolation.no_new_privileges { "1" } else { "0" }
+                if isolation.no_new_privileges {
+                    "1"
+                } else {
+                    "0"
+                }
             ),
             "未发现 Docker socket 与宿主密钥路径；进程未挂载模型连接凭据卷".to_owned(),
         ];
