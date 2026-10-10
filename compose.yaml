@@ -131,6 +131,7 @@ services:
       - repositories:/data/repositories
       - worktrees:/data/worktrees
       - runner_outputs:/data/runner
+      - executor_auth:/run/maitu-executor:ro
     init: true
     restart: unless-stopped
 

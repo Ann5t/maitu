@@ -124,6 +124,9 @@ struct Identity {
     worker_id: Uuid,
     worker_token: String,
     display_name: String,
+    // 注册重试必须复用同一个 clientRequestId：首次请求若已落库但响应丢失，
+    // 换新 ID 的重试会被服务端判成幂等冲突（409），进程永远进不了领取循环。
+    register_request_id: Uuid,
 }
 
 #[derive(Clone)]
@@ -179,7 +182,8 @@ fn mount_options_for(path: &str, mountinfo: &str) -> Option<String> {
             continue;
         }
         let mount_point = fields[4].replace("\\040", " ");
-        if mount_point == "/" || path.starts_with(&mount_point) {
+        // 组件级比较：/data 不能误匹配 /database/…；Path::starts_with 按路径组件判断。
+        if mount_point == "/" || Path::new(path).starts_with(Path::new(&mount_point)) {
             let length = mount_point.len();
             if best.as_ref().is_none_or(|(current, _)| length > *current) {
                 best = Some((length, fields[5].to_owned()));
@@ -264,7 +268,7 @@ impl ReviewWorker {
 
     async fn register(&self) -> anyhow::Result<()> {
         let body = json!({
-            "clientRequestId": Uuid::new_v4(),
+            "clientRequestId": self.identity.register_request_id,
             "workerId": self.identity.worker_id,
             "workerToken": self.identity.worker_token,
             "displayName": self.identity.display_name,
@@ -687,6 +691,7 @@ async fn main() -> anyhow::Result<()> {
             worker_token: random_token()?,
             display_name: std::env::var("MAITU_REVIEW_DISPLAY_NAME")
                 .unwrap_or_else(|_| "maitu-review-worker".to_owned()),
+            register_request_id: Uuid::new_v4(),
         },
     };
     log(format!(
@@ -791,6 +796,17 @@ mod tests {
         assert_eq!(
             mount_options_for("/data/worktrees/x", mountinfo),
             Some("rw,relatime".to_owned())
+        );
+    }
+
+    #[test]
+    fn prefix_alike_paths_do_not_inherit_mount_options() {
+        let mountinfo = "36 30 0:51 / /data ro,relatime - overlay overlay ro\n";
+        // /database 只是以 /data 为字符串前缀，不是它的子路径，不能继承它的挂载选项。
+        assert_eq!(mount_options_for("/database/x", mountinfo), None);
+        assert_eq!(
+            mount_options_for("/data/x", mountinfo),
+            Some("ro,relatime".to_owned())
         );
     }
 
