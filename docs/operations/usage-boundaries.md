@@ -27,7 +27,7 @@
 | 动词 | 做法 | 结果 |
 | --- | --- | --- |
 | 可重复启动 | `MAITU_INSTANCE=maitu-verify` + 独立端口，`docker compose up -d --no-build` | 全新库应用 18 项迁移，`health=200`（10 秒）；`down` 后再 `up` 仍 200（5 秒） |
-| 升级 | `docker build --target runtime` 带 `FUDIAN_SOURCE_REVISION=<HEAD>`，另用独立标签 | 新镜像的 `org.opencontainers.image.revision` 等于源码修订；用它起的栈 `health=200`、18 项迁移 |
+| 升级 | `docker build --target runtime` 带 `FUDIAN_SOURCE_REVISION=<HEAD>`，另用独立标签 | 新镜像的 `org.opencontainers.image.revision` 等于源码修订；用它起的栈 `health=200`、18 项迁移。2026-10-10 复核迁移三方一致：`migrations/` 磁盘 18 个、`src/migrations.rs` 注册 18 条（最后是 `0018_maitu_daily_history.sql`，**没有**第 19 个）、活库 `schema_migrations` 18 条，且没有「磁盘上有但未注册」的文件；所以活实例在迁移上不落后。但运行中的活实例镜像 `7f6d55df3e16`（2026-10-06 构建，晚于 `main` 最新提交 2026-10-02）只有 compose 标签、**没有** `org.opencontainers.image.revision`，因此它的源码修订无法确认——补这个标签正是 **#12** 的作用 |
 | 备份 | 用修好的 `backup-v2.sh`，备份目录写在**会触发该缺陷的 Windows 盘路径**上 | 目录可被恢复路径的只读挂载读取；`SHA256SUMS` 13/13 OK；元数据 `sourceMatchesRunningImage: true` |
 | 恢复 | 把真实备份包恢复进带 `com.fudian.restore-target=true` 的**空**目标 | 退出 0；数据库 6 项计数与活实例一致；四个内容卷按文件清单逐个一致 |
 
