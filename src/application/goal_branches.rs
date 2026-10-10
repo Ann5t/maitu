@@ -1618,7 +1618,6 @@ async fn add_contribution(
         "evidenceRefs": input.evidence_refs,
         "evidenceIds": input.evidence_ids,
         "supersedesId": input.supersedes_id,
-        "maituTaskId": input.maitu_task_id,
     }))?;
     sqlx::query(
         "INSERT INTO goal_contributions \
