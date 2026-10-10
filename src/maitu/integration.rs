@@ -626,6 +626,10 @@ async fn rate_limited_connection_fails_over_bounded_and_records_usage_per_connec
         .with_file_name("maitu-test-connections");
     let providers = ProviderStore::open(provider_root.clone()).await.unwrap();
     let base = format!("http://{address}");
+    // Only the throttled connection is registered for now, so the first attempt of
+    // the automatic task below can only reach it. The usable connection is added
+    // once that request has been served, which keeps the failover path under test
+    // independent of which connection happens to win the claim race.
     providers
         .save(ProviderConfig {
             key: "flaky".into(),
@@ -638,20 +642,17 @@ async fn rate_limited_connection_fails_over_bounded_and_records_usage_per_connec
         })
         .await
         .unwrap();
-    providers
-        .save(ProviderConfig {
-            key: "steady".into(),
-            label: "可用连接".into(),
-            base_url: base.clone(),
-            api_key: fixture_key("test"),
-            concurrency: 1,
-            max_tokens: 65536,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    // The untouched default connection has no credentials; drop it so the
-    // fixture store contains exactly the two connections under test.
+    let steady_config = ProviderConfig {
+        key: "steady".into(),
+        label: "可用连接".into(),
+        base_url: base.clone(),
+        api_key: fixture_key("test"),
+        concurrency: 1,
+        max_tokens: 65536,
+        ..Default::default()
+    };
+    // The untouched default connection has no credentials; drop it so the fixture
+    // store starts with only the throttled connection under test.
     providers.delete("deepseek").await.unwrap();
     let state = Arc::new(AppState {
         pool,
@@ -686,6 +687,31 @@ async fn rate_limited_connection_fails_over_bounded_and_records_usage_per_connec
     workflows::start(&state.pool, auto.id, Uuid::new_v4())
         .await
         .unwrap();
+    // Wait until the throttled connection has served the first attempt, then make
+    // the usable connection available. Otherwise the task could be claimed by the
+    // usable connection first and the failover path under test would never run.
+    let mut reached_flaky = false;
+    for _ in 0..200 {
+        // Any recorded request is the throttled connection's: it is the only
+        // connection registered at this point, so this does not depend on how the
+        // fixture keys its call counter.
+        let seen = fixture_state
+            .calls
+            .lock()
+            .await
+            .values()
+            .any(|count| *count >= 1);
+        if seen {
+            reached_flaky = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        reached_flaky,
+        "the first attempt must reach the throttled connection"
+    );
+    state.providers.save(steady_config).await.unwrap();
     let produced = wait_status(&state, auto.id, "produced").await;
     assert_eq!(produced.attempts.len(), 2, "one failover retry, no more");
     let failed = &produced.attempts[1];
