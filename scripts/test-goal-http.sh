@@ -437,4 +437,41 @@ goal_form_snapshot="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_form_proj
 python3 -c 'import json,sys; assert len(json.loads(sys.argv[1])["proposals"]) == 1' \
   "$goal_form_snapshot"
 
-echo "goal HTTP flow passed: Proposal, contract diff/decision, Evidence, withdraw, stop/archive and root completion"
+# 贡献关联任务图成果（0020）：未采用任务被拒；已采用任务可关联且图上可查；重复关联被拒。
+goal_link_project_response="$(curl -fsS -H 'content-type: application/json'   -d '{"intent":"验证贡献关联任务图成果"}'   "$goal_http_base/api/projects")"
+goal_link_project_id="$(json_field "$goal_link_project_response" id)"
+# post_goal 绑定共享的 goal_project_id；本块之后不再有其他用例，安全地指向新项目。
+goal_project_id="$goal_link_project_id"
+goal_response="$(post_goal proposal.create "{\"revision\":$goal_root_revision}" "$(new_uuid)")"
+goal_link_proposal_id="$(json_field "$goal_response" result.proposalId)"
+post_goal proposal.submit "{\"proposalId\":\"$goal_link_proposal_id\",\"expectedRevision\":1}" "$(new_uuid)" >/dev/null
+goal_response="$(post_goal proposal.approve   "{\"proposalId\":\"$goal_link_proposal_id\",\"expectedRevision\":1,\"branchName\":\"关联回归枝干\",\"assignment\":\"验证任务关联\",\"agentIdentity\":\"link-agent\"}"   "$(new_uuid)")"
+goal_link_session_id="$(json_field "$goal_response" result.sessionId)"
+
+goal_link_task_id="$(new_uuid)"
+docker exec "$goal_http_db" psql -U fudian_test -d fudian_test -Atc   "INSERT INTO maitu_tasks (id, project_id, title, instruction, output_filename, task_kind, status)    VALUES ('$goal_link_task_id', '$goal_link_project_id', '关联回归任务', '产出 out.md', 'out.md', 'file', 'produced')" >/dev/null
+goal_link_status="$(curl -sS -o "$goal_http_tmp/link-reject.json" -w '%{http_code}'   -H 'content-type: application/json'   -d "$(python3 -c 'import json,sys,uuid
+print(json.dumps({"clientRequestId":str(uuid.uuid4()),"action":"session.add_contribution",
+ "payload":{"sessionId":sys.argv[1],"kind":"finding","title":"过早关联","body":"任务尚未采用",
+  "artifactId":None,"evidenceRefs":[],"supersedesId":None,"maituTaskId":sys.argv[2]}},ensure_ascii=False))'     "$goal_link_session_id" "$goal_link_task_id")"   "$goal_http_base/api/v1/projects/$goal_link_project_id/goal-commands")"
+[[ "$goal_link_status" == 409 ]]
+[[ "$(json_field "$(<"$goal_http_tmp/link-reject.json")" code)" == task_not_accepted ]]
+
+goal_link_attempt_id="$(new_uuid)"
+docker exec "$goal_http_db" psql -U fudian_test -d fudian_test -Atc   "UPDATE maitu_tasks SET accepted_attempt_id = '$goal_link_attempt_id' WHERE id = '$goal_link_task_id'" >/dev/null
+goal_response="$(post_goal session.add_contribution   "{\"sessionId\":\"$goal_link_session_id\",\"kind\":\"finding\",\"title\":\"任务成果进入枝干\",\"body\":\"关联回归任务的已采用成果\",\"artifactId\":null,\"evidenceRefs\":[],\"supersedesId\":null,\"maituTaskId\":\"$goal_link_task_id\"}"   "$(new_uuid)")"
+goal_link_contribution_id="$(json_field "$goal_response" result.contributionId)"
+goal_link_graph="$(curl -fsS "$goal_http_base/api/v1/projects/$goal_link_project_id/goal-graph")"
+python3 -c 'import json,sys
+s=json.loads(sys.argv[1]); cid=sys.argv[2]; task=sys.argv[3]; attempt=sys.argv[4]
+c=next(x for x in s["contributions"] if x["id"]==cid)
+assert c["maituTaskId"]==task and c["maituAttemptId"]==attempt'   "$goal_link_graph" "$goal_link_contribution_id" "$goal_link_task_id" "$goal_link_attempt_id"
+
+goal_link_dup_status="$(curl -sS -o "$goal_http_tmp/link-dup.json" -w '%{http_code}'   -H 'content-type: application/json'   -d "$(python3 -c 'import json,sys,uuid
+print(json.dumps({"clientRequestId":str(uuid.uuid4()),"action":"session.add_contribution",
+ "payload":{"sessionId":sys.argv[1],"kind":"finding","title":"重复关联","body":"同一成果不能挂两条",
+  "artifactId":None,"evidenceRefs":[],"supersedesId":None,"maituTaskId":sys.argv[2]}},ensure_ascii=False))'     "$goal_link_session_id" "$goal_link_task_id")"   "$goal_http_base/api/v1/projects/$goal_link_project_id/goal-commands")"
+[[ "$goal_link_dup_status" == 409 ]]
+[[ "$(json_field "$(<"$goal_http_tmp/link-dup.json")" code)" == task_already_linked ]]
+
+echo "goal HTTP flow passed: Proposal, contract diff/decision, Evidence, withdraw, stop/archive, root completion and task-contribution link"

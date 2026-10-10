@@ -124,6 +124,8 @@ struct AddContributionInput {
     #[serde(default)]
     evidence_ids: Vec<Uuid>,
     supersedes_id: Option<Uuid>,
+    #[serde(default)]
+    maitu_task_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1560,6 +1562,35 @@ async fn add_contribution(
             ));
         }
     }
+    let mut linked_maitu_attempt_id: Option<Uuid> = None;
+    if let Some(task_id) = input.maitu_task_id {
+        let accepted_attempt: Option<(Option<Uuid>,)> = sqlx::query_as(
+            "SELECT accepted_attempt_id FROM maitu_tasks WHERE id = $1 AND project_id = $2",
+        )
+        .bind(task_id)
+        .bind(project_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        let Some((Some(attempt_id),)) = accepted_attempt else {
+            return Err(AppError::conflict(
+                "task_not_accepted",
+                "关联的任务必须属于当前项目且成果已被采用",
+            ));
+        };
+        let already_linked: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM goal_contributions WHERE maitu_attempt_id = $1)",
+        )
+        .bind(attempt_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if already_linked {
+            return Err(AppError::conflict(
+                "task_already_linked",
+                "该任务成果已关联到另一条贡献",
+            ));
+        }
+        linked_maitu_attempt_id = Some(attempt_id);
+    }
     if let Some(supersedes_id) = input.supersedes_id {
         let belongs: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM goal_contributions \
@@ -1587,12 +1618,13 @@ async fn add_contribution(
         "evidenceRefs": input.evidence_refs,
         "evidenceIds": input.evidence_ids,
         "supersedesId": input.supersedes_id,
+        "maituTaskId": input.maitu_task_id,
     }))?;
     sqlx::query(
         "INSERT INTO goal_contributions \
          (id, project_id, goal_branch_id, session_id, kind, title, body, artifact_id, \
-          evidence_refs, supersedes_id, content_hash) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          evidence_refs, supersedes_id, maitu_task_id, maitu_attempt_id, content_hash) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(contribution_id)
     .bind(project_id)
@@ -1604,6 +1636,8 @@ async fn add_contribution(
     .bind(input.artifact_id)
     .bind(Json(input.evidence_refs))
     .bind(input.supersedes_id)
+    .bind(input.maitu_task_id)
+    .bind(linked_maitu_attempt_id)
     .bind(&content_hash)
     .execute(&mut **transaction)
     .await?;

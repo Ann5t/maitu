@@ -164,6 +164,8 @@ pub struct GoalContributionRecord {
     pub evidence_refs: Json<Value>,
     pub supersedes_id: Option<Uuid>,
     pub runner_job_id: Option<Uuid>,
+    pub maitu_task_id: Option<Uuid>,
+    pub maitu_attempt_id: Option<Uuid>,
     pub content_hash: String,
     pub created_at: DateTime<Utc>,
 }

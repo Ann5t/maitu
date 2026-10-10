@@ -12,6 +12,7 @@
   const evidenceKinds = {observation:'观察', measurement:'度量', reference:'引用', reasoning:'推理'};
   let snapshot;
   let selectedBranch;
+  let maituTasks = null;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -361,6 +362,10 @@
       for (const item of contributions) {
         const row = element('div', 'maitu-contribution');
         row.append(element('strong', '', `${kindLabels[item.kind] || item.kind} · ${item.title}`), element('p', 'maitu-note', item.body));
+        if (item.maituTaskId) {
+          const linked = (maituTasks || []).find(task => task.id === item.maituTaskId);
+          row.append(element('span', 'maitu-note', `关联任务：${linked ? linked.title : item.maituTaskId.slice(0, 8)}`));
+        }
         list.append(row);
       }
       card.append(list);
@@ -498,13 +503,32 @@
     openGoalDialog(`执行记录 · ${runs.length} 条`, host);
   }
 
-  function openContribution(session) {
+  async function openContribution(session) {
     const form = element('form', '');
     form.append(
       formRow('标题', field('title', {placeholder: '一句话'})),
       formRow('内容', field('body', {tag: 'textarea', rows: 2})));
+    // 关联已采用的任务成果：把任务图的成果以 schema 关系（而不是正文文本）接进目标枝干。
+    try { if (maituTasks === null) maituTasks = (await api(`/api/maitu/projects/${projectId}`)).tasks || []; }
+    catch { maituTasks = []; }
+    const adopted = (maituTasks || []).filter(task => task.acceptedAttemptId);
+    if (adopted.length) {
+      const select = element('select', '');
+      select.name = 'maituTaskId';
+      const empty = element('option', '', '不关联');
+      empty.value = '';
+      select.append(empty);
+      for (const task of adopted) {
+        const option = element('option', '', task.title);
+        option.value = task.id;
+        select.append(option);
+      }
+      const row = element('label');
+      row.append(element('span', '', '关联已采用的任务'), select);
+      form.append(row);
+    }
     bindDialog(form, '添加', async data => {
-      await goalCommand('session.add_contribution', {sessionId: session.id, kind: 'finding', title: data.title, body: data.body, artifactId: null, evidenceRefs: [], evidenceIds: [], supersedesId: null});
+      await goalCommand('session.add_contribution', {sessionId: session.id, kind: 'finding', title: data.title, body: data.body, artifactId: null, evidenceRefs: [], evidenceIds: [], supersedesId: null, maituTaskId: data.maituTaskId || null});
       $('#maitu-goal-dialog').close();
       feedback('贡献已记录。'); await refreshAfter();
     });
@@ -610,5 +634,10 @@
   async function load() {
     snapshot = await api(`/api/v1/projects/${projectId}/goal-graph`);
     if (!selectedBranch && snapshot.branches.length) selectedBranch = snapshot.branches[0].id;
+    // 贡献关联的任务标题只在需要时拉一次：goal-graph 只带回任务 id。
+    if (maituTasks === null && snapshot.contributions.some(item => item.maituTaskId)) {
+      try { maituTasks = (await api(`/api/maitu/projects/${projectId}`)).tasks || []; }
+      catch { maituTasks = []; }
+    }
   }
 })();
