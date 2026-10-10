@@ -266,11 +266,13 @@ mkdir -p "$rw_tmp/artifacts" "$rw_tmp/repositories" "$rw_tmp/worktrees" \
 chmod 0777 "$rw_tmp/artifacts" "$rw_tmp/repositories" "$rw_tmp/worktrees" \
   "$rw_tmp/runner" "$rw_tmp/executor"
 # bootstrap secret 只在子 shell 里收紧 umask：全局收紧会让后续 spec.json
-# 变成 0600，Runner 容器（uid 1000）读不到。
+# 变成 0600，Runner 容器（uid 1000）读不到。文件本身设为 0444：CI 上它
+# 属主是 runner 用户，而 Review Worker 容器 cap_drop 后没有 DAC_OVERRIDE，
+# 读不了 0400；外层 $rw_tmp 是 mktemp 的 0700，只有本次测试进程可及。
 (
   umask 077
   printf '%s' "$rw_bootstrap" > "$rw_tmp/executor/review-bootstrap"
-  chmod 400 "$rw_tmp/executor/review-bootstrap"
+  chmod 444 "$rw_tmp/executor/review-bootstrap"
 )
 
 docker network create "$rw_network" >/dev/null
