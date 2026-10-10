@@ -76,13 +76,26 @@ archive_volume() {
   local volume="$1"
   local archive_name="$2"
   local manifest_name="$3"
+  # 归档与清单都必须由宿主进程落盘：容器只把字节写到 stdout，宿主重定向负责建文件。
+  # 2026-10-10 可复现：宿主 mkdir 的目录里一旦出现由容器（守护进程）创建的文件，
+  # 该目录随后在 WSL 侧显示 d?????????，容器只读 bind 挂载报 "mkdir …: file exists"，
+  # restore-v2.sh 于是读不到它——备份 sha256 校验全 OK，却无法用于恢复。
+  # 对照实测：同样字节由宿主自己写入的目录完全正常，故修复落在写入方而不是 umask/uid。
   docker run --rm \
     --network none \
     --read-only \
     --mount "type=volume,src=$volume,dst=/source,readonly" \
-    --mount "type=bind,src=$backup_partial,dst=/backup" \
     "$backup_archive_image" \
-    sh -ec "cd /source && find . -type f -print0 | sort -z | xargs -0 -r sha256sum >'/backup/$manifest_name' && tar -czf '/backup/$archive_name' ."
+    sh -ec 'cd /source && find . -type f -print0 | sort -z | xargs -0 -r sha256sum' \
+    >"$backup_partial/$manifest_name"
+  docker run --rm \
+    --network none \
+    --read-only \
+    --mount "type=volume,src=$volume,dst=/source,readonly" \
+    "$backup_archive_image" \
+    sh -ec 'cd /source && tar -czf - .' \
+    >"$backup_partial/$archive_name"
+  gzip -t "$backup_partial/$archive_name"
 }
 
 echo "备份 PostgreSQL：$backup_database_container"
