@@ -5,6 +5,11 @@ COMPOSE ?= docker compose -f compose.yaml
 # 分开，所以操作它必须显式用这个变量，避免把两套栈混在一起。
 MAITU_COMPOSE ?= docker compose -f compose.maitu.yaml
 
+# 生产镜像打上构建它的源码修订，备份元数据才能证明归档源码与运行镜像同源；
+# 与 scripts/start-local.ps1 同一约定（脏树加 -dirty），外部已设置时不覆盖。
+FUDIAN_SOURCE_REVISION ?= $(shell r=$$(git rev-parse HEAD 2>/dev/null) && [ -n "$$r" ] && { git status --porcelain 2>/dev/null | grep -q . && echo $$r-dirty || echo $$r; })
+export FUDIAN_SOURCE_REVISION
+
 .PHONY: help dev build start check docs test fmt lint db-shell maitu-db-shell backup logs down
 
 help:

@@ -25,7 +25,7 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 MAX_BYTES = 2_000_000
 
 SECRET_FILE_NAME = re.compile(
-    r"(^|/)(?:\.env(?:\.local|\.production|\.development)?|"
+    r"(^|/)(?:\.env(?:\.[A-Za-z0-9]+)*|\.envrc|"
     r"id_(?:rsa|dsa|ecdsa|ed25519)|credentials\.json|"
     r"[^/]*\.(?:pem|key|p12|pfx|jks))$",
 )
@@ -41,7 +41,7 @@ CONTENT_PATTERNS = (
     ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
-    ("connection string with password", re.compile(r"://([^:@/\s]{1,64}):([^@/\s]{1,128})@([A-Za-z0-9._:\-]{1,64})")),
+    ("connection string with password", re.compile(r"://([^:@/\s]{1,64}):([^@/\s]{1,128})@([A-Za-z0-9._:\-\[\]]{1,64})")),
 )
 
 PLACEHOLDER_PASSWORD = re.compile(

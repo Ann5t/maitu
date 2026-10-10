@@ -19,6 +19,13 @@ if [[ ! -f "$backup_entry_compose_file" ]]; then
   exit 1
 fi
 
+# Docker 守护进程不可用时，下面命令替换里的 docker compose ps 会被 set -e 直接终结，
+# 且 stderr 已被压掉——用户将看到一个零输出的 exit 1。先显式探测，让失败自己说明原因。
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker 守护进程不可用：请先启动 Docker（如 Docker Desktop），再运行备份。" >&2
+  exit 1
+fi
+
 running_service_container() {
   local service="$1"
   docker compose -f "$backup_entry_compose_file" ps --format '{{.Name}}' "$service" 2>/dev/null | head -n 1

@@ -784,7 +784,7 @@ async fn claim(
     sqlx::query("UPDATE maitu_tasks t SET wait_reason='等待前序任务的成果被采用；可先推进其他任务' WHERE t.status='queued' AND EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) AND t.wait_reason IS DISTINCT FROM '等待前序任务的成果被采用；可先推进其他任务'")
         .execute(&state.pool).await?;
     let queued: Vec<TaskRecord> = sqlx::query_as(
-        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT (t.hold_connection=$1 AND t.hold_until > now()) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
+        "SELECT * FROM maitu_tasks t WHERE t.status='queued' AND (t.connection_key='' OR t.connection_key=$1) AND NOT (t.hold_connection=$1 AND COALESCE(t.hold_until, '-infinity'::timestamptz) > now()) AND NOT EXISTS(SELECT 1 FROM maitu_attempt_dependencies d WHERE d.attempt_id=t.latest_attempt_id AND d.source_attempt_id IS NULL) ORDER BY t.created_at,t.id LIMIT 128",
     )
     .bind(&config.key)
     .fetch_all(&state.pool)
@@ -792,7 +792,7 @@ async fn claim(
     'candidates: for candidate in queued {
         let mut tx = state.pool.begin().await?;
         let current: Option<TaskRecord> = sqlx::query_as(
-            "SELECT * FROM maitu_tasks WHERE id=$1 AND status='queued' AND NOT (hold_connection=$2 AND hold_until > now()) FOR UPDATE SKIP LOCKED",
+            "SELECT * FROM maitu_tasks WHERE id=$1 AND status='queued' AND NOT (hold_connection=$2 AND COALESCE(hold_until, '-infinity'::timestamptz) > now()) FOR UPDATE SKIP LOCKED",
         )
         .bind(candidate.id)
         .bind(&config.key)
@@ -935,7 +935,7 @@ async fn claim(
         // for another connection or a later tick instead of hammering the throttled
         // one.
         let claimed = sqlx::query(
-            "UPDATE maitu_tasks SET status='running',wait_reason=NULL,hold_connection='',hold_until=NULL,updated_at=now() WHERE id=$1 AND NOT (hold_connection=$2 AND hold_until > now())",
+            "UPDATE maitu_tasks SET status='running',wait_reason=NULL,hold_connection='',hold_until=NULL,updated_at=now() WHERE id=$1 AND NOT (hold_connection=$2 AND COALESCE(hold_until, '-infinity'::timestamptz) > now())",
         )
         .bind(current.id)
         .bind(&config.key)

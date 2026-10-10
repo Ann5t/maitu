@@ -6,8 +6,12 @@
   // promise，只能在 pageswap / pagereveal 上兜住同一件事。
   const swallowTransitionRejection = (transition) => {
     if (!transition) return;
-    if (transition.ready) transition.ready.catch(() => {});
-    if (transition.finished) transition.finished.catch(() => {});
+    // AbortError 是跳过/中断的预期拒绝；其它拒绝（如 update 回调自身抛错）是真实错误，留下日志。
+    const ignoreOnlyAbort = (error) => {
+      if (!error || error.name !== "AbortError") console.warn("视图切换失败", error);
+    };
+    if (transition.ready) transition.ready.catch(ignoreOnlyAbort);
+    if (transition.finished) transition.finished.catch(ignoreOnlyAbort);
   };
   window.addEventListener("pageswap", (event) => swallowTransitionRejection(event.viewTransition));
   window.addEventListener("pagereveal", (event) => swallowTransitionRejection(event.viewTransition));
